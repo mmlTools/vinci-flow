@@ -1,0 +1,507 @@
+#include "settings.hpp"
+#include "state.hpp"
+#include "entities.hpp"
+#include "log.hpp"
+#include "slt_helpers.hpp"
+
+#include <obs.h>
+#include <obs-frontend-api.h>
+
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QColorDialog>
+#include <QDialogButtonBox>
+#include <QColor>
+#include <QFontComboBox>
+#include <QFont>
+#include <QKeySequenceEdit>
+#include <QKeySequence>
+#include <QFileDialog>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QDateTime>
+
+using namespace smart_lt;
+
+LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent)
+	: QDialog(parent)
+{
+	setWindowTitle(tr("Lower Third Settings"));
+	resize(720, 620);
+
+	auto *root = new QVBoxLayout(this);
+	auto *contentBox = new QGroupBox(tr("Content && Media"), this);
+	auto *contentLayout = new QFormLayout(contentBox);
+
+	titleEdit = new QLineEdit(this);
+	contentLayout->addRow(tr("Title:"), titleEdit);
+
+	subtitleEdit = new QLineEdit(this);
+	contentLayout->addRow(tr("Subtitle:"), subtitleEdit);
+
+	{
+		auto *picRow = new QHBoxLayout();
+		profilePictureEdit = new QLineEdit(this);
+		profilePictureEdit->setReadOnly(true);
+		browseProfilePictureBtn = new QPushButton(tr("Browse..."), this);
+
+		picRow->addWidget(profilePictureEdit, 1);
+		picRow->addWidget(browseProfilePictureBtn);
+
+		contentLayout->addRow(tr("Profile picture:"), picRow);
+	}
+
+	root->addWidget(contentBox);
+
+	auto *styleBox = new QGroupBox(tr("Style"), this);
+	auto *styleLayout = new QVBoxLayout(styleBox);
+
+	{
+		auto *row = new QHBoxLayout();
+
+		auto *lblIn = new QLabel(tr("Anim In:"), this);
+		animInCombo = new QComboBox(this);
+		for (const auto &opt : smart_lt::AnimInOptions) {
+			animInCombo->addItem(
+			    tr(opt.label),                     
+			    QString::fromUtf8(opt.value));    
+		}
+
+		auto *lblOut = new QLabel(tr("Anim Out:"), this);
+		animOutCombo = new QComboBox(this);
+		for (const auto &opt : smart_lt::AnimOutOptions) {
+			animOutCombo->addItem(
+			    tr(opt.label),
+			    QString::fromUtf8(opt.value));
+		}
+
+		auto *lblFont = new QLabel(tr("Font:"), this);
+		fontCombo = new QFontComboBox(this);
+		fontCombo->setEditable(false);
+
+		row->addWidget(lblIn);
+		row->addWidget(animInCombo);
+		row->addSpacing(8);
+		row->addWidget(lblOut);
+		row->addWidget(animOutCombo);
+		row->addSpacing(8);
+		row->addWidget(lblFont);
+		row->addWidget(fontCombo, 1);
+
+		styleLayout->addLayout(row);
+	}
+
+	{
+		auto *row = new QHBoxLayout();
+		auto *lblBg = new QLabel(tr("Background:"), this);
+		bgColorBtn = new QPushButton(tr("Pick"), this);
+		auto *lblText = new QLabel(tr("Text color:"), this);
+		textColorBtn = new QPushButton(tr("Pick"), this);
+
+		row->addWidget(lblBg);
+		row->addWidget(bgColorBtn);
+		row->addSpacing(12);
+		row->addWidget(lblText);
+		row->addWidget(textColorBtn);
+		row->addStretch(1);
+
+		styleLayout->addLayout(row);
+
+		connect(bgColorBtn, &QPushButton::clicked,
+		        this, &LowerThirdSettingsDialog::onPickBgColor);
+		connect(textColorBtn, &QPushButton::clicked,
+		        this, &LowerThirdSettingsDialog::onPickTextColor);
+	}
+
+	root->addWidget(styleBox);
+
+	auto *behaviorBox = new QGroupBox(tr("Behavior"), this);
+	auto *behaviorLayout = new QFormLayout(behaviorBox);
+
+	hotkeyEdit = new QKeySequenceEdit(this);
+	behaviorLayout->addRow(tr("Hotkey:"), hotkeyEdit);
+
+	sceneCombo = new QComboBox(this);
+	behaviorLayout->addRow(tr("Bind to scene:"), sceneCombo);
+
+	root->addWidget(behaviorBox);
+
+	connect(sceneCombo,
+	        QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this,
+	        &LowerThirdSettingsDialog::onSceneBindingChanged);
+
+	auto *tplBox = new QGroupBox(tr("Templates"), this);
+	auto *tplLayout = new QVBoxLayout(tplBox);
+
+	{
+		auto *lbl = new QLabel(tr("HTML Template:"), this);
+		htmlEdit = new QPlainTextEdit(this);
+		htmlEdit->setPlaceholderText(
+		    "<li id=\"{{ID}}\" class=\"lower-third animate__animated {{ANIM_IN}}\">\n"
+		    "  <div class=\"lt-inner\">\n"
+		    "    <!-- Optional avatar: <img class=\"lt-avatar\" src=\"{{PROFILE_PICTURE}}\" /> -->\n"
+		    "    <div class=\"lt-title\">{{TITLE}}</div>\n"
+		    "    <div class=\"lt-subtitle\">{{SUBTITLE}}</div>\n"
+		    "  </div>\n"
+		    "</li>\n");
+
+		tplLayout->addWidget(lbl);
+		tplLayout->addWidget(htmlEdit, 1);
+	}
+
+	{
+		auto *lbl = new QLabel(tr("CSS Template:"), this);
+		cssEdit = new QPlainTextEdit(this);
+		cssEdit->setPlaceholderText(
+		    "#{{ID}} .lt-inner {\n"
+		    "  font-family: {{FONT_FAMILY}}, sans-serif;\n"
+		    "  background: {{BG_COLOR}};\n"
+		    "  color: {{TEXT_COLOR}};\n"
+		    "}\n"
+		    "#{{ID}} .lt-avatar {\n"
+		    "  width: 56px;\n"
+		    "  height: 56px;\n"
+		    "  border-radius: 50%;\n"
+		    "  margin-right: 12px;\n"
+		    "}\n");
+		tplLayout->addWidget(lbl);
+		tplLayout->addWidget(cssEdit, 1);
+	}
+
+	root->addWidget(tplBox, 1);
+
+	buttonBox = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+	auto *applyBtn = buttonBox->addButton(tr("Save && Apply"), QDialogButtonBox::AcceptRole);
+	connect(buttonBox, &QDialogButtonBox::accepted,
+	        this, &LowerThirdSettingsDialog::onSaveAndApply);
+	connect(buttonBox, &QDialogButtonBox::rejected,
+	        this, &LowerThirdSettingsDialog::reject);
+	connect(applyBtn, &QPushButton::clicked,
+	        this, &LowerThirdSettingsDialog::onSaveAndApply);
+
+	root->addWidget(buttonBox);
+
+	connect(titleEdit, &QLineEdit::textChanged,
+	        this, &LowerThirdSettingsDialog::onTitleChanged);
+	connect(subtitleEdit, &QLineEdit::textChanged,
+	        this, &LowerThirdSettingsDialog::onSubtitleChanged);
+	connect(animInCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &LowerThirdSettingsDialog::onAnimInChanged);
+	connect(animOutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &LowerThirdSettingsDialog::onAnimOutChanged);
+	connect(fontCombo, &QFontComboBox::currentFontChanged,
+	        this, &LowerThirdSettingsDialog::onFontChanged);
+	connect(hotkeyEdit, &QKeySequenceEdit::keySequenceChanged,
+	        this, &LowerThirdSettingsDialog::onHotkeyChanged);
+	connect(sceneCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &LowerThirdSettingsDialog::onSceneBindingChanged);
+	connect(browseProfilePictureBtn, &QPushButton::clicked,
+	        this, &LowerThirdSettingsDialog::onBrowseProfilePicture);
+}
+
+void LowerThirdSettingsDialog::onSceneBindingChanged(int)
+{
+    if (currentId.isEmpty())
+        return;
+
+    if (auto *cfg = get_by_id(currentId.toStdString())) {
+        const QString data = sceneCombo->currentData().toString();
+        cfg->bound_scene = data.toStdString(); 
+    }
+
+    smart_lt::save_state_json();
+}
+
+LowerThirdSettingsDialog::~LowerThirdSettingsDialog()
+{
+	delete currentBgColor;
+	delete currentTextColor;
+}
+
+void LowerThirdSettingsDialog::setLowerThirdId(const QString &id)
+{
+	currentId = id;
+	loadFromState();
+}
+
+void LowerThirdSettingsDialog::loadFromState()
+{
+	if (currentId.isEmpty())
+		return;
+
+	LowerThirdConfig *cfg = get_by_id(currentId.toStdString());
+	if (!cfg)
+		return;
+
+	titleEdit->setText(QString::fromStdString(cfg->title));
+	subtitleEdit->setText(QString::fromStdString(cfg->subtitle));
+
+	{
+		const QString valueIn = QString::fromStdString(cfg->anim_in);
+		int idxIn = -1;
+		for (int i = 0; i < animInCombo->count(); ++i) {
+			if (animInCombo->itemData(i).toString() == valueIn) {
+				idxIn = i;
+				break;
+			}
+		}
+		if (idxIn >= 0)
+			animInCombo->setCurrentIndex(idxIn);
+	}
+
+	{
+		const QString valueOut = QString::fromStdString(cfg->anim_out);
+		int idxOut = -1;
+		for (int i = 0; i < animOutCombo->count(); ++i) {
+			if (animOutCombo->itemData(i).toString() == valueOut) {
+				idxOut = i;
+				break;
+			}
+		}
+		if (idxOut >= 0)
+			animOutCombo->setCurrentIndex(idxOut);
+	}
+
+	if (!cfg->font_family.empty())
+		fontCombo->setCurrentFont(QFont(QString::fromStdString(cfg->font_family)));
+
+	if (!cfg->hotkey.empty())
+		hotkeyEdit->setKeySequence(QKeySequence(QString::fromStdString(cfg->hotkey)));
+
+	htmlEdit->setPlainText(QString::fromStdString(cfg->html_template));
+	cssEdit->setPlainText(QString::fromStdString(cfg->css_template));
+
+	delete currentBgColor;
+	delete currentTextColor;
+
+	QColor bg(cfg->bg_color.c_str());
+	QColor fg(cfg->text_color.c_str());
+
+	if (!bg.isValid())
+		bg = QColor(0, 0, 0, 200);
+	if (!fg.isValid())
+		fg = QColor(255, 255, 255);
+
+	currentBgColor  = new QColor(bg);
+	currentTextColor = new QColor(fg);
+
+	updateColorButton(bgColorBtn, *currentBgColor);
+	updateColorButton(textColorBtn, *currentTextColor);
+
+	if (cfg->profile_picture.empty()) {
+		profilePictureEdit->clear();
+	} else {
+		profilePictureEdit->setText(QString::fromStdString(cfg->profile_picture));
+	}
+
+	if (sceneCombo)
+	    populate_scene_combo(sceneCombo, cfg->bound_scene);
+
+
+	pendingProfilePicturePath.clear();
+}
+
+void LowerThirdSettingsDialog::saveToState()
+{
+	if (currentId.isEmpty())
+		return;
+
+	LowerThirdConfig *cfg = get_by_id(currentId.toStdString());
+	if (!cfg)
+		return;
+
+	cfg->title    = titleEdit->text().toStdString();
+	cfg->subtitle = subtitleEdit->text().toStdString();
+
+	cfg->anim_in  = animInCombo->currentData().toString().toStdString();
+	cfg->anim_out = animOutCombo->currentData().toString().toStdString();
+
+	cfg->font_family = fontCombo->currentFont().family().toStdString();
+
+	if (currentBgColor)
+		cfg->bg_color = currentBgColor->name(QColor::HexRgb).toStdString();
+	if (currentTextColor)
+		cfg->text_color = currentTextColor->name(QColor::HexRgb).toStdString();
+
+	cfg->html_template = htmlEdit->toPlainText().toStdString();
+	cfg->css_template  = cssEdit->toPlainText().toStdString();
+	cfg->hotkey = hotkeyEdit->keySequence()
+	                  .toString(QKeySequence::PortableText)
+	                  .toStdString();
+
+	if (sceneCombo) {
+		const QString data = sceneCombo->currentData().toString();
+		cfg->bound_scene = data.toStdString();
+	}
+
+	if (!pendingProfilePicturePath.isEmpty()) {
+		QString outDir = QString::fromStdString(smart_lt::output_dir());
+		if (!outDir.isEmpty()) {
+			QDir dir(outDir);
+
+			if (!cfg->profile_picture.empty()) {
+				QString oldFilePath = dir.filePath(QString::fromStdString(cfg->profile_picture));
+				if (QFile::exists(oldFilePath)) {
+					QFile::remove(oldFilePath);
+				}
+			}
+
+			QFileInfo fi(pendingProfilePicturePath);
+			QString ext = fi.suffix();
+			qint64 ts = QDateTime::currentSecsSinceEpoch();
+
+			QString baseId = QString::fromStdString(cfg->id);
+			QString newFileName = QString("%1_%2").arg(baseId).arg(ts);
+			if (!ext.isEmpty())
+				newFileName += "." + ext.toLower();
+
+			QString destPath = dir.filePath(newFileName);
+
+			if (QFile::copy(pendingProfilePicturePath, destPath)) {
+				cfg->profile_picture = newFileName.toStdString();
+				profilePictureEdit->setText(newFileName);
+			} else {
+				LOGW("Failed to copy profile picture from '%s' to '%s'",
+				     pendingProfilePicturePath.toUtf8().constData(),
+				     destPath.toUtf8().constData());
+			}
+		} else {
+			LOGW("No output_dir set when saving profile picture for '%s'",
+			     cfg->id.c_str());
+		}
+
+		pendingProfilePicturePath.clear();
+	}
+
+	write_index_html();
+	ensure_browser_source();
+	refresh_browser_source();
+	save_state_json();
+}
+
+void LowerThirdSettingsDialog::onPickBgColor()
+{
+	QColor start = currentBgColor ? *currentBgColor : QColor(0, 0, 0, 200);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick background color"),
+	                                  QColorDialog::ShowAlphaChannel);
+	if (!c.isValid())
+		return;
+
+	if (!currentBgColor)
+		currentBgColor = new QColor(c);
+	else
+		*currentBgColor = c;
+
+	updateColorButton(bgColorBtn, c);
+}
+
+void LowerThirdSettingsDialog::onPickTextColor()
+{
+	QColor start = currentTextColor ? *currentTextColor : QColor(255, 255, 255);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick text color"));
+	if (!c.isValid())
+		return;
+
+	if (!currentTextColor)
+		currentTextColor = new QColor(c);
+	else
+		*currentTextColor = c;
+
+	updateColorButton(textColorBtn, c);
+}
+
+void LowerThirdSettingsDialog::onBrowseProfilePicture()
+{
+	QString filter = tr("Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)");
+	QString file = QFileDialog::getOpenFileName(this,
+	                                            tr("Select profile picture"),
+	                                            QString(), filter);
+	if (file.isEmpty())
+		return;
+
+	pendingProfilePicturePath = file;
+	profilePictureEdit->setText(file);
+}
+
+void LowerThirdSettingsDialog::onSaveAndApply()
+{
+	saveToState();
+	accept();
+}
+
+void LowerThirdSettingsDialog::onTitleChanged(const QString &text)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->title = text.toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::onSubtitleChanged(const QString &text)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->subtitle = text.toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::onAnimInChanged(int)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->anim_in = animInCombo->currentData().toString().toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::onAnimOutChanged(int)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->anim_out = animOutCombo->currentData().toString().toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::onFontChanged(const QFont &font)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->font_family = font.family().toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::onHotkeyChanged(const QKeySequence &seq)
+{
+	if (currentId.isEmpty())
+		return;
+	if (auto *cfg = get_by_id(currentId.toStdString())) {
+		cfg->hotkey = seq.toString(QKeySequence::PortableText).toStdString();
+	}
+}
+
+void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor &color)
+{
+	QString hex = color.name(QColor::HexRgb);
+	QString css = QString(
+	    "background-color:%1;"
+	    "border:1px solid #333;"
+	    "min-width:64px;"
+	    "padding:2px 4px;")
+	                  .arg(hex);
+
+	btn->setStyleSheet(css);
+	btn->setText(hex);
+}
