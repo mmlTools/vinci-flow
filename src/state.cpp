@@ -55,8 +55,7 @@ static void save_global_config()
 		std::string dir = path.substr(0, sep);
 		int mk = os_mkdirs(dir.c_str());
 		if (mk != 0) {
-			LOGW("Failed to create config directory '%s' (os_mkdirs=%d)",
-			     dir.c_str(), mk);
+			LOGW("Failed to create config directory '%s' (os_mkdirs=%d)", dir.c_str(), mk);
 		}
 	}
 
@@ -75,8 +74,8 @@ static void save_global_config()
 	if (rc != 0) {
 		LOGW("obs_data_save_json failed for '%s' (code=%d)", path.c_str(), rc);
 	} else {
-		LOGI("Saved global config to '%s' (output_dir='%s', preferred_port=%d)",
-		     path.c_str(), g_output_dir.c_str(), g_preferred_port);
+		LOGI("Saved global config to '%s' (output_dir='%s', preferred_port=%d)", path.c_str(),
+		     g_output_dir.c_str(), g_preferred_port);
 	}
 }
 
@@ -128,8 +127,7 @@ void set_output_dir(const std::string &dir)
 	save_global_config();
 
 	if (!g_output_dir.empty()) {
-		LOGI("Output dir set to '%s', index.html = '%s'",
-		     g_output_dir.c_str(), g_index_html_path.c_str());
+		LOGI("Output dir set to '%s', index.html = '%s'", g_output_dir.c_str(), g_index_html_path.c_str());
 	} else {
 		LOGW("Output dir cleared; index.html will not be written");
 	}
@@ -196,38 +194,36 @@ std::string add_default_lower_third()
 	cfg.subtitle = "Subtitle";
 	cfg.anim_in = "animate__fadeInUp";
 	cfg.anim_out = "animate__fadeOutDown";
-	cfg.font_family = "Inter";    
-	cfg.bg_color = "#C0000000";   
-	cfg.text_color = "#FFFFFFFF"; 
+	cfg.font_family = "Inter";
+	cfg.bg_color = "#C0000000";
+	cfg.text_color = "#FFFFFFFF";
 	cfg.bound_scene.clear();
 	cfg.hotkey.clear();
 	cfg.visible = false;
 	cfg.profile_picture.clear();
 
-	cfg.html_template =
-	    "<li id=\"{{ID}}\" class=\"lower-third animate__animated\">\n"
-	    "  <div class=\"lt-inner\">\n"
-	    "    <div class=\"lt-title\">{{TITLE}}</div>\n"
-	    "    <div class=\"lt-subtitle\">{{SUBTITLE}}</div>\n"
-	    "  </div>\n"
-	    "</li>\n";
+	cfg.html_template = "<li id=\"{{ID}}\" class=\"lower-third animate__animated\">\n"
+			    "  <div class=\"lt-inner\">\n"
+			    "    <div class=\"lt-title\">{{TITLE}}</div>\n"
+			    "    <div class=\"lt-subtitle\">{{SUBTITLE}}</div>\n"
+			    "  </div>\n"
+			    "</li>\n";
 
-	cfg.css_template =
-	    "#{{ID}} .lt-inner {\n"
-	    "  font-family: {{FONT_FAMILY}}, sans-serif;\n"
-	    "  background: {{BG_COLOR}};\n"
-	    "  color: {{TEXT_COLOR}};\n"
-	    "  padding: 12px 24px;\n"
-	    "  border-radius: 8px;\n"
-	    "}\n"
-	    "#{{ID}} .lt-title {\n"
-	    "  font-size: 28px;\n"
-	    "  font-weight: 700;\n"
-	    "}\n"
-	    "#{{ID}} .lt-subtitle {\n"
-	    "  font-size: 18px;\n"
-	    "  opacity: 0.85;\n"
-	    "}\n";
+	cfg.css_template = "#{{ID}} .lt-inner {\n"
+			   "  font-family: {{FONT_FAMILY}}, sans-serif;\n"
+			   "  background: {{BG_COLOR}};\n"
+			   "  color: {{TEXT_COLOR}};\n"
+			   "  padding: 12px 24px;\n"
+			   "  border-radius: 8px;\n"
+			   "}\n"
+			   "#{{ID}} .lt-title {\n"
+			   "  font-size: 28px;\n"
+			   "  font-weight: 700;\n"
+			   "}\n"
+			   "#{{ID}} .lt-subtitle {\n"
+			   "  font-size: 18px;\n"
+			   "  opacity: 0.85;\n"
+			   "}\n";
 
 	g_items.push_back(cfg);
 	return cfg.id;
@@ -349,9 +345,7 @@ void handle_scene_changed()
 	save_state_json();
 }
 
-static std::string replace_all(std::string text,
-                               const std::string &from,
-                               const std::string &to)
+static std::string replace_all(std::string text, const std::string &from, const std::string &to)
 {
 	if (from.empty())
 		return text;
@@ -382,8 +376,7 @@ static std::string css_from_stored_color(const std::string &stored)
 		int b = hexByte(7);
 
 		char out[64];
-		snprintf(out, sizeof(out), "rgba(%d,%d,%d,%.3f)",
-		         r, g, b, a / 255.0);
+		snprintf(out, sizeof(out), "rgba(%d,%d,%d,%.3f)", r, g, b, a / 255.0);
 		return out;
 	}
 
@@ -411,10 +404,10 @@ bool write_index_html()
 
 	for (const auto &cfg : g_items) {
 		std::string css = cfg.css_template;
-		css = replace_all(css, "{{ID}}",            cfg.id);
-		css = replace_all(css, "{{FONT_FAMILY}}",   cfg.font_family);
-		css = replace_all(css, "{{BG_COLOR}}",      css_from_stored_color(cfg.bg_color));
-		css = replace_all(css, "{{TEXT_COLOR}}",    css_from_stored_color(cfg.text_color));
+		css = replace_all(css, "{{ID}}",          cfg.id);
+		css = replace_all(css, "{{FONT_FAMILY}}", cfg.font_family);
+		css = replace_all(css, "{{BG_COLOR}}",    css_from_stored_color(cfg.bg_color));
+		css = replace_all(css, "{{TEXT_COLOR}}",  css_from_stored_color(cfg.text_color));
 		html += css;
 		html += "\n";
 	}
@@ -424,10 +417,15 @@ bool write_index_html()
 	for (const auto &cfg : g_items) {
 		std::string item = cfg.html_template;
 
+		std::string animInTpl  = (cfg.anim_in  == "custom") ? cfg.custom_anim_in  : cfg.anim_in;
+		std::string animOutTpl = (cfg.anim_out == "custom") ? cfg.custom_anim_out : cfg.anim_out;
+
 		item = replace_all(item, "{{ID}}",              cfg.id);
 		item = replace_all(item, "{{TITLE}}",           cfg.title);
 		item = replace_all(item, "{{SUBTITLE}}",        cfg.subtitle);
 		item = replace_all(item, "{{PROFILE_PICTURE}}", cfg.profile_picture);
+		item = replace_all(item, "{{ANIM_IN}}",         animInTpl);
+		item = replace_all(item, "{{ANIM_OUT}}",        animOutTpl);
 
 		html += item;
 		html += "\n";
@@ -449,10 +447,14 @@ bool write_index_html()
 		firstAnim = false;
 	};
 
-	for (const auto &opt : AnimInOptions)
-		appendAnim(opt.value);
-	for (const auto &opt : AnimOutOptions)
-		appendAnim(opt.value);
+	for (const auto &opt : AnimInOptions) {
+		if (std::string(opt.value) != "custom")
+			appendAnim(opt.value);
+	}
+	for (const auto &opt : AnimOutOptions) {
+		if (std::string(opt.value) != "custom")
+			appendAnim(opt.value);
+	}
 
 	jsAllAnims += "];\n";
 
@@ -466,8 +468,12 @@ bool write_index_html()
 	html += "  nodes.forEach(li => { if (li.id) byId[li.id] = li; });\n";
 	html += jsAllAnims;
 	html += "  let lastActiveId = null;\n";
-	html += "  function clearAnim(li){\n";
+	html += "  function clearAnim(li, cfg){\n";
 	html += "    ALL_ANIMS.forEach(a => li.classList.remove(a));\n";
+	html += "    if (cfg) {\n";
+	html += "      if (cfg.anim_in)  li.classList.remove(cfg.anim_in);\n";
+	html += "      if (cfg.anim_out) li.classList.remove(cfg.anim_out);\n";
+	html += "    }\n";
 	html += "  }\n";
 	html += "  function applyState(activeId, animMap){\n";
 	html += "    if (activeId === lastActiveId) return;\n";
@@ -478,16 +484,20 @@ bool write_index_html()
 	html += "      const animOut = cfg.anim_out || '";
 	html += defaultAnimOut;
 	html += "';\n";
-	html += "      clearAnim(li);\n";
+	html += "      clearAnim(li, cfg);\n";
 	html += "      li.style.pointerEvents = 'none';\n";
 	html += "      li.style.opacity = '1';\n";
-	html += "      li.classList.add(animOut);\n";
-	html += "      const handler = (ev) => {\n";
-	html += "        li.removeEventListener('animationend', handler);\n";
-	html += "        clearAnim(li);\n";
+	html += "      if (animOut) {\n";
+	html += "        li.classList.add(animOut);\n";
+	html += "        const handler = (ev) => {\n";
+	html += "          li.removeEventListener('animationend', handler);\n";
+	html += "          clearAnim(li, cfg);\n";
+	html += "          li.style.opacity = '0';\n";
+	html += "        };\n";
+	html += "        li.addEventListener('animationend', handler);\n";
+	html += "      } else {\n";
 	html += "        li.style.opacity = '0';\n";
-	html += "      };\n";
-	html += "      li.addEventListener('animationend', handler);\n";
+	html += "      }\n";
 	html += "    }\n";
 	html += "    // animate IN new\n";
 	html += "    if (activeId && byId[activeId]) {\n";
@@ -496,10 +506,12 @@ bool write_index_html()
 	html += "      const animIn = cfg.anim_in || '";
 	html += defaultAnimIn;
 	html += "';\n";
-	html += "      clearAnim(li);\n";
+	html += "      clearAnim(li, cfg);\n";
 	html += "      li.style.opacity = '1';\n";
 	html += "      li.style.pointerEvents = 'auto';\n";
-	html += "      li.classList.add(animIn);\n";
+	html += "      if (animIn) {\n";
+	html += "        li.classList.add(animIn);\n";
+	html += "      }\n";
 	html += "    }\n";
 	html += "    lastActiveId = activeId;\n";
 	html += "  }\n";
@@ -513,7 +525,14 @@ bool write_index_html()
 	html += "      const animMap = {};\n";
 	html += "      for (const it of items) {\n";
 	html += "        if (!it || !it.id) continue;\n";
-	html += "        animMap[it.id] = { anim_in: it.anim_in, anim_out: it.anim_out };\n";
+	html += "        const customIn  = it.custom_anim_in  || '';\n";
+	html += "        const customOut = it.custom_anim_out || '';\n";
+	html += "        const effectiveIn  = (it.anim_in  === 'custom') ? customIn  : it.anim_in;\n";
+	html += "        const effectiveOut = (it.anim_out === 'custom') ? customOut : it.anim_out;\n";
+	html += "        animMap[it.id] = {\n";
+	html += "          anim_in:  effectiveIn  || '',\n";
+	html += "          anim_out: effectiveOut || ''\n";
+	html += "        };\n";
 	html += "        if (!activeId && it.visible)\n";
 	html += "          activeId = it.id;\n";
 	html += "      }\n";
@@ -575,13 +594,10 @@ void ensure_browser_source()
 		obs_data_t *settings = obs_data_create();
 		obs_data_set_bool(settings, "is_local_file", false);
 		obs_data_set_string(settings, "url", url.c_str());
-		obs_data_set_int(settings, "width",  sltBrowserWidth);
+		obs_data_set_int(settings, "width", sltBrowserWidth);
 		obs_data_set_int(settings, "height", sltBrowserHeight);
 
-		source = obs_source_create(sltBrowserSourceId,
-		                           sltBrowserSourceName,
-		                           settings,
-		                           nullptr);
+		source = obs_source_create(sltBrowserSourceId, sltBrowserSourceName, settings, nullptr);
 		obs_data_release(settings);
 
 		if (!source) {
@@ -589,8 +605,7 @@ void ensure_browser_source()
 			return;
 		}
 
-		LOGI("Created browser source '%s' with url '%s'",
-		     sltBrowserSourceName, url.c_str());
+		LOGI("Created browser source '%s' with url '%s'", sltBrowserSourceName, url.c_str());
 	} else {
 		obs_data_t *settings = obs_source_get_settings(source);
 		if (settings) {
@@ -608,13 +623,12 @@ void ensure_browser_source()
 
 QString cache_bust_url(const QString &in)
 {
-    QUrl u(in);
-    QUrlQuery q(u);
-    q.removeAllQueryItems(QStringLiteral("cb"));
-    q.addQueryItem(QStringLiteral("cb"),
-                   QString::number(QDateTime::currentMSecsSinceEpoch()));
-    u.setQuery(q);
-    return u.toString();
+	QUrl u(in);
+	QUrlQuery q(u);
+	q.removeAllQueryItems(QStringLiteral("cb"));
+	q.addQueryItem(QStringLiteral("cb"), QString::number(QDateTime::currentMSecsSinceEpoch()));
+	u.setQuery(q);
+	return u.toString();
 }
 
 void refresh_browser_source()
@@ -628,35 +642,35 @@ void refresh_browser_source()
 
 	obs_source_t *src = obs_get_source_by_name(sltBrowserSourceName);
 	if (!src) {
-        LOGW("Browser source not found");
-        return;
-    }
+		LOGW("Browser source not found");
+		return;
+	}
 	LOGI("Refreshing browser source '%s'", sltBrowserSourceName);
-	
-    const char *sid = obs_source_get_id(src);
-    if (sid && strcmp(sid, "browser_source") == 0) {
-        obs_data_t *settings = obs_source_get_settings(src);
-        if (settings) {
-            const bool isLocal = obs_data_get_bool(settings, "is_local_file");
-            if (!isLocal) {
-                const char *curl = obs_data_get_string(settings, "url");
-                QString url = cache_bust_url(QString::fromUtf8(curl ? curl : ""));
-                obs_data_set_string(settings, "url", url.toUtf8().constData());
-                obs_source_update(src, settings);
-            } else {
-                bool shutdown = obs_data_get_bool(settings, "shutdown");
-                obs_data_set_bool(settings, "shutdown", !shutdown);
-                obs_source_update(src, settings);
-                obs_data_set_bool(settings, "shutdown", shutdown);
-                obs_source_update(src, settings);
-            }
-            obs_data_release(settings);
-        }
-    } else {
-        LOGW("Source '%s' is not a browser_source", sltBrowserSourceName);
-    }
 
-    obs_source_release(src);
+	const char *sid = obs_source_get_id(src);
+	if (sid && strcmp(sid, "browser_source") == 0) {
+		obs_data_t *settings = obs_source_get_settings(src);
+		if (settings) {
+			const bool isLocal = obs_data_get_bool(settings, "is_local_file");
+			if (!isLocal) {
+				const char *curl = obs_data_get_string(settings, "url");
+				QString url = cache_bust_url(QString::fromUtf8(curl ? curl : ""));
+				obs_data_set_string(settings, "url", url.toUtf8().constData());
+				obs_source_update(src, settings);
+			} else {
+				bool shutdown = obs_data_get_bool(settings, "shutdown");
+				obs_data_set_bool(settings, "shutdown", !shutdown);
+				obs_source_update(src, settings);
+				obs_data_set_bool(settings, "shutdown", shutdown);
+				obs_source_update(src, settings);
+			}
+			obs_data_release(settings);
+		}
+	} else {
+		LOGW("Source '%s' is not a browser_source", sltBrowserSourceName);
+	}
+
+	obs_source_release(src);
 }
 
 static std::string get_state_json_path()
@@ -695,6 +709,8 @@ bool save_state_json()
 		obs_data_set_string(item, "subtitle", cfg.subtitle.c_str());
 		obs_data_set_string(item, "anim_in", cfg.anim_in.c_str());
 		obs_data_set_string(item, "anim_out", cfg.anim_out.c_str());
+		obs_data_set_string(item, "custom_anim_in", cfg.custom_anim_in.c_str());
+		obs_data_set_string(item, "custom_anim_out", cfg.custom_anim_out.c_str());
 		obs_data_set_string(item, "font_family", cfg.font_family.c_str());
 		obs_data_set_string(item, "bg_color", cfg.bg_color.c_str());
 		obs_data_set_string(item, "text_color", cfg.text_color.c_str());
@@ -756,6 +772,8 @@ bool load_state_json()
 			cfg.subtitle = obs_data_get_string(item, "subtitle");
 			cfg.anim_in = obs_data_get_string(item, "anim_in");
 			cfg.anim_out = obs_data_get_string(item, "anim_out");
+			cfg.custom_anim_in = obs_data_get_string(item, "custom_anim_in");
+			cfg.custom_anim_out = obs_data_get_string(item, "custom_anim_out");
 			cfg.font_family = obs_data_get_string(item, "font_family");
 			cfg.bg_color = obs_data_get_string(item, "bg_color");
 			cfg.text_color = obs_data_get_string(item, "text_color");
@@ -795,4 +813,4 @@ void init_state_from_disk()
 	}
 }
 
-}
+} // namespace smart_lt

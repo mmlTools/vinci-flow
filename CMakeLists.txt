@@ -73,21 +73,43 @@ configure_file(
 )
 
 # ---------------------------------------------------------------------------
-# Target
+# MiniZip (vendored in src/thirdparty/minizip)
+# ---------------------------------------------------------------------------
+set(MINIZIP_DIR "${SLT_TRD_DIR}/minizip")
+
+set(MINIZIP_SOURCES
+  ${MINIZIP_DIR}/ioapi.c
+  ${MINIZIP_DIR}/unzip.c
+  ${MINIZIP_DIR}/zip.c
+)
+
+# Windows-specific I/O wrappers
+if(WIN32)
+  list(APPEND MINIZIP_SOURCES ${MINIZIP_DIR}/iowin32.c)
+endif()
+
+add_library(minizip STATIC ${MINIZIP_SOURCES})
+
+target_include_directories(minizip PUBLIC
+  ${MINIZIP_DIR}
+)
+
+# Try to link against zlib if CMake package is available.
+# OBS already brings zlib in most environments, so this is optional-safe.
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+  target_link_libraries(minizip PUBLIC ZLIB::ZLIB)
+endif()
+
+# ---------------------------------------------------------------------------
+# Target (OBS plugin)
 # ---------------------------------------------------------------------------
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
 # libobs
 find_package(libobs REQUIRED)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
-
-# ---------------------------------------------------------------------------
 # Frontend API (REQUIRED)
-# ---------------------------------------------------------------------------
 find_package(obs-frontend-api REQUIRED)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
-# Define macro for your #ifdefs
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ENABLE_FRONTEND_API=1)
 
 # ---------------------------------------------------------------------------
 # Qt (dock & dialogs) – REQUIRED
@@ -107,7 +129,10 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
 )
 
 # Define macro for your #ifdefs (even if you don't currently use it)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ENABLE_QT=1)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+  ENABLE_FRONTEND_API=1
+  ENABLE_QT=1
+)
 
 # ---------------------------------------------------------------------------
 # Includes
@@ -163,6 +188,15 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED YES
+)
+
+# ---------------------------------------------------------------------------
+# Linking
+# ---------------------------------------------------------------------------
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+  OBS::libobs
+  OBS::obs-frontend-api
+  minizip
 )
 
 # ---------------------------------------------------------------------------

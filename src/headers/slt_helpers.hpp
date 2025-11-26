@@ -49,6 +49,7 @@ inline const std::vector<AnimOption> AnimInOptions = {
 	{"Light Speed In Left",   "animate__lightSpeedInLeft"},
 	{"Jack In The Box",       "animate__jackInTheBox"},
 	{"Roll In",               "animate__rollIn"},
+	{"Custom (CSS class)", "custom"},
 };
 
 inline const std::vector<AnimOption> AnimOutOptions = {
@@ -84,6 +85,7 @@ inline const std::vector<AnimOption> AnimOutOptions = {
 	{"Light Speed Out Right", "animate__lightSpeedOutRight"},
 	{"Light Speed Out Left",  "animate__lightSpeedOutLeft"},
 	{"Roll Out",              "animate__rollOut"},
+	{"Custom (CSS class)", "custom"},
 };
 
 }

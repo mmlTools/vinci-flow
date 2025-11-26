@@ -32,16 +32,26 @@ private slots:
 	void onSubtitleChanged(const QString &text);
 	void onAnimInChanged(int index);
 	void onAnimOutChanged(int index);
+	void updateCustomAnimFieldsVisibility();
+	void onCustomAnimInChanged(const QString &text);
+	void onCustomAnimOutChanged(const QString &text);
 	void onFontChanged(const QFont &font);
 	void onHotkeyChanged(const QKeySequence &seq);
 	void onBrowseProfilePicture();
 
 	void onSceneBindingChanged(int index);
 
+	void onImportTemplateClicked();
+	void onExportTemplateClicked();
+
+	void onOpenHtmlEditorDialog();
+	void onOpenCssEditorDialog();
+
 private:
 	void loadFromState();
 	void saveToState();
 	void updateColorButton(QPushButton *btn, const QColor &color);
+    void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
 
 private:
 	QString currentId;
@@ -50,6 +60,11 @@ private:
 	QLineEdit *subtitleEdit = nullptr;
 	QComboBox *animInCombo = nullptr;
 	QComboBox *animOutCombo = nullptr;
+	QLineEdit *customAnimInEdit = nullptr;
+	QLineEdit *customAnimOutEdit = nullptr;
+	QLabel *customAnimInLabel = nullptr;
+	QLabel *customAnimOutLabel = nullptr;
+
 	QFontComboBox *fontCombo = nullptr;
 	QKeySequenceEdit *hotkeyEdit = nullptr;
 

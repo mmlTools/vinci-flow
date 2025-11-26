@@ -5,30 +5,32 @@
 #include <obs.h>
 
 struct LowerThirdConfig {
-	std::string id;              
-	std::string title;           
-	std::string subtitle;        
+	std::string id;
+	std::string title;
+	std::string subtitle;
 
-	std::string anim_in;         
-	std::string anim_out;        
+	std::string anim_in;
+	std::string anim_out;
+	std::string custom_anim_in;
+	std::string custom_anim_out;
 
-	std::string font_family;     
-	std::string bg_color;        
-	std::string text_color;      
+	std::string font_family;
+	std::string bg_color;
+	std::string text_color;
 
-	std::string html_template;   
-	std::string css_template;    
+	std::string html_template;
+	std::string css_template;
 
-	std::string hotkey;          
-	std::string bound_scene;     
-	bool visible = false;        
+	std::string hotkey;
+	std::string bound_scene;
+	bool visible = false;
 
-	std::string profile_picture; 
+	std::string profile_picture;
 
-	obs_hotkey_id hotkey_id = OBS_INVALID_HOTKEY_ID; 
+	obs_hotkey_id hotkey_id = OBS_INVALID_HOTKEY_ID;
 };
 
 struct LowerThirdState {
 	bool is_showing = false;
-	std::uint64_t show_start_time = 0; 
+	std::uint64_t show_start_time = 0;
 };
