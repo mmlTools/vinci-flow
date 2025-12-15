@@ -7,12 +7,12 @@
 class QPushButton;
 class QScrollArea;
 class QVBoxLayout;
+class QHBoxLayout;
 class QLineEdit;
 class QCheckBox;
 class QLabel;
-class QFrame;
-class QSpinBox;
 class QShortcut;
+class QToolButton;
 
 struct LowerThirdRowUi {
 	QString id;
@@ -33,19 +33,24 @@ public:
 	void updateFromState();
 
 signals:
-	void requestSave();
+	void requestSave(); // emitted on operations that should persist state
 
 protected:
 	bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
-	void onAddLowerThird();
 	void onBrowseOutputFolder();
-	void onToggleServer();
+	void onAddLowerThird();
+	void onEnsureBrowserSourceClicked();
 
 private:
 	void rebuildList();
 	void updateRowActiveStyles();
+
+	// Carousel (preview strip)
+	void rebuildCarousel();
+	void updateCarouselActiveStyles();
+
 	void handleToggleVisible(const QString &id, bool hideOthers = true);
 	void handleClone(const QString &id);
 	void handleOpenSettings(const QString &id);
@@ -54,17 +59,19 @@ private:
 	void clearShortcuts();
 	void rebuildShortcuts();
 
-	void updateServerUi();
-
 private:
 	QLineEdit *outputPathEdit = nullptr;
 	QPushButton *outputBrowseBtn = nullptr;
-
-	QFrame *serverStatusDot = nullptr;
-	QSpinBox *serverPortSpin = nullptr;
-	QPushButton *serverToggleBtn = nullptr;
-
 	QPushButton *addBtn = nullptr;
+	QPushButton *ensureSourceBtn = nullptr;
+
+	// Carousel widgets
+	QScrollArea *carouselArea = nullptr;
+	QWidget *carouselContainer = nullptr;
+	QHBoxLayout *carouselLayout = nullptr;
+	QVector<QToolButton *> carouselButtons;
+
+	// Main list
 	QScrollArea *scrollArea = nullptr;
 	QWidget *listContainer = nullptr;
 	QVBoxLayout *listLayout = nullptr;

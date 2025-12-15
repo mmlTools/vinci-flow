@@ -1,17 +1,10 @@
+#define LOG_TAG "[" PLUGIN_NAME "][settings]"
 #include "settings.hpp"
-#include "state.hpp"
-#include "entities.hpp"
-#include "log.hpp"
-#include "slt_helpers.hpp"
-
-#include <obs.h>
-#include <obs-frontend-api.h>
-#include <unzip.h>
-#include <zip.h>
+#include "core.hpp"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -30,201 +23,10 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
-#include <QTemporaryDir>
-#include <QMessageBox>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonParseError>
 #include <QStyle>
+#include <QSignalBlocker>
 
-using namespace smart_lt;
-
-static bool unzip_to_dir(const QString &zipPath, const QString &destDir, QString &htmlPath, QString &cssPath,
-			 QString &jsonPath, QString &profilePath)
-{
-	htmlPath.clear();
-	cssPath.clear();
-	jsonPath.clear();
-	profilePath.clear();
-
-	unzFile zip = unzOpen(zipPath.toUtf8().constData());
-	if (!zip)
-		return false;
-
-	if (unzGoToFirstFile(zip) != UNZ_OK) {
-		unzClose(zip);
-		return false;
-	}
-
-	do {
-		char filename[512];
-		unz_file_info info;
-
-		if (unzGetCurrentFileInfo(zip, &info, filename, sizeof(filename), nullptr, 0, nullptr, 0) != UNZ_OK)
-			break;
-
-		QString name = QString::fromUtf8(filename);
-		QString outPath = destDir + "/" + name;
-
-		QFileInfo fi(outPath);
-		QDir().mkpath(fi.path());
-
-		if (unzOpenCurrentFile(zip) != UNZ_OK)
-			break;
-
-		QFile out(outPath);
-		if (!out.open(QIODevice::WriteOnly))
-			break;
-
-		constexpr int BUF = 8192;
-		char buffer[BUF];
-
-		int bytesRead = 0;
-		while ((bytesRead = unzReadCurrentFile(zip, buffer, BUF)) > 0) {
-			out.write(buffer, bytesRead);
-		}
-
-		out.close();
-		unzCloseCurrentFile(zip);
-
-		if (name == "template.html")
-			htmlPath = outPath;
-		else if (name == "template.css")
-			cssPath = outPath;
-		else if (name == "template.json")
-			jsonPath = outPath;
-
-		else if (name.startsWith("profile.") || name.contains("profile", Qt::CaseInsensitive))
-			profilePath = outPath;
-
-	} while (unzGoToNextFile(zip) == UNZ_OK);
-
-	unzClose(zip);
-
-	return (!htmlPath.isEmpty() && !cssPath.isEmpty() && !jsonPath.isEmpty());
-}
-
-void LowerThirdSettingsDialog::onExportTemplateClicked()
-{
-	if (currentId.isEmpty()) {
-		QMessageBox::warning(this, tr("Export"), tr("No lower third selected to export."));
-		return;
-	}
-
-	saveToState();
-
-	auto *cfg = get_by_id(currentId.toStdString());
-	if (!cfg) {
-		QMessageBox::warning(this, tr("Export"), tr("Cannot find current lower third configuration."));
-		return;
-	}
-
-	QString suggestedName = QString::fromStdString(cfg->id) + "-template.zip";
-	QString zipPath =
-		QFileDialog::getSaveFileName(this, tr("Export Template"), suggestedName, tr("Template ZIP (*.zip)"));
-
-	if (zipPath.isEmpty())
-		return;
-
-	zipFile zf = zipOpen(zipPath.toUtf8().constData(), 0);
-	if (!zf) {
-		QMessageBox::warning(this, tr("Export"), tr("Failed to create ZIP file."));
-		return;
-	}
-
-	auto writeFileToZip = [&](const char *internalName, const QByteArray &data) -> bool {
-		zip_fileinfo zi;
-		memset(&zi, 0, sizeof(zi));
-
-		int err = zipOpenNewFileInZip(zf, internalName, &zi, nullptr, 0, nullptr, 0, nullptr, Z_DEFLATED,
-					      Z_BEST_COMPRESSION);
-		if (err != ZIP_OK)
-			return false;
-
-		if (!data.isEmpty()) {
-			err = zipWriteInFileInZip(zf, data.constData(), data.size());
-			if (err != ZIP_OK) {
-				zipCloseFileInZip(zf);
-				return false;
-			}
-		}
-
-		zipCloseFileInZip(zf);
-		return true;
-	};
-
-	QJsonObject obj;
-	obj["id"] = QString::fromStdString(cfg->id);
-	obj["title"] = QString::fromStdString(cfg->title);
-	obj["subtitle"] = QString::fromStdString(cfg->subtitle);
-	obj["anim_in"] = QString::fromStdString(cfg->anim_in);
-	obj["anim_out"] = QString::fromStdString(cfg->anim_out);
-	obj["custom_anim_in"] = QString::fromStdString(cfg->custom_anim_in);
-	obj["custom_anim_out"] = QString::fromStdString(cfg->custom_anim_out);
-	obj["font_family"] = QString::fromStdString(cfg->font_family);
-	obj["lt_position"] = QString::fromStdString(cfg->lt_position);
-	obj["bg_color"] = QString::fromStdString(cfg->bg_color);
-	obj["text_color"] = QString::fromStdString(cfg->text_color);
-	obj["bound_scene"] = QString::fromStdString(cfg->bound_scene);
-	obj["visible"] = cfg->visible;
-	obj["hotkey"] = QString::fromStdString(cfg->hotkey);
-	obj["profile_picture"] = QString::fromStdString(cfg->profile_picture);
-
-	QJsonDocument jsonDoc(obj);
-	QByteArray jsonBytes = jsonDoc.toJson(QJsonDocument::Indented);
-
-	if (!writeFileToZip("template.json", jsonBytes)) {
-		zipClose(zf, nullptr);
-		QMessageBox::warning(this, tr("Export"), tr("Failed to write template.json to ZIP."));
-		return;
-	}
-
-	QByteArray htmlBytes = QString::fromStdString(cfg->html_template).toUtf8();
-	if (!writeFileToZip("template.html", htmlBytes)) {
-		zipClose(zf, nullptr);
-		QMessageBox::warning(this, tr("Export"), tr("Failed to write template.html to ZIP."));
-		return;
-	}
-
-	QByteArray cssBytes = QString::fromStdString(cfg->css_template).toUtf8();
-	if (!writeFileToZip("template.css", cssBytes)) {
-		zipClose(zf, nullptr);
-		QMessageBox::warning(this, tr("Export"), tr("Failed to write template.css to ZIP."));
-		return;
-	}
-
-	if (!cfg->profile_picture.empty()) {
-		QString outDir = QString::fromStdString(output_dir());
-		if (!outDir.isEmpty()) {
-			QDir dir(outDir);
-			QString picFileName = QString::fromStdString(cfg->profile_picture);
-			QString srcPath = dir.filePath(picFileName);
-
-			if (QFile::exists(srcPath)) {
-				QFile picFile(srcPath);
-				if (picFile.open(QIODevice::ReadOnly)) {
-					QByteArray picBytes = picFile.readAll();
-
-					QString ext = QFileInfo(picFileName).suffix();
-					QString internalName = ext.isEmpty() ? QStringLiteral("profile")
-									     : QStringLiteral("profile.%1").arg(ext);
-
-					if (!writeFileToZip(internalName.toUtf8().constData(), picBytes)) {
-						zipClose(zf, nullptr);
-						QMessageBox::warning(this, tr("Export"),
-								     tr("Failed to add profile picture to ZIP."));
-						return;
-					}
-				}
-			}
-		}
-	}
-
-	zipClose(zf, nullptr);
-
-	QMessageBox::information(this, tr("Export"), tr("Template exported successfully."));
-}
-
+// ctor/dtor
 LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(parent)
 {
 	setWindowTitle(tr("Lower Third Settings"));
@@ -232,12 +34,17 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 	auto *root = new QVBoxLayout(this);
 
+	// Content box
 	auto *contentBox = new QGroupBox(tr("Content && Media"), this);
 	auto *contentLayout = new QGridLayout(contentBox);
 
 	auto *titleLabel = new QLabel(tr("Title:"), this);
 	titleEdit = new QLineEdit(this);
 
+	auto *subtitleLabel = new QLabel(tr("Subtitle:"), this);
+	subtitleEdit = new QLineEdit(this);
+
+	auto *picLabel = new QLabel(tr("Profile picture:"), this);
 	auto *picRow = new QHBoxLayout();
 	profilePictureEdit = new QLineEdit(this);
 	profilePictureEdit->setReadOnly(true);
@@ -250,113 +57,91 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	picRow->addWidget(profilePictureEdit, 1);
 	picRow->addWidget(browseProfilePictureBtn);
 
-	auto *picLabel = new QLabel(tr("Profile picture:"), this);
-
-	auto *subtitleLabel = new QLabel(tr("Subtitle:"), this);
-	subtitleEdit = new QLineEdit(this);
-
 	int row = 0;
 	contentLayout->addWidget(titleLabel, row, 0);
-	contentLayout->addWidget(titleEdit, row, 1);
-	contentLayout->addWidget(picLabel, row, 2);
-	contentLayout->addLayout(picRow, row, 3);
+	contentLayout->addWidget(titleEdit, row, 1, 1, 3);
 
 	row++;
 	contentLayout->addWidget(subtitleLabel, row, 0);
 	contentLayout->addWidget(subtitleEdit, row, 1, 1, 3);
 
-	contentLayout->setColumnStretch(1, 1);
-	contentLayout->setColumnStretch(3, 1);
+	row++;
+	contentLayout->addWidget(picLabel, row, 0);
+	contentLayout->addLayout(picRow, row, 1, 1, 3);
 
+	contentLayout->setColumnStretch(1, 1);
 	root->addWidget(contentBox);
 
+	// Style box
 	auto *styleBox = new QGroupBox(tr("Style"), this);
 	auto *styleGrid = new QGridLayout(styleBox);
 
 	auto *lblIn = new QLabel(tr("Anim In:"), this);
 	animInCombo = new QComboBox(this);
-	for (const auto &opt : smart_lt::AnimInOptions) {
+	for (const auto &opt : AnimInOptions)
 		animInCombo->addItem(tr(opt.label), QString::fromUtf8(opt.value));
-	}
-	auto *colAnimIn = new QVBoxLayout();
-	colAnimIn->addWidget(lblIn);
-	colAnimIn->addWidget(animInCombo);
 
 	auto *lblOut = new QLabel(tr("Anim Out:"), this);
 	animOutCombo = new QComboBox(this);
-	for (const auto &opt : smart_lt::AnimOutOptions) {
+	for (const auto &opt : AnimOutOptions)
 		animOutCombo->addItem(tr(opt.label), QString::fromUtf8(opt.value));
-	}
-	auto *colAnimOut = new QVBoxLayout();
-	colAnimOut->addWidget(lblOut);
-	colAnimOut->addWidget(animOutCombo);
 
 	auto *lblFont = new QLabel(tr("Font:"), this);
 	fontCombo = new QFontComboBox(this);
 	fontCombo->setEditable(false);
-	auto *colFont = new QVBoxLayout();
-	colFont->addWidget(lblFont);
-	colFont->addWidget(fontCombo);
 
 	row = 0;
-	styleGrid->addLayout(colAnimIn, row, 0);
-	styleGrid->addLayout(colAnimOut, row, 1);
-	styleGrid->addLayout(colFont, row, 2);
+	styleGrid->addWidget(lblIn, row, 0);
+	styleGrid->addWidget(animInCombo, row, 1);
+	styleGrid->addWidget(lblOut, row, 2);
+	styleGrid->addWidget(animOutCombo, row, 3);
+
+	row++;
+	styleGrid->addWidget(lblFont, row, 0);
+	styleGrid->addWidget(fontCombo, row, 1);
 
 	auto *lblPos = new QLabel(tr("Position:"), this);
 	ltPosCombo = new QComboBox(this);
-	for (const auto &opt : smart_lt::LtPositionOptions) {
+	for (const auto &opt : LtPositionOptions)
 		ltPosCombo->addItem(tr(opt.label), QString::fromUtf8(opt.value));
-	}
-	auto *colPos = new QVBoxLayout();
-	colPos->addWidget(lblPos);
-	colPos->addWidget(ltPosCombo);
 
+	styleGrid->addWidget(lblPos, row, 2);
+	styleGrid->addWidget(ltPosCombo, row, 3);
+
+	row++;
 	customAnimInLabel = new QLabel(tr("Custom In class:"), this);
 	customAnimInEdit = new QLineEdit(this);
 	customAnimInEdit->setPlaceholderText(tr("e.g. myFadeIn"));
-	auto *colCustomIn = new QVBoxLayout();
-	colCustomIn->addWidget(customAnimInLabel);
-	colCustomIn->addWidget(customAnimInEdit);
 
 	customAnimOutLabel = new QLabel(tr("Custom Out class:"), this);
 	customAnimOutEdit = new QLineEdit(this);
 	customAnimOutEdit->setPlaceholderText(tr("e.g. myFadeOut"));
-	auto *colCustomOut = new QVBoxLayout();
-	colCustomOut->addWidget(customAnimOutLabel);
-	colCustomOut->addWidget(customAnimOutEdit);
+
+	styleGrid->addWidget(customAnimInLabel, row, 0);
+	styleGrid->addWidget(customAnimInEdit, row, 1);
+	styleGrid->addWidget(customAnimOutLabel, row, 2);
+	styleGrid->addWidget(customAnimOutEdit, row, 3);
 
 	row++;
-	styleGrid->addLayout(colPos, row, 0);
-	styleGrid->addLayout(colCustomIn, row, 1);
-	styleGrid->addLayout(colCustomOut, row, 2);
-
 	auto *lblBg = new QLabel(tr("Background:"), this);
 	bgColorBtn = new QPushButton(tr("Pick"), this);
-	auto *colBg = new QVBoxLayout();
-	colBg->addWidget(lblBg);
-	colBg->addWidget(bgColorBtn);
 
 	auto *lblText = new QLabel(tr("Text color:"), this);
 	textColorBtn = new QPushButton(tr("Pick"), this);
-	auto *colText = new QVBoxLayout();
-	colText->addWidget(lblText);
-	colText->addWidget(textColorBtn);
 
-	row++;
-	styleGrid->addLayout(colBg, row, 0);
-	styleGrid->addLayout(colText, row, 1);
-	styleGrid->setColumnStretch(0, 1);
-	styleGrid->setColumnStretch(1, 1);
-	styleGrid->setColumnStretch(2, 1);
+	styleGrid->addWidget(lblBg, row, 0);
+	styleGrid->addWidget(bgColorBtn, row, 1);
+	styleGrid->addWidget(lblText, row, 2);
+	styleGrid->addWidget(textColorBtn, row, 3);
+
+	root->addWidget(styleBox);
 
 	connect(bgColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickBgColor);
 	connect(textColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickTextColor);
 	connect(ltPosCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		&LowerThirdSettingsDialog::onLtPosChanged);
 
-	root->addWidget(styleBox);
-
+	// Behavior box (scene binding removed)
 	auto *behaviorBox = new QGroupBox(tr("Behavior"), this);
 	auto *behaviorGrid = new QGridLayout(behaviorBox);
 
@@ -374,100 +159,34 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	hotkeyRowLayout->addWidget(hotkeyEdit, 1);
 	hotkeyRowLayout->addWidget(clearHotkeyBtn);
 
-	auto *hotkeyColLayout = new QVBoxLayout();
-	hotkeyColLayout->addWidget(hotkeyLabel);
-	hotkeyColLayout->addLayout(hotkeyRowLayout);
-
-	// Column 1: Bind to scene
-	auto *sceneLabel = new QLabel(tr("Bind to scene:"), this);
-	sceneCombo = new QComboBox(this);
-
-	auto *sceneColLayout = new QVBoxLayout();
-	sceneColLayout->addWidget(sceneLabel);
-	sceneColLayout->addWidget(sceneCombo);
-
-	behaviorGrid->addLayout(hotkeyColLayout, 0, 0);
-	behaviorGrid->addLayout(sceneColLayout, 0, 1);
-	behaviorGrid->setColumnStretch(0, 1);
-	behaviorGrid->setColumnStretch(1, 1);
+	behaviorGrid->addWidget(hotkeyLabel, 0, 0);
+	behaviorGrid->addLayout(hotkeyRowLayout, 0, 1);
 
 	root->addWidget(behaviorBox);
-
-	connect(sceneCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-		&LowerThirdSettingsDialog::onSceneBindingChanged);
 
 	connect(clearHotkeyBtn, &QPushButton::clicked, this, [this]() {
 		hotkeyEdit->setKeySequence(QKeySequence());
 		onHotkeyChanged(hotkeyEdit->keySequence());
 	});
 
+	// HTML/CSS editors
 	auto *tplRow = new QHBoxLayout();
 
 	auto *htmlCard = new QGroupBox(tr("HTML Template"), this);
 	auto *htmlLayout = new QVBoxLayout(htmlCard);
-
-	auto *htmlHeaderRow = new QHBoxLayout();
-	auto *expandHtmlBtn = new QPushButton(this);
-	expandHtmlBtn->setIcon(style()->standardIcon(QStyle::SP_FileDialogDetailedView));
-	expandHtmlBtn->setCursor(Qt::PointingHandCursor);
-	expandHtmlBtn->setToolTip(tr("Open HTML editor..."));
-	expandHtmlBtn->setFlat(true);
-
-	htmlHeaderRow->addStretch(1);
-	htmlHeaderRow->addWidget(expandHtmlBtn);
-
-	htmlLayout->addLayout(htmlHeaderRow);
-
 	htmlEdit = new QPlainTextEdit(this);
-	htmlEdit->setPlaceholderText(
-		"<li id=\"{{ID}}\" class=\"lower-third lt-pos-bottom-left animate__animated {{ANIM_IN}}\">\n"
-		"  <div class=\"lt-inner\">\n"
-		"    <!-- Optional avatar: <img class=\"lt-avatar\" src=\"{{PROFILE_PICTURE}}\" /> -->\n"
-		"    <div class=\"lt-title\">{{TITLE}}</div>\n"
-		"    <div class=\"lt-subtitle\">{{SUBTITLE}}</div>\n"
-		"  </div>\n"
-		"</li>\n");
 	htmlLayout->addWidget(htmlEdit, 1);
-
-	connect(expandHtmlBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onOpenHtmlEditorDialog);
-
 	tplRow->addWidget(htmlCard, 1);
 
 	auto *cssCard = new QGroupBox(tr("CSS Template"), this);
 	auto *cssLayout = new QVBoxLayout(cssCard);
-
-	auto *cssHeaderRow = new QHBoxLayout();
-	auto *expandCssBtn = new QPushButton(this);
-	expandCssBtn->setIcon(style()->standardIcon(QStyle::SP_FileDialogDetailedView));
-	expandCssBtn->setCursor(Qt::PointingHandCursor);
-	expandCssBtn->setToolTip(tr("Open CSS editor..."));
-	expandCssBtn->setFlat(true);
-
-	cssHeaderRow->addStretch(1);
-	cssHeaderRow->addWidget(expandCssBtn);
-
-	cssLayout->addLayout(cssHeaderRow);
-
 	cssEdit = new QPlainTextEdit(this);
-	cssEdit->setPlaceholderText("#{{ID}} .lt-inner {\n"
-				    "  font-family: {{FONT_FAMILY}}, sans-serif;\n"
-				    "  background: {{BG_COLOR}};\n"
-				    "  color: {{TEXT_COLOR}};\n"
-				    "}\n"
-				    "#{{ID}} .lt-avatar {\n"
-				    "  width: 56px;\n"
-				    "  height: 56px;\n"
-				    "  border-radius: 50%;\n"
-				    "  margin-right: 12px;\n"
-				    "}\n");
 	cssLayout->addWidget(cssEdit, 1);
-
-	connect(expandCssBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onOpenCssEditorDialog);
-
 	tplRow->addWidget(cssCard, 1);
 
 	root->addLayout(tplRow, 1);
 
+	// bottom
 	buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
 	auto *applyBtn = buttonBox->addButton(tr("Save && Apply"), QDialogButtonBox::AcceptRole);
 
@@ -475,57 +194,23 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	connect(buttonBox, &QDialogButtonBox::rejected, this, &LowerThirdSettingsDialog::reject);
 	connect(applyBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onSaveAndApply);
 
-	auto *bottomRow = new QHBoxLayout();
+	root->addWidget(buttonBox);
 
-	auto *importBtn = new QPushButton(this);
-	importBtn->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-	importBtn->setCursor(Qt::PointingHandCursor);
-	importBtn->setToolTip(tr("Import template from ZIP..."));
-
-	auto *exportBtn = new QPushButton(this);
-	exportBtn->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-	exportBtn->setCursor(Qt::PointingHandCursor);
-	exportBtn->setToolTip(tr("Export template to ZIP..."));
-
-	bottomRow->addWidget(importBtn);
-	bottomRow->addWidget(exportBtn);
-	bottomRow->addStretch(1);
-	bottomRow->addWidget(buttonBox);
-
-	root->addLayout(bottomRow);
-
-	connect(importBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onImportTemplateClicked);
-	connect(exportBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onExportTemplateClicked);
-
-	connect(titleEdit, &QLineEdit::textChanged, this, &LowerThirdSettingsDialog::onTitleChanged);
-	connect(subtitleEdit, &QLineEdit::textChanged, this, &LowerThirdSettingsDialog::onSubtitleChanged);
+	// bindings
 	connect(animInCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		&LowerThirdSettingsDialog::onAnimInChanged);
 	connect(animOutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		&LowerThirdSettingsDialog::onAnimOutChanged);
-
-	connect(customAnimInEdit, &QLineEdit::textChanged, this, &LowerThirdSettingsDialog::onCustomAnimInChanged);
-	connect(customAnimOutEdit, &QLineEdit::textChanged, this, &LowerThirdSettingsDialog::onCustomAnimOutChanged);
-
-	updateCustomAnimFieldsVisibility();
-
+	connect(customAnimInEdit, &QLineEdit::textChanged, this,
+		[this](const QString &) { updateCustomAnimFieldsVisibility(); });
+	connect(customAnimOutEdit, &QLineEdit::textChanged, this,
+		[this](const QString &) { updateCustomAnimFieldsVisibility(); });
 	connect(fontCombo, &QFontComboBox::currentFontChanged, this, &LowerThirdSettingsDialog::onFontChanged);
 	connect(hotkeyEdit, &QKeySequenceEdit::keySequenceChanged, this, &LowerThirdSettingsDialog::onHotkeyChanged);
 	connect(browseProfilePictureBtn, &QPushButton::clicked, this,
 		&LowerThirdSettingsDialog::onBrowseProfilePicture);
-}
 
-void LowerThirdSettingsDialog::onSceneBindingChanged(int)
-{
-	if (currentId.isEmpty())
-		return;
-
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		const QString data = sceneCombo->currentData().toString();
-		cfg->bound_scene = data.toStdString();
-	}
-
-	smart_lt::save_state_json();
+	updateCustomAnimFieldsVisibility();
 }
 
 LowerThirdSettingsDialog::~LowerThirdSettingsDialog()
@@ -534,6 +219,7 @@ LowerThirdSettingsDialog::~LowerThirdSettingsDialog()
 	delete currentTextColor;
 }
 
+// load/save
 void LowerThirdSettingsDialog::setLowerThirdId(const QString &id)
 {
 	currentId = id;
@@ -545,7 +231,7 @@ void LowerThirdSettingsDialog::loadFromState()
 	if (currentId.isEmpty())
 		return;
 
-	LowerThirdConfig *cfg = get_by_id(currentId.toStdString());
+	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -553,60 +239,40 @@ void LowerThirdSettingsDialog::loadFromState()
 	subtitleEdit->setText(QString::fromStdString(cfg->subtitle));
 
 	{
-		const QString valueIn = QString::fromStdString(cfg->anim_in);
-		int idxIn = -1;
-		for (int i = 0; i < animInCombo->count(); ++i) {
-			if (animInCombo->itemData(i).toString() == valueIn) {
-				idxIn = i;
-				break;
-			}
-		}
-		if (idxIn >= 0)
-			animInCombo->setCurrentIndex(idxIn);
+		const QString v = QString::fromStdString(cfg->anim_in);
+		const int idx = animInCombo->findData(v);
+		animInCombo->setCurrentIndex(idx >= 0 ? idx : 0);
 	}
-
 	{
-		const QString valueOut = QString::fromStdString(cfg->anim_out);
-		int idxOut = -1;
-		for (int i = 0; i < animOutCombo->count(); ++i) {
-			if (animOutCombo->itemData(i).toString() == valueOut) {
-				idxOut = i;
-				break;
-			}
-		}
-		if (idxOut >= 0)
-			animOutCombo->setCurrentIndex(idxOut);
+		const QString v = QString::fromStdString(cfg->anim_out);
+		const int idx = animOutCombo->findData(v);
+		animOutCombo->setCurrentIndex(idx >= 0 ? idx : 0);
 	}
 
-	customAnimInEdit->clear();
-	customAnimOutEdit->clear();
-
-	if (!cfg->custom_anim_in.empty())
-		customAnimInEdit->setText(QString::fromStdString(cfg->custom_anim_in));
-	if (!cfg->custom_anim_out.empty())
-		customAnimOutEdit->setText(QString::fromStdString(cfg->custom_anim_out));
-
+	customAnimInEdit->setText(QString::fromStdString(cfg->custom_anim_in));
+	customAnimOutEdit->setText(QString::fromStdString(cfg->custom_anim_out));
 	updateCustomAnimFieldsVisibility();
 
 	if (!cfg->font_family.empty())
 		fontCombo->setCurrentFont(QFont(QString::fromStdString(cfg->font_family)));
 
-	if (!cfg->hotkey.empty())
-		hotkeyEdit->setKeySequence(QKeySequence(QString::fromStdString(cfg->hotkey)));
+	// hotkey (portable text)
+	hotkeyEdit->setKeySequence(QKeySequence(QString::fromStdString(cfg->hotkey)));
 
 	htmlEdit->setPlainText(QString::fromStdString(cfg->html_template));
 	cssEdit->setPlainText(QString::fromStdString(cfg->css_template));
 
 	delete currentBgColor;
 	delete currentTextColor;
+	currentBgColor = nullptr;
+	currentTextColor = nullptr;
 
-	QColor bg(cfg->bg_color.c_str());
-	QColor fg(cfg->text_color.c_str());
-
+	QColor bg(QString::fromStdString(cfg->bg_color));
+	QColor fg(QString::fromStdString(cfg->text_color));
 	if (!bg.isValid())
-		bg = QColor(0, 0, 0, 200);
+		bg = QColor(17, 24, 39);
 	if (!fg.isValid())
-		fg = QColor(255, 255, 255);
+		fg = QColor(249, 250, 251);
 
 	currentBgColor = new QColor(bg);
 	currentTextColor = new QColor(fg);
@@ -614,29 +280,16 @@ void LowerThirdSettingsDialog::loadFromState()
 	updateColorButton(bgColorBtn, *currentBgColor);
 	updateColorButton(textColorBtn, *currentTextColor);
 
-	if (ltPosCombo) {
-		const QString posValue = QString::fromStdString(cfg->lt_position);
-		int idx = -1;
-		for (int i = 0; i < ltPosCombo->count(); ++i) {
-			if (ltPosCombo->itemData(i).toString() == posValue) {
-				idx = i;
-				break;
-			}
-		}
-		if (idx >= 0)
-			ltPosCombo->setCurrentIndex(idx);
-		else if (ltPosCombo->count() > 0)
-			ltPosCombo->setCurrentIndex(0);
+	{
+		const QString v = QString::fromStdString(cfg->lt_position);
+		const int idx = ltPosCombo->findData(v);
+		ltPosCombo->setCurrentIndex(idx >= 0 ? idx : 0);
 	}
 
-	if (cfg->profile_picture.empty()) {
+	if (cfg->profile_picture.empty())
 		profilePictureEdit->clear();
-	} else {
+	else
 		profilePictureEdit->setText(QString::fromStdString(cfg->profile_picture));
-	}
-
-	if (sceneCombo)
-		populate_scene_combo(sceneCombo, cfg->bound_scene);
 
 	pendingProfilePicturePath.clear();
 }
@@ -646,7 +299,7 @@ void LowerThirdSettingsDialog::saveToState()
 	if (currentId.isEmpty())
 		return;
 
-	LowerThirdConfig *cfg = get_by_id(currentId.toStdString());
+	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -655,16 +308,13 @@ void LowerThirdSettingsDialog::saveToState()
 
 	cfg->anim_in = animInCombo->currentData().toString().toStdString();
 	cfg->anim_out = animOutCombo->currentData().toString().toStdString();
-
 	cfg->custom_anim_in = customAnimInEdit->text().toStdString();
 	cfg->custom_anim_out = customAnimOutEdit->text().toStdString();
 
 	cfg->font_family = fontCombo->currentFont().family().toStdString();
+	cfg->hotkey = hotkeyEdit->keySequence().toString(QKeySequence::PortableText).toStdString();
 
-	if (ltPosCombo) {
-		const QString data = ltPosCombo->currentData().toString();
-		cfg->lt_position = data.toStdString();
-	}
+	cfg->lt_position = ltPosCombo->currentData().toString().toStdString();
 
 	if (currentBgColor)
 		cfg->bg_color = currentBgColor->name(QColor::HexRgb).toStdString();
@@ -673,60 +323,49 @@ void LowerThirdSettingsDialog::saveToState()
 
 	cfg->html_template = htmlEdit->toPlainText().toStdString();
 	cfg->css_template = cssEdit->toPlainText().toStdString();
-	cfg->hotkey = hotkeyEdit->keySequence().toString(QKeySequence::PortableText).toStdString();
 
-	if (sceneCombo) {
-		const QString data = sceneCombo->currentData().toString();
-		cfg->bound_scene = data.toStdString();
-	}
+	// profile picture copy into output_dir (Major because it affects rendered HTML image)
+	if (!pendingProfilePicturePath.isEmpty() && smart_lt::has_output_dir()) {
+		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+		QDir dir(outDir);
 
-	if (!pendingProfilePicturePath.isEmpty()) {
-		QString outDir = QString::fromStdString(smart_lt::output_dir());
-		if (!outDir.isEmpty()) {
-			QDir dir(outDir);
+		// remove old
+		if (!cfg->profile_picture.empty()) {
+			const QString oldPath = dir.filePath(QString::fromStdString(cfg->profile_picture));
+			if (QFile::exists(oldPath))
+				QFile::remove(oldPath);
+		}
 
-			if (!cfg->profile_picture.empty()) {
-				QString oldFilePath = dir.filePath(QString::fromStdString(cfg->profile_picture));
-				if (QFile::exists(oldFilePath)) {
-					QFile::remove(oldFilePath);
-				}
-			}
+		const QFileInfo fi(pendingProfilePicturePath);
+		const QString ext = fi.suffix().toLower();
+		const qint64 ts = QDateTime::currentSecsSinceEpoch();
 
-			QFileInfo fi(pendingProfilePicturePath);
-			QString ext = fi.suffix();
-			qint64 ts = QDateTime::currentSecsSinceEpoch();
+		QString newFileName = QString("%1_%2").arg(QString::fromStdString(cfg->id)).arg(ts);
+		if (!ext.isEmpty())
+			newFileName += "." + ext;
 
-			QString baseId = QString::fromStdString(cfg->id);
-			QString newFileName = QString("%1_%2").arg(baseId).arg(ts);
-			if (!ext.isEmpty())
-				newFileName += "." + ext.toLower();
+		const QString destPath = dir.filePath(newFileName);
 
-			QString destPath = dir.filePath(newFileName);
-
-			if (QFile::copy(pendingProfilePicturePath, destPath)) {
-				cfg->profile_picture = newFileName.toStdString();
-				profilePictureEdit->setText(newFileName);
-			} else {
-				LOGW("Failed to copy profile picture from '%s' to '%s'",
-				     pendingProfilePicturePath.toUtf8().constData(), destPath.toUtf8().constData());
-			}
+		if (QFile::copy(pendingProfilePicturePath, destPath)) {
+			cfg->profile_picture = newFileName.toStdString();
+			profilePictureEdit->setText(newFileName);
 		} else {
-			LOGW("No output_dir set when saving profile picture for '%s'", cfg->id.c_str());
+			LOGW("Failed to copy profile picture '%s' -> '%s'",
+			     pendingProfilePicturePath.toUtf8().constData(), destPath.toUtf8().constData());
 		}
 
 		pendingProfilePicturePath.clear();
 	}
 
-	write_index_html();
-	ensure_browser_source();
-	refresh_browser_source();
-	save_state_json();
+	// Major changes: template/style/position/media -> rev++ + html rewrite + json save
+	smart_lt::apply_changes(smart_lt::ApplyMode::HtmlAndJsonRev);
 }
 
+// actions
 void LowerThirdSettingsDialog::onPickBgColor()
 {
-	QColor start = currentBgColor ? *currentBgColor : QColor(0, 0, 0, 200);
-	QColor c = QColorDialog::getColor(start, this, tr("Pick background color"), QColorDialog::ShowAlphaChannel);
+	QColor start = currentBgColor ? *currentBgColor : QColor(17, 24, 39);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick background color"));
 	if (!c.isValid())
 		return;
 
@@ -740,7 +379,7 @@ void LowerThirdSettingsDialog::onPickBgColor()
 
 void LowerThirdSettingsDialog::onPickTextColor()
 {
-	QColor start = currentTextColor ? *currentTextColor : QColor(255, 255, 255);
+	QColor start = currentTextColor ? *currentTextColor : QColor(249, 250, 251);
 	QColor c = QColorDialog::getColor(start, this, tr("Pick text color"));
 	if (!c.isValid())
 		return;
@@ -755,8 +394,8 @@ void LowerThirdSettingsDialog::onPickTextColor()
 
 void LowerThirdSettingsDialog::onBrowseProfilePicture()
 {
-	QString filter = tr("Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)");
-	QString file = QFileDialog::getOpenFileName(this, tr("Select profile picture"), QString(), filter);
+	const QString filter = tr("Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)");
+	const QString file = QFileDialog::getOpenFileName(this, tr("Select profile picture"), QString(), filter);
 	if (file.isEmpty())
 		return;
 
@@ -770,258 +409,57 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 	accept();
 }
 
-void LowerThirdSettingsDialog::onTitleChanged(const QString &text)
-{
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->title = text.toStdString();
-	}
-}
-
-void LowerThirdSettingsDialog::onSubtitleChanged(const QString &text)
-{
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->subtitle = text.toStdString();
-	}
-}
-
+// change handlers
 void LowerThirdSettingsDialog::updateCustomAnimFieldsVisibility()
 {
 	const QString customKey = QStringLiteral("custom");
 
-	bool inCustom = (animInCombo->currentData().toString() == customKey);
-	bool outCustom = (animOutCombo->currentData().toString() == customKey);
+	const bool inCustom = (animInCombo->currentData().toString() == customKey);
+	const bool outCustom = (animOutCombo->currentData().toString() == customKey);
 
-	if (customAnimInLabel)
-		customAnimInLabel->setVisible(inCustom);
-	if (customAnimInEdit)
-		customAnimInEdit->setVisible(inCustom);
-	if (customAnimOutLabel)
-		customAnimOutLabel->setVisible(outCustom);
-	if (customAnimOutEdit)
-		customAnimOutEdit->setVisible(outCustom);
+	customAnimInLabel->setVisible(inCustom);
+	customAnimInEdit->setVisible(inCustom);
+	customAnimOutLabel->setVisible(outCustom);
+	customAnimOutEdit->setVisible(outCustom);
 }
 
 void LowerThirdSettingsDialog::onAnimInChanged(int)
 {
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->anim_in = animInCombo->currentData().toString().toStdString();
-	}
 	updateCustomAnimFieldsVisibility();
 }
 
 void LowerThirdSettingsDialog::onAnimOutChanged(int)
 {
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->anim_out = animOutCombo->currentData().toString().toStdString();
-	}
 	updateCustomAnimFieldsVisibility();
 }
 
-void LowerThirdSettingsDialog::onCustomAnimInChanged(const QString &text)
+void LowerThirdSettingsDialog::onFontChanged(const QFont &)
 {
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->custom_anim_in = text.toStdString();
-	}
+	// no-op here; persisted on Save
 }
 
-void LowerThirdSettingsDialog::onCustomAnimOutChanged(const QString &text)
+void LowerThirdSettingsDialog::onHotkeyChanged(const QKeySequence &)
 {
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->custom_anim_out = text.toStdString();
-	}
+	// no-op here; persisted on Save
 }
 
-void LowerThirdSettingsDialog::onFontChanged(const QFont &font)
+void LowerThirdSettingsDialog::onLtPosChanged(int)
 {
+	// Position impacts rendered HTML class usage -> Major
 	if (currentId.isEmpty())
 		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->font_family = font.family().toStdString();
-	}
-}
 
-void LowerThirdSettingsDialog::onHotkeyChanged(const QKeySequence &seq)
-{
-	if (currentId.isEmpty())
-		return;
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->hotkey = seq.toString(QKeySequence::PortableText).toStdString();
+	if (auto *cfg = smart_lt::get_by_id(currentId.toStdString())) {
+		cfg->lt_position = ltPosCombo->currentData().toString().toStdString();
 	}
+
+	smart_lt::apply_changes(smart_lt::ApplyMode::HtmlAndJsonRev);
 }
 
 void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor &color)
 {
-	QString hex = color.name(QColor::HexRgb);
-	QString css = QString("background-color:%1;"
-			      "border:1px solid #333;"
-			      "min-width:64px;"
-			      "padding:2px 4px;")
-			      .arg(hex);
-
-	btn->setStyleSheet(css);
+	const QString hex = color.name(QColor::HexRgb);
+	btn->setStyleSheet(
+		QString("background-color:%1;border:1px solid #333;min-width:64px;padding:2px 4px;").arg(hex));
 	btn->setText(hex);
-}
-
-void LowerThirdSettingsDialog::onImportTemplateClicked()
-{
-	QString zipPath =
-		QFileDialog::getOpenFileName(this, tr("Select template ZIP"), QString(), tr("Template ZIP (*.zip)"));
-
-	if (zipPath.isEmpty())
-		return;
-
-	QTemporaryDir tempDir;
-	if (!tempDir.isValid()) {
-		QMessageBox::warning(this, tr("Error"), tr("Unable to create temp directory."));
-		return;
-	}
-
-	QString htmlPath, cssPath, jsonPath, profilePicPath;
-
-	if (!unzip_to_dir(zipPath, tempDir.path(), htmlPath, cssPath, jsonPath, profilePicPath)) {
-		QMessageBox::warning(this, tr("Error"),
-				     tr("ZIP must contain template.html, template.css and template.json."));
-		return;
-	}
-
-	QFile jsonFile(jsonPath);
-	if (!jsonFile.open(QIODevice::ReadOnly)) {
-		QMessageBox::warning(this, tr("Error"), tr("Cannot read template.json."));
-		return;
-	}
-
-	QJsonParseError err;
-	QJsonDocument doc = QJsonDocument::fromJson(jsonFile.readAll(), &err);
-	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-		QMessageBox::warning(this, tr("Error"), tr("Invalid JSON file."));
-		return;
-	}
-
-	QJsonObject obj = doc.object();
-	LowerThirdConfig *cfg = get_by_id(currentId.toStdString());
-	if (!cfg)
-		return;
-
-	cfg->title = obj["title"].toString().toStdString();
-	cfg->subtitle = obj["subtitle"].toString().toStdString();
-	cfg->anim_in = obj["anim_in"].toString().toStdString();
-	cfg->anim_out = obj["anim_out"].toString().toStdString();
-	cfg->custom_anim_in = obj["custom_anim_in"].toString().toStdString();
-	cfg->custom_anim_out = obj["custom_anim_out"].toString().toStdString();
-	cfg->font_family = obj["font_family"].toString().toStdString();
-	cfg->lt_position = obj["lt_position"].toString().toStdString();
-	cfg->bg_color = obj["bg_color"].toString().toStdString();
-	cfg->text_color = obj["text_color"].toString().toStdString();
-	cfg->bound_scene = obj["bound_scene"].toString().toStdString();
-	cfg->visible = obj["visible"].toBool();
-	cfg->hotkey = obj["hotkey"].toString().toStdString();
-	cfg->profile_picture = obj["profile_picture"].toString().toStdString();
-
-	{
-		QFile f1(htmlPath);
-		if (f1.open(QIODevice::ReadOnly)) {
-			cfg->html_template = QString::fromUtf8(f1.readAll()).toStdString();
-		}
-	}
-
-	{
-		QFile f2(cssPath);
-		if (f2.open(QIODevice::ReadOnly)) {
-			cfg->css_template = QString::fromUtf8(f2.readAll()).toStdString();
-		}
-	}
-
-	if (!profilePicPath.isEmpty()) {
-		QString outDir = QString::fromStdString(output_dir());
-
-		if (!outDir.isEmpty()) {
-			QDir dir(outDir);
-
-			QString ext = QFileInfo(profilePicPath).suffix();
-			QString newName = QString("%1_profile.%2").arg(cfg->id.c_str()).arg(ext);
-			QString dest = dir.filePath(newName);
-
-			QFile::remove(dest);
-			QFile::copy(profilePicPath, dest);
-
-			cfg->profile_picture = newName.toStdString();
-		}
-	}
-
-	loadFromState();
-
-	save_state_json();
-	write_index_html();
-	refresh_browser_source();
-
-	QMessageBox::information(this, tr("Imported"), tr("Template imported successfully."));
-}
-
-void LowerThirdSettingsDialog::openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit)
-{
-	if (!sourceEdit)
-		return;
-
-	QDialog dlg(this);
-	dlg.setWindowTitle(title);
-	dlg.resize(900, 700);
-
-	auto *layout = new QVBoxLayout(&dlg);
-	auto *bigEdit = new QPlainTextEdit(&dlg);
-
-	bigEdit->setPlainText(sourceEdit->toPlainText());
-	bigEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
-	QFont monoFont = bigEdit->font();
-#if defined(Q_OS_WIN)
-	monoFont.setFamily(QStringLiteral("Consolas"));
-#elif defined(Q_OS_MACOS)
-	monoFont.setFamily(QStringLiteral("Menlo"));
-#else
-	monoFont.setFamily(QStringLiteral("Monospace"));
-#endif
-	bigEdit->setFont(monoFont);
-
-	auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dlg);
-
-	layout->addWidget(bigEdit, 1);
-	layout->addWidget(box);
-
-	connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-	connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-	if (dlg.exec() == QDialog::Accepted) {
-		sourceEdit->setPlainText(bigEdit->toPlainText());
-	}
-}
-
-void LowerThirdSettingsDialog::onOpenHtmlEditorDialog()
-{
-	openTemplateEditorDialog(tr("Edit HTML Template"), htmlEdit);
-}
-
-void LowerThirdSettingsDialog::onOpenCssEditorDialog()
-{
-	openTemplateEditorDialog(tr("Edit CSS Template"), cssEdit);
-}
-void LowerThirdSettingsDialog::onLtPosChanged(int)
-{
-	if (currentId.isEmpty())
-		return;
-
-	if (auto *cfg = get_by_id(currentId.toStdString())) {
-		cfg->lt_position = ltPosCombo->currentData().toString().toStdString();
-		smart_lt::save_state_json();
-	}
 }

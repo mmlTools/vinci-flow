@@ -19,7 +19,6 @@ project(${_name} VERSION ${_version} LANGUAGES C CXX)
 # Options (these are mainly here so your CI flags are "used")
 # ---------------------------------------------------------------------------
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for dock, hotkeys, browser auto-setup" ON)
-option(ENABLE_HTTP_SERVER  "Serve overlay on http://127.0.0.1:<port>"                   ON)
 option(ENABLE_QT           "Use Qt for dock UI and dialogs"                             ON)
 
 # This plugin *requires* Qt and frontend API; don't allow disabling them.
@@ -122,12 +121,20 @@ find_package(obs-frontend-api REQUIRED)
 # ---------------------------------------------------------------------------
 # Qt (dock & dialogs) – REQUIRED
 # ---------------------------------------------------------------------------
-find_package(Qt6 COMPONENTS Core Widgets QUIET)
+find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
 if(Qt6_FOUND)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+    Qt6::Core
+    Qt6::Widgets
+    Qt6::Network
+  )
 else()
-  find_package(Qt5 COMPONENTS Core Widgets REQUIRED)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt5::Core Qt5::Widgets)
+  find_package(Qt5 COMPONENTS Core Widgets Network REQUIRED)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+    Qt5::Core
+    Qt5::Widgets
+    Qt5::Network
+  )
 endif()
 
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
@@ -154,30 +161,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # ---------------------------------------------------------------------------
-# HTTP server deps
-# ---------------------------------------------------------------------------
-if(ENABLE_HTTP_SERVER)
-  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ENABLE_HTTP_SERVER=1)
-  if(WIN32)
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
-  endif()
-endif()
-
-# ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
 set(SLT_SRC
   ${SLT_SRC_DIR}/main.cpp
-  ${SLT_SRC_DIR}/state.cpp
+  ${SLT_SRC_DIR}/core.cpp
   ${SLT_SRC_DIR}/widget.cpp
-  ${SLT_SRC_DIR}/slt_helpers.cpp
 )
-
-if(ENABLE_HTTP_SERVER)
-  list(APPEND SLT_SRC
-    ${SLT_SRC_DIR}/server.cpp
-  )
-endif()
 
 list(APPEND SLT_SRC
   ${SLT_SRC_DIR}/dock.cpp

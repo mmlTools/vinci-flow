@@ -1,14 +1,12 @@
+#define LOG_TAG "[" PLUGIN_NAME "][dock]"
 #include "dock.hpp"
-#include "config.hpp"
-#include "const.hpp"
-#include "log.hpp"
-#include "state.hpp"
+
+#include "core.hpp"
 #include "settings.hpp"
-#include "server.hpp"
 #include "widget.hpp"
-#include "slt_helpers.hpp"
 
 #include <obs-frontend-api.h>
+#include <obs.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -20,51 +18,24 @@
 #include <QFileDialog>
 #include <QStyle>
 #include <QFrame>
-#include <QSpinBox>
 #include <QEvent>
-#include <QKeyEvent>
-#include <QTimer>
 #include <QShortcut>
 #include <QMouseEvent>
-
-#include "httplib.h"
-
-using namespace smart_lt;
+#include <QDir>
+#include <QPixmap>
+#include <QVariant>
+#include <QSizePolicy>
+#include <QToolButton>
 
 static QWidget *g_dockWidget = nullptr;
 
-static void styleDot(QFrame *dot, bool ok)
-{
-	if (!dot)
-		return;
-	dot->setFixedSize(12, 12);
-	dot->setStyleSheet(QString("border-radius:6px;"
-				   "background-color:%1;"
-				   "border:1px solid rgba(0,0,0,0.4);")
-				   .arg(ok ? "#44ff66" : "#ff5555"));
-}
-
-static bool slt_health_ok_http(int port, int timeout_ms = 150)
-{
-	if (port <= 0)
-		return false;
-
-	httplib::Client cli("127.0.0.1", port);
-	cli.set_keep_alive(false);
-	cli.set_connection_timeout(0, timeout_ms * 1000);
-	cli.set_read_timeout(0, timeout_ms * 1000);
-	cli.set_write_timeout(0, timeout_ms * 1000);
-
-	if (auto res = cli.Get("/__slt/health"))
-		return res->status == 200;
-
-	return false;
-}
+// ------------------------------------------------------------
 
 LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 {
 	setObjectName(QStringLiteral("LowerThirdDock"));
 	setAttribute(Qt::WA_StyledBackground, true);
+
 	setStyleSheet(R"(
 	#LowerThirdDock {
 	    background: rgba(39, 42, 51, 1.0);
@@ -99,14 +70,37 @@ LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 	    background: rgba(255,255,255,0.06);
 	    border-radius: 3px;
 	}
+
+	/* Carousel */
+	QToolButton[sltCarousel="true"] {
+	  background: rgba(255,255,255,0.06);
+	  border: 1px solid rgba(255,255,255,0.10);
+	  border-radius: 10px;
+	  padding: 6px 10px;
+	  color: #f0f6fc;
+	}
+	QToolButton[sltCarousel="true"]:hover {
+	  background: rgba(255,255,255,0.10);
+	}
+	QToolButton[sltCarousel="true"][sltActive="true"] {
+	  background: rgba(88,166,255,0.18);
+	  border: 1px solid rgba(88,166,255,0.95);
+	}
 	)");
 
 	auto *rootLayout = new QVBoxLayout(this);
 	rootLayout->setContentsMargins(8, 8, 8, 8);
 	rootLayout->setSpacing(6);
 
+	auto *st = style();
+
+	// ─────────────────────────────────────────────────────────────
+	// Row 1: Browse output folder + Add Browser Source (globe icon)
+	// ─────────────────────────────────────────────────────────────
 	{
 		auto *row = new QHBoxLayout();
+		row->setSpacing(6);
+
 		auto *lbl = new QLabel(tr("Resources:"), this);
 
 		outputPathEdit = new QLineEdit(this);
@@ -116,124 +110,109 @@ LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 		outputBrowseBtn->setCursor(Qt::PointingHandCursor);
 		outputBrowseBtn->setToolTip(tr("Select output folder"));
 		outputBrowseBtn->setFlat(true);
-
-		addBtn = new QPushButton(this);
-
-		auto *st = style();
 		outputBrowseBtn->setIcon(st->standardIcon(QStyle::SP_DirOpenIcon));
-		outputBrowseBtn->setText(QString());
 
-		addBtn->setIcon(st->standardIcon(QStyle::SP_FileDialogNewFolder));
-		addBtn->setCursor(Qt::PointingHandCursor);
-		addBtn->setToolTip(tr("Add new lower third"));
-		addBtn->setText(QString());
+		ensureSourceBtn = new QPushButton(this);
+		ensureSourceBtn->setCursor(Qt::PointingHandCursor);
+		ensureSourceBtn->setToolTip(tr("Add Browser Source to current scene"));
+		ensureSourceBtn->setFlat(true);
+
+		// Web globe icon (theme) with fallback
+		QIcon globe = QIcon::fromTheme(QStringLiteral("internet-web-browser"));
+		if (globe.isNull())
+			globe = QIcon::fromTheme(QStringLiteral("applications-internet"));
+		if (globe.isNull())
+			globe = QIcon::fromTheme(QStringLiteral("network-workgroup"));
+		if (globe.isNull())
+			globe = st->standardIcon(QStyle::SP_BrowserReload);
+		ensureSourceBtn->setIcon(globe);
 
 		row->addWidget(lbl);
 		row->addWidget(outputPathEdit, 1);
 		row->addWidget(outputBrowseBtn);
-		row->addStretch();
-		row->addWidget(addBtn);
+		row->addWidget(ensureSourceBtn);
 
 		rootLayout->addLayout(row);
 
-		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
-		connect(outputBrowseBtn, &QPushButton::clicked,
-		        this, &LowerThirdDock::onBrowseOutputFolder);
+		connect(outputBrowseBtn, &QPushButton::clicked, this, &LowerThirdDock::onBrowseOutputFolder);
+		connect(ensureSourceBtn, &QPushButton::clicked, this, &LowerThirdDock::onEnsureBrowserSourceClicked);
 	}
 
-	{
-		auto *row = new QHBoxLayout();
-		auto *lbl = new QLabel(tr("Webserver:"), this);
-
-		serverStatusDot = new QFrame(this);
-		styleDot(serverStatusDot, false);
-
-		serverPortSpin = new QSpinBox(this);
-		serverPortSpin->setRange(1024, 65535);
-		serverPortSpin->setValue(smart_lt::get_preferred_port());
-
-		serverToggleBtn = new QPushButton(this);
-		serverToggleBtn->setCursor(Qt::PointingHandCursor);
-		serverToggleBtn->setFlat(false);
-		serverToggleBtn->setToolTip(tr("Start webserver"));
-		serverToggleBtn->setText(QString());
-
-		row->addWidget(lbl);
-		row->addWidget(serverStatusDot);
-		row->addSpacing(6);
-		row->addWidget(new QLabel(tr("Port:"), this));
-		row->addWidget(serverPortSpin);
-		row->addStretch();
-		row->addWidget(serverToggleBtn);
-
-		rootLayout->addLayout(row);
-
-		connect(serverToggleBtn, &QPushButton::clicked, this, &LowerThirdDock::onToggleServer);
-	}
-
-	const QString sareaStyle = QStringLiteral("#LowerThirdContent {"
-						  "  background-color: rgba(0, 0, 0, 0.25);"
-						  "  border: 1px solid rgba(7, 7, 7, 0.1);"
-						  "  border-radius: 4px;"
-						  "  margin-top: 10px;"
-						  "  padding-left: 10px;"
-						  "}");
-
+	// ─────────────────────────────────────────────────────────────
+	// List (scroll area)
+	// ─────────────────────────────────────────────────────────────
 	scrollArea = new QScrollArea(this);
 	scrollArea->setObjectName(QStringLiteral("LowerThirdContent"));
-	scrollArea->setStyleSheet(sareaStyle);
+	scrollArea->setStyleSheet(QStringLiteral("#LowerThirdContent {"
+						 "  background-color: rgba(0, 0, 0, 0.25);"
+						 "  border: 1px solid rgba(7, 7, 7, 0.1);"
+						 "  border-radius: 4px;"
+						 "  margin-top: 10px;"
+						 "  padding-left: 10px;"
+						 "}"));
 	scrollArea->setWidgetResizable(true);
 
 	listContainer = new QWidget(scrollArea);
 	listLayout = new QVBoxLayout(listContainer);
 	listLayout->setContentsMargins(8, 8, 8, 8);
 	listLayout->setSpacing(6);
-	listLayout->setAlignment(Qt::AlignTop);
-	scrollArea->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+	listLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 
 	scrollArea->setWidget(listContainer);
 	rootLayout->addWidget(scrollArea);
 
-	auto *carousel = create_widget_carousel(this);
-	rootLayout->addWidget(carousel);
+	// ─────────────────────────────────────────────────────────────
+	// Bottom-right "+" Add button (below scroll area)
+	// ─────────────────────────────────────────────────────────────
+	{
+		auto *row = new QHBoxLayout();
+		row->setSpacing(6);
 
-	if (smart_lt::has_output_dir()) {
-		outputPathEdit->setText(QString::fromStdString(smart_lt::output_dir()));
+		row->addStretch(1);
+
+		addBtn = new QPushButton(this);
+		addBtn->setCursor(Qt::PointingHandCursor);
+		addBtn->setToolTip(tr("Add new lower third"));
+		addBtn->setFlat(true);
+
+		// "+" icon (theme) with fallbacks
+		QIcon plus = QIcon::fromTheme(QStringLiteral("list-add"));
+		if (plus.isNull())
+			plus = QIcon::fromTheme(QStringLiteral("add"));
+		if (plus.isNull())
+			plus = st->standardIcon(QStyle::SP_DialogYesButton);
+		addBtn->setIcon(plus);
+
+		row->addWidget(addBtn);
+		rootLayout->addLayout(row);
+
+		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
 	}
 
-	bool hasDir = smart_lt::has_output_dir();
-	addBtn->setEnabled(hasDir);
-	serverToggleBtn->setEnabled(hasDir);
+	// Your existing widget carousel (Ko-fi/etc)
+	rootLayout->addWidget(create_widget_carousel(this));
 
-	updateServerUi();
+	// init button state + current path display
+	if (smart_lt::has_output_dir())
+		outputPathEdit->setText(QString::fromStdString(smart_lt::output_dir()));
+	else
+		outputPathEdit->clear();
+
+	const bool hasDir = smart_lt::has_output_dir();
+	addBtn->setEnabled(hasDir);
+	ensureSourceBtn->setEnabled(hasDir);
 }
 
 bool LowerThirdDock::init()
 {
-	if (smart_lt::all().empty()) {
+	if (smart_lt::all().empty())
 		smart_lt::add_default_lower_third();
-	}
 
 	rebuildList();
 
-	updateServerUi();
-
-	if (server_is_running()) {
-		const int p = server_port();
-		QTimer::singleShot(200, this, [this, p]() {
-			if (!this->isVisible())
-				return;
-
-			const bool httpOk = slt_health_ok_http(p, 150);
-			const bool runningNow = server_is_running();
-
-			if (runningNow && httpOk) {
-				updateServerUi();
-			} else {
-				styleDot(serverStatusDot, runningNow && httpOk);
-			}
-		});
-	}
+	// Ensure baseline artifacts exist
+	if (smart_lt::has_output_dir())
+		smart_lt::ensure_output_artifacts_exist();
 
 	return true;
 }
@@ -241,7 +220,12 @@ bool LowerThirdDock::init()
 void LowerThirdDock::updateFromState()
 {
 	updateRowActiveStyles();
+	updateCarouselActiveStyles();
 }
+
+// ------------------------------------------------------------
+// event filter: click row toggles checkbox (except buttons)
+// ------------------------------------------------------------
 
 bool LowerThirdDock::eventFilter(QObject *watched, QEvent *event)
 {
@@ -252,9 +236,8 @@ bool LowerThirdDock::eventFilter(QObject *watched, QEvent *event)
 				if (watched == r.row) {
 					if (QWidget *rowWidget = r.row) {
 						QWidget *child = rowWidget->childAt(me->pos());
-						if (child && qobject_cast<QPushButton *>(child)) {
+						if (child && qobject_cast<QPushButton *>(child))
 							return QWidget::eventFilter(watched, event);
-						}
 					}
 				}
 
@@ -271,90 +254,9 @@ bool LowerThirdDock::eventFilter(QObject *watched, QEvent *event)
 	return QWidget::eventFilter(watched, event);
 }
 
-void LowerThirdDock::onBrowseOutputFolder()
-{
-	QString dir = QFileDialog::getExistingDirectory(this, tr("Select output folder"));
-	if (dir.isEmpty())
-		return;
-
-	outputPathEdit->setText(dir);
-	smart_lt::set_output_dir(dir.toUtf8().constData());
-
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
-
-	addBtn->setEnabled(true);
-	serverToggleBtn->setEnabled(true);
-
-	updateServerUi();
-}
-
-void LowerThirdDock::onToggleServer()
-{
-	if (!smart_lt::has_output_dir())
-		return;
-
-	if (server_is_running()) {
-		server_stop();
-		updateServerUi();
-		return;
-	}
-
-	int preferred = serverPortSpin->value();
-	smart_lt::set_preferred_port(preferred);
-
-	int actual = server_start(outputPathEdit->text(), preferred);
-	if (!actual) {
-		updateServerUi();
-		return;
-	}
-
-	serverPortSpin->setValue(actual);
-
-	updateServerUi();
-
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
-	smart_lt::ensure_browser_source();                     		
-	smart_lt::refresh_browser_source();    
-
-	QTimer::singleShot(200, this, [this, actual]() {
-		if (!this->isVisible())
-			return;
-
-		const bool httpOk = slt_health_ok_http(actual, 150);
-		const bool runningNow = server_is_running();
-
-		if (runningNow && httpOk) {
-			updateServerUi();
-		} else {
-			styleDot(serverStatusDot, runningNow && httpOk);
-		}
-	});
-}
-
-void LowerThirdDock::updateServerUi()
-{
-	const bool running = server_is_running();
-
-	styleDot(serverStatusDot, running);
-
-	if (serverToggleBtn) {
-		auto *st = style();
-		if (running) {
-			serverToggleBtn->setIcon(st->standardIcon(QStyle::SP_MediaStop));
-			serverToggleBtn->setToolTip(tr("Stop webserver"));
-		} else {
-			serverToggleBtn->setIcon(st->standardIcon(QStyle::SP_MediaPlay));
-			serverToggleBtn->setToolTip(tr("Start webserver"));
-		}
-		serverToggleBtn->setText(QString());
-	}
-
-	if (serverPortSpin) {
-		serverPortSpin->setEnabled(!running);
-	}
-}
+// ------------------------------------------------------------
+// shortcuts
+// ------------------------------------------------------------
 
 void LowerThirdDock::clearShortcuts()
 {
@@ -374,8 +276,8 @@ void LowerThirdDock::rebuildShortcuts()
 		if (cfg.hotkey.empty())
 			continue;
 
-		const QString seqStr = QString::fromStdString(cfg.hotkey);
-		if (seqStr.trimmed().isEmpty())
+		const QString seqStr = QString::fromStdString(cfg.hotkey).trimmed();
+		if (seqStr.isEmpty())
 			continue;
 
 		QKeySequence seq(seqStr);
@@ -389,22 +291,188 @@ void LowerThirdDock::rebuildShortcuts()
 		const QString id = QString::fromStdString(cfg.id);
 
 		connect(sc, &QShortcut::activated, this, [this, id]() {
-			LOGI("Hotkey triggered for lower third '%s'", id.toUtf8().constData());
-			handleToggleVisible(id);
+			// Hotkeys toggle the item (and hide others for a broadcast-safe behavior)
+			handleToggleVisible(id, /*hideOthers*/ true);
 		});
 	}
 }
 
-void LowerThirdDock::onAddLowerThird()
+// ------------------------------------------------------------
+// Carousel (optional; safe no-op if you keep it disabled)
+// ------------------------------------------------------------
+
+void LowerThirdDock::rebuildCarousel()
 {
-	QString newId = QString::fromStdString(smart_lt::add_default_lower_third());
-	LOGI("Added new lower third '%s'", newId.toUtf8().constData());
+	if (!carouselContainer || !carouselLayout)
+		return;
+
+	for (auto *b : carouselButtons) {
+		if (b)
+			b->deleteLater();
+	}
+	carouselButtons.clear();
+
+	auto &items = smart_lt::all();
+	const QString outDir = QString::fromStdString(smart_lt::output_dir());
+
+	for (const auto &cfg : items) {
+		const QString id = QString::fromStdString(cfg.id);
+
+		auto *btn = new QToolButton(carouselContainer);
+		btn->setProperty("sltCarousel", true);
+		btn->setProperty("sltActive", cfg.visible);
+		btn->setProperty("sltId", id);
+		btn->setCursor(Qt::PointingHandCursor);
+		btn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+		btn->setText(QString::fromStdString(cfg.title));
+		btn->setIconSize(QSize(28, 28));
+
+		QPixmap px;
+		if (!cfg.profile_picture.empty() && !outDir.isEmpty()) {
+			const QString imgPath = QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture));
+			px.load(imgPath);
+		}
+
+		if (!px.isNull())
+			btn->setIcon(QIcon(px));
+		else
+			btn->setIcon(style()->standardIcon(QStyle::SP_FileIcon));
+
+		connect(btn, &QToolButton::clicked, this, [this, id]() { handleToggleVisible(id, true); });
+
+		carouselLayout->addWidget(btn);
+		carouselButtons.push_back(btn);
+	}
+
+	carouselLayout->addStretch(1);
+	updateCarouselActiveStyles();
+}
+
+void LowerThirdDock::updateCarouselActiveStyles()
+{
+	if (carouselButtons.isEmpty())
+		return;
+
+	auto &items = smart_lt::all();
+
+	auto isVisibleById = [&](const QString &id) -> bool {
+		for (const auto &cfg : items) {
+			if (id == QString::fromStdString(cfg.id))
+				return cfg.visible;
+		}
+		return false;
+	};
+
+	for (auto *btn : carouselButtons) {
+		if (!btn)
+			continue;
+
+		const QString id = btn->property("sltId").toString();
+		const bool active = (!id.isEmpty()) ? isVisibleById(id) : false;
+
+		btn->setProperty("sltActive", active);
+		btn->style()->unpolish(btn);
+		btn->style()->polish(btn);
+		btn->update();
+	}
+}
+
+// ------------------------------------------------------------
+// handlers
+// ------------------------------------------------------------
+
+void LowerThirdDock::onBrowseOutputFolder()
+{
+	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Output Folder"));
+	if (dir.isEmpty())
+		return;
+
+	smart_lt::set_output_dir_and_load(dir.toStdString());
+
+	outputPathEdit->setText(dir);
+
+	const bool hasDir = smart_lt::has_output_dir();
+	addBtn->setEnabled(hasDir);
+	ensureSourceBtn->setEnabled(hasDir);
 
 	rebuildList();
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
 	emit requestSave();
 }
+
+void LowerThirdDock::onAddLowerThird()
+{
+	const QString newId = QString::fromStdString(smart_lt::add_default_lower_third());
+	LOGI("Added lower third '%s'", newId.toUtf8().constData());
+
+	rebuildList();
+	emit requestSave();
+}
+
+void LowerThirdDock::onEnsureBrowserSourceClicked()
+{
+	if (!smart_lt::has_output_dir()) {
+		LOGW("Cannot add browser source: output dir not set");
+		return;
+	}
+
+	// Ensure artifacts exist (HTML may be missing)
+	smart_lt::ensure_output_artifacts_exist();
+
+	const std::string &htmlPath = smart_lt::index_html_path();
+	if (htmlPath.empty()) {
+		LOGW("index_html_path empty");
+		return;
+	}
+
+	obs_source_t *curSceneSrc = obs_frontend_get_current_scene();
+	if (!curSceneSrc) {
+		LOGW("No current scene");
+		return;
+	}
+
+	obs_scene_t *scene = obs_scene_from_source(curSceneSrc);
+	if (!scene) {
+		LOGW("Current scene source is not a scene");
+		obs_source_release(curSceneSrc);
+		return;
+	}
+
+	obs_data_t *settings = obs_data_create();
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", htmlPath.c_str());
+	obs_data_set_bool(settings, "smart_lt_managed", true);
+
+	obs_video_info vi;
+	if (obs_get_video_info(&vi) == 0) {
+		obs_data_set_int(settings, "width", vi.base_width);
+		obs_data_set_int(settings, "height", vi.base_height);
+	} else {
+		obs_data_set_int(settings, "width", sltBrowserWidth);
+		obs_data_set_int(settings, "height", sltBrowserHeight);
+	}
+
+	obs_data_set_bool(settings, "shutdown", false);
+
+	obs_source_t *browser = obs_source_create(sltBrowserSourceId, sltBrowserSourceName, settings, nullptr);
+	obs_data_release(settings);
+
+	if (!browser) {
+		LOGW("Failed to create browser source");
+		obs_source_release(curSceneSrc);
+		return;
+	}
+
+	obs_scene_add(scene, browser);
+
+	LOGI("Added browser source '%s' with local_file '%s'", sltBrowserSourceName, htmlPath.c_str());
+
+	obs_source_release(browser);
+	obs_source_release(curSceneSrc);
+}
+
+// ------------------------------------------------------------
+// list rendering
+// ------------------------------------------------------------
 
 void LowerThirdDock::rebuildList()
 {
@@ -423,7 +491,7 @@ void LowerThirdDock::rebuildList()
 
 		auto *rowFrame = new QFrame(listContainer);
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
-		rowFrame->setProperty("sltActive", cfg.visible);
+		rowFrame->setProperty("sltActive", QVariant(cfg.visible));
 		rowFrame->setCursor(Qt::PointingHandCursor);
 
 		auto *h = new QHBoxLayout(rowFrame);
@@ -434,25 +502,22 @@ void LowerThirdDock::rebuildList()
 		visible->setChecked(cfg.visible);
 		visible->setFocusPolicy(Qt::NoFocus);
 		visible->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-		visible->setStyleSheet(
-		    "QCheckBox::indicator { width: 0px; height: 0px; margin: 0; padding: 0; }");
+		visible->setStyleSheet("QCheckBox::indicator { width: 0px; height: 0px; margin: 0; padding: 0; }");
 		h->addWidget(visible);
 		rowUi.visibleCheck = visible;
 
-		QLabel *thumb = new QLabel(rowFrame);
+		auto *thumb = new QLabel(rowFrame);
 		thumb->setObjectName(QStringLiteral("sltRowThumbnail"));
 		thumb->setFixedSize(32, 32);
 		thumb->setScaledContents(true);
 
 		bool hasThumb = false;
 		if (!cfg.profile_picture.empty() && !outDir.isEmpty()) {
-			QString imgPath = QDir(outDir).filePath(
-			    QString::fromStdString(cfg.profile_picture));
+			const QString imgPath = QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture));
 			QPixmap px(imgPath);
 			if (!px.isNull()) {
-				thumb->setPixmap(px.scaled(32, 32,
-				                           Qt::KeepAspectRatioByExpanding,
-				                           Qt::SmoothTransformation));
+				thumb->setPixmap(
+					px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
 				hasThumb = true;
 			}
 		}
@@ -473,38 +538,26 @@ void LowerThirdDock::rebuildList()
 
 		auto *st = rowFrame->style();
 
-		{
-			QIcon cloneIcon = QIcon::fromTheme(
-			    QStringLiteral("edit-copy"),
-			    st->standardIcon(QStyle::SP_DialogOpenButton));
-			cloneBtn->setIcon(cloneIcon);
-			cloneBtn->setToolTip(tr("Clone lower third"));
-			cloneBtn->setText(QString());
-		}
+		cloneBtn->setIcon(
+			QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
+		cloneBtn->setToolTip(tr("Clone lower third"));
+		cloneBtn->setText(QString());
+		cloneBtn->setFlat(true);
 
-		{
-			QIcon settingsIcon = QIcon::fromTheme(
-			    QStringLiteral("settings-configure"),
-			    QIcon::fromTheme(QStringLiteral("preferences-system"),
-			                     st->standardIcon(QStyle::SP_FileDialogInfoView)));
-			settingsBtn->setIcon(settingsIcon);
-			settingsBtn->setToolTip(tr("Open settings"));
-			settingsBtn->setText(QString());
-		}
+		settingsBtn->setIcon(QIcon::fromTheme(QStringLiteral("settings-configure"),
+						      st->standardIcon(QStyle::SP_FileDialogInfoView)));
+		settingsBtn->setToolTip(tr("Open settings"));
+		settingsBtn->setText(QString());
+		settingsBtn->setFlat(true);
 
-		{
-			removeBtn->setIcon(st->standardIcon(QStyle::SP_DialogCloseButton));
-			removeBtn->setToolTip(tr("Remove lower third"));
-			removeBtn->setText(QString());
-		}
+		removeBtn->setIcon(st->standardIcon(QStyle::SP_DialogCloseButton));
+		removeBtn->setToolTip(tr("Remove lower third"));
+		removeBtn->setText(QString());
+		removeBtn->setFlat(true);
 
 		cloneBtn->setIconSize(QSize(16, 16));
 		settingsBtn->setIconSize(QSize(16, 16));
 		removeBtn->setIconSize(QSize(16, 16));
-
-		cloneBtn->setFlat(true);
-		settingsBtn->setFlat(true);
-		removeBtn->setFlat(true);
 
 		h->addWidget(cloneBtn);
 		h->addWidget(settingsBtn);
@@ -534,6 +587,7 @@ void LowerThirdDock::rebuildList()
 
 	rebuildShortcuts();
 	updateRowActiveStyles();
+	rebuildCarousel();
 }
 
 void LowerThirdDock::updateRowActiveStyles()
@@ -551,7 +605,7 @@ void LowerThirdDock::updateRowActiveStyles()
 		}
 
 		if (row.row) {
-			row.row->setProperty("sltActive", isVisible);
+			row.row->setProperty("sltActive", QVariant(isVisible));
 			row.row->style()->unpolish(row.row);
 			row.row->style()->polish(row.row);
 			row.row->update();
@@ -565,25 +619,26 @@ void LowerThirdDock::updateRowActiveStyles()
 	}
 }
 
+// ------------------------------------------------------------
+// row actions
+// ------------------------------------------------------------
+
 void LowerThirdDock::handleToggleVisible(const QString &id, bool hideOthers)
 {
 	smart_lt::toggle_active(id.toStdString(), hideOthers);
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
-	emit requestSave();
 
+	emit requestSave();
 	updateRowActiveStyles();
+	updateCarouselActiveStyles();
 }
 
 void LowerThirdDock::handleClone(const QString &id)
 {
-	QString newId = QString::fromStdString(smart_lt::clone_lower_third(id.toStdString()));
+	const QString newId = QString::fromStdString(smart_lt::clone_lower_third(id.toStdString()));
 	if (newId.isEmpty())
 		return;
 
 	rebuildList();
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
 	emit requestSave();
 }
 
@@ -594,19 +649,20 @@ void LowerThirdDock::handleOpenSettings(const QString &id)
 	dlg.exec();
 
 	rebuildList();
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
 	emit requestSave();
 }
 
 void LowerThirdDock::handleRemove(const QString &id)
 {
 	smart_lt::remove_lower_third(id.toStdString());
+
 	rebuildList();
-	smart_lt::write_index_html();
-	smart_lt::save_state_json();
 	emit requestSave();
 }
+
+// ------------------------------------------------------------
+// Dock lifecycle wrappers
+// ------------------------------------------------------------
 
 void LowerThird_create_dock()
 {
@@ -623,7 +679,7 @@ void LowerThird_create_dock()
 #endif
 
 	g_dockWidget = panel;
-	LOGI("Smart Lower Thirds dock created");
+	LOGI("Dock created");
 }
 
 void LowerThird_destroy_dock()
@@ -634,12 +690,13 @@ void LowerThird_destroy_dock()
 #if defined(HAVE_OBS_DOCK_BY_ID)
 	obs_frontend_remove_dock(sltDockId);
 #else
+	// NOTE: obs_frontend_remove_dock(QWidget*) is deprecated in some OBS versions.
+	// Prefer _by_id when available.
 	obs_frontend_remove_dock(g_dockWidget);
 #endif
 
 	g_dockWidget = nullptr;
-
-	LOGI("Smart Lower Thirds dock destroyed");
+	LOGI("Dock destroyed");
 }
 
 LowerThirdDock *LowerThird_get_dock()
