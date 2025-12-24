@@ -663,7 +663,7 @@ bool load_state_json()
 	std::vector<lower_third_cfg> out;
 	out.reserve((size_t)items.size());
 
-	for (const auto &v : items) {
+	for (const QJsonValue v : items) {
 		if (!v.isObject())
 			continue;
 		const QJsonObject o = v.toObject();
@@ -801,7 +801,7 @@ bool load_visible_json()
 	std::vector<std::string> ids;
 	if (doc.isArray()) {
 		const QJsonArray a = doc.array();
-		for (const auto &v : a) {
+		for (const QJsonValue v : a) {
 			if (v.isString())
 				ids.push_back(sanitize_id(v.toString().toStdString()));
 		}
