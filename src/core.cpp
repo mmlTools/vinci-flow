@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 #include <random>
+#include <cctype>
 
 #include <QDir>
 #include <QFile>
@@ -28,79 +29,77 @@ static std::string g_last_html_path;
 // -------------------------
 static std::string join_path(const std::string &a, const std::string &b)
 {
-    QDir d(QString::fromStdString(a));
-    return d.filePath(QString::fromStdString(b)).toStdString();
+	QDir d(QString::fromStdString(a));
+	return d.filePath(QString::fromStdString(b)).toStdString();
 }
 
 static bool write_text_file(const std::string &path, const std::string &data)
 {
-    QFile f(QString::fromStdString(path));
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-    f.write(data.data(), (qint64)data.size());
-    f.close();
-    return true;
+	QFile f(QString::fromStdString(path));
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		return false;
+	f.write(data.data(), (qint64)data.size());
+	f.close();
+	return true;
 }
 
 static std::string read_text_file(const std::string &path)
 {
-    QFile f(QString::fromStdString(path));
-    if (!f.open(QIODevice::ReadOnly))
-        return {};
-    const QByteArray b = f.readAll();
-    f.close();
-    return std::string(b.constData(), (size_t)b.size());
+	QFile f(QString::fromStdString(path));
+	if (!f.open(QIODevice::ReadOnly))
+		return {};
+	const QByteArray b = f.readAll();
+	f.close();
+	return std::string(b.constData(), (size_t)b.size());
 }
 
 static void ensure_dir(const std::string &dir)
 {
-    QDir().mkpath(QString::fromStdString(dir));
+	QDir().mkpath(QString::fromStdString(dir));
 }
 
 static std::string sanitize_id(const std::string &s)
 {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        if ((c >= 'a' && c <= 'z') ||
-            (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') ||
-            c == '_' || c == '-') {
-            out.push_back(c);
-        }
-    }
-    if (out.empty())
-        out = "lt_" + now_timestamp_string();
-    return out;
+	std::string out;
+	out.reserve(s.size());
+	for (char c : s) {
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+		    c == '-') {
+			out.push_back(c);
+		}
+	}
+	if (out.empty())
+		out = "lt_" + now_timestamp_string();
+	return out;
 }
 
 static std::string replace_all(std::string s, const std::string &from, const std::string &to)
 {
-    if (from.empty())
-        return s;
-    size_t pos = 0;
-    while ((pos = s.find(from, pos)) != std::string::npos) {
-        s.replace(pos, from.size(), to);
-        pos += to.size();
-    }
-    return s;
+	if (from.empty())
+		return s;
+	size_t pos = 0;
+	while ((pos = s.find(from, pos)) != std::string::npos) {
+		s.replace(pos, from.size(), to);
+		pos += to.size();
+	}
+	return s;
 }
 
 static void delete_old_lt_html_keep(const std::string &keepAbsPath)
 {
-    if (!has_output_dir())
-        return;
+	if (!has_output_dir())
+		return;
 
-    QDir d(QString::fromStdString(output_dir()));
-    const QFileInfo keepFi(QString::fromStdString(keepAbsPath));
-    const QString keepName = keepFi.fileName();
+	QDir d(QString::fromStdString(output_dir()));
+	const QFileInfo keepFi(QString::fromStdString(keepAbsPath));
+	const QString keepName = keepFi.fileName();
 
-    const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-    for (const QString &fn : list) {
-        if (!keepName.isEmpty() && fn == keepName)
-            continue;
-        d.remove(fn);
-    }
+	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
+	for (const QString &fn : list) {
+		if (!keepName.isEmpty() && fn == keepName)
+			continue;
+		d.remove(fn);
+	}
 }
 
 // -------------------------
@@ -108,75 +107,75 @@ static void delete_old_lt_html_keep(const std::string &keepAbsPath)
 // -------------------------
 static std::string module_config_path_cached()
 {
-    static std::string cached;
-    static bool inited = false;
-    if (inited)
-        return cached;
+	static std::string cached;
+	static bool inited = false;
+	if (inited)
+		return cached;
 
-    inited = true;
+	inited = true;
 
-    char *p = obs_module_config_path("config.json"); // <- YOU REQUESTED THIS FORMAT
-    if (!p)
-        return cached;
+	char *p = obs_module_config_path("config.json");
+	if (!p)
+		return cached;
 
-    cached = p;
-    bfree(p);
-    return cached;
+	cached = p;
+	bfree(p);
+	return cached;
 }
 
 static void load_global_config()
 {
-    const std::string pathS = module_config_path_cached();
-    if (pathS.empty())
-        return;
+	const std::string pathS = module_config_path_cached();
+	if (pathS.empty())
+		return;
 
-    const QString path = QString::fromStdString(pathS);
-    QFile f(path);
+	const QString path = QString::fromStdString(pathS);
+	QFile f(path);
 
-    if (!f.exists() || !f.open(QIODevice::ReadOnly)) {
-        LOGD("No global config at '%s' (first run ok)", path.toUtf8().constData());
-        return;
-    }
+	if (!f.exists() || !f.open(QIODevice::ReadOnly)) {
+		LOGD("No global config at '%s' (first run ok)", path.toUtf8().constData());
+		return;
+	}
 
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    if (!doc.isObject())
-        return;
+	const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+	if (!doc.isObject())
+		return;
 
-    const QJsonObject root = doc.object();
-    const QString out = root.value("output_dir").toString().trimmed();
-    if (!out.isEmpty()) {
-        g_output_dir = out.toStdString();
-        LOGI("Loaded output_dir: '%s'", g_output_dir.c_str());
-    }
+	const QJsonObject root = doc.object();
+	const QString out = root.value("output_dir").toString().trimmed();
+	if (!out.isEmpty()) {
+		g_output_dir = out.toStdString();
+		LOGI("Loaded output_dir: '%s'", g_output_dir.c_str());
+	}
 }
 
 bool save_global_config()
 {
-    const std::string pathS = module_config_path_cached();
-    if (pathS.empty())
-        return false;
+	const std::string pathS = module_config_path_cached();
+	if (pathS.empty())
+		return false;
 
-    QFileInfo fi(QString::fromStdString(pathS));
-    QDir().mkpath(fi.absolutePath());
+	QFileInfo fi(QString::fromStdString(pathS));
+	QDir().mkpath(fi.absolutePath());
 
-    QJsonObject root;
-    root["output_dir"] = QString::fromStdString(g_output_dir);
+	QJsonObject root;
+	root["output_dir"] = QString::fromStdString(g_output_dir);
 
-    const QJsonDocument doc(root);
-    return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
+	const QJsonDocument doc(root);
+	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
 }
 
 // Find latest lt-*.html so we can repoint browser on startup without rebuilding.
 static std::string find_latest_lt_html()
 {
-    if (!has_output_dir())
-        return {};
+	if (!has_output_dir())
+		return {};
 
-    QDir d(QString::fromStdString(output_dir()));
-    const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-    if (list.isEmpty())
-        return {};
-    return d.filePath(list.first()).toStdString();
+	QDir d(QString::fromStdString(output_dir()));
+	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
+	if (list.isEmpty())
+		return {};
+	return d.filePath(list.first()).toStdString();
 }
 
 // -------------------------
@@ -184,25 +183,25 @@ static std::string find_latest_lt_html()
 // -------------------------
 static lower_third_cfg default_cfg()
 {
-    lower_third_cfg c;
-    c.id = new_id();
-    c.title = "New Lower Third";
-    c.subtitle = "Subtitle";
-    c.profile_picture.clear();
+	lower_third_cfg c;
+	c.id = new_id();
+	c.title = "New Lower Third";
+	c.subtitle = "Subtitle";
+	c.profile_picture.clear();
 
-    c.anim_in  = "animate__fadeInUp";
-    c.anim_out = "animate__fadeOutDown";
-    c.custom_anim_in.clear();
-    c.custom_anim_out.clear();
+	c.anim_in = "animate__fadeInUp";
+	c.anim_out = "animate__fadeOutDown";
+	c.custom_anim_in.clear();
+	c.custom_anim_out.clear();
 
-    c.font_family = "Inter";
-    c.lt_position = "lt-pos-bottom-left";
+	c.font_family = "Inter";
+	c.lt_position = "lt-pos-bottom-left";
 
-    c.bg_color = "#111827";
-    c.text_color = "#F9FAFB";
+	c.bg_color = "#111827";
+	c.text_color = "#F9FAFB";
 
-    c.html_template =
-        R"HTML(
+	c.html_template =
+		R"HTML(
 <div class="slt-card">
   <div class="slt-left">
     <img class="slt-avatar" src="{{PROFILE_PICTURE_URL}}" alt="" onerror="this.style.display='none'">
@@ -214,8 +213,8 @@ static lower_third_cfg default_cfg()
 </div>
 )HTML";
 
-    c.css_template =
-        R"CSS(
+	c.css_template =
+		R"CSS(
 .slt-card {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 18px;
@@ -233,8 +232,8 @@ static lower_third_cfg default_cfg()
 }
 
 /* Hide the image if the source is empty or the placeholder ./ */
-.slt-avatar:not([src]), 
-.slt-avatar[src=""], 
+.slt-avatar:not([src]),
+.slt-avatar[src=""],
 .slt-avatar[src="./"] {
   display: none !important;
 }
@@ -243,21 +242,25 @@ static lower_third_cfg default_cfg()
 .slt-subtitle { opacity: 0.9; font-size: 24px; margin-top: 2px; }
 )CSS";
 
-    c.js_template = "// Custom JS logic here";
-    c.hotkey.clear();
-    return c;
+	c.js_template = "// Custom JS logic here";
+	c.repeat_every_sec = 0;
+	c.repeat_visible_sec = 3;
+	c.hotkey.clear();
+	return c;
 }
 
 static std::string resolve_in_class(const lower_third_cfg &c)
 {
-    if (c.anim_in == "custom") return c.custom_anim_in;
-    return c.anim_in;
+	if (c.anim_in == "custom")
+		return c.custom_anim_in;
+	return c.anim_in;
 }
 
 static std::string resolve_out_class(const lower_third_cfg &c)
 {
-    if (c.anim_out == "custom") return c.custom_anim_out;
-    return c.anim_out;
+	if (c.anim_out == "custom")
+		return c.custom_anim_out;
+	return c.anim_out;
 }
 
 // -------------------------
@@ -265,7 +268,7 @@ static std::string resolve_out_class(const lower_third_cfg &c)
 // -------------------------
 static std::string build_shared_css()
 {
-    return R"CSS(
+	return R"CSS(
 /* Smart Lower Thirds - Base */
 :root{ --slt-safe-margin: 40px; --slt-z: 9999; }
 html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
@@ -277,7 +280,7 @@ html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 }
 #slt-root > li{
     position:absolute;
-    display: none; /* FIX: Start completely hidden from the layout engine */
+    display: none; /* Start completely hidden */
     pointer-events:none;
 }
 /* These ensure the display property is toggled correctly */
@@ -288,82 +291,81 @@ html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 
 static std::string scope_css_best_effort(const lower_third_cfg &c)
 {
-    std::string css = c.css_template;
+	std::string css = c.css_template;
 
-    css = replace_all(css, "{{ID}}", c.id);
-    css = replace_all(css, "{{BG_COLOR}}", c.bg_color);
-    css = replace_all(css, "{{TEXT_COLOR}}", c.text_color);
-    css = replace_all(css, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
+	css = replace_all(css, "{{ID}}", c.id);
+	css = replace_all(css, "{{BG_COLOR}}", c.bg_color);
+	css = replace_all(css, "{{TEXT_COLOR}}", c.text_color);
+	css = replace_all(css, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
 
-    if (css.find("#" + c.id) != std::string::npos) {
-        return "/* ---- " + c.id + " ---- */\n" + css + "\n";
-    }
+	if (css.find("#" + c.id) != std::string::npos) {
+		return "/* ---- " + c.id + " ---- */\n" + css + "\n";
+	}
 
-    std::stringstream in(css);
-    std::string line;
-    std::string out;
-    out += "/* ---- " + c.id + " ---- */\n";
+	std::stringstream in(css);
+	std::string line;
+	std::string out;
+	out += "/* ---- " + c.id + " ---- */\n";
 
-    while (std::getline(in, line)) {
-        std::string trimmed = line;
-        trimmed.erase(trimmed.begin(), std::find_if(trimmed.begin(), trimmed.end(),
-            [](unsigned char ch){ return !std::isspace(ch); }));
+	while (std::getline(in, line)) {
+		std::string trimmed = line;
+		trimmed.erase(trimmed.begin(), std::find_if(trimmed.begin(), trimmed.end(),
+							    [](unsigned char ch) { return !std::isspace(ch); }));
 
-        const bool isAt = (!trimmed.empty() && trimmed[0] == '@');
-        if (!isAt && line.find('{') != std::string::npos) {
-            const auto pos = line.find('{');
-            std::string sel = line.substr(0, pos);
-            std::string rest = line.substr(pos);
+		const bool isAt = (!trimmed.empty() && trimmed[0] == '@');
+		if (!isAt && line.find('{') != std::string::npos) {
+			const auto pos = line.find('{');
+			std::string sel = line.substr(0, pos);
+			std::string rest = line.substr(pos);
 
-            std::stringstream ss(sel);
-            std::string part;
-            std::string newSel;
-            bool first = true;
-            while (std::getline(ss, part, ',')) {
-                if (part.find("#" + c.id) == std::string::npos)
-                    part = " #" + c.id + " " + part;
-                if (!first) newSel += ",";
-                newSel += part;
-                first = false;
-            }
-            out += newSel + rest + "\n";
-        } else {
-            out += line + "\n";
-        }
-    }
+			std::stringstream ss(sel);
+			std::string part;
+			std::string newSel;
+			bool first = true;
+			while (std::getline(ss, part, ',')) {
+				if (part.find("#" + c.id) == std::string::npos)
+					part = " #" + c.id + " " + part;
+				if (!first)
+					newSel += ",";
+				newSel += part;
+				first = false;
+			}
+			out += newSel + rest + "\n";
+		} else {
+			out += line + "\n";
+		}
+	}
 
-    return out;
+	return out;
 }
 
 static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 {
-    // Build animation map with staggering support
-    std::string map = "{\n";
-    for (const auto &c : items) {
-        const std::string inC  = resolve_in_class(c);
-        const std::string outC = resolve_out_class(c);
-        
-        // Assuming your lower_third_cfg has a 'delay_ms' field (e.g., 0, 200, 500)
-        // If not, you can hardcode 0 here for now.
-        int delay = 0; 
+	std::string map = "{\n";
+	for (const auto &c : items) {
+		const std::string inC = resolve_in_class(c);
+		const std::string outC = resolve_out_class(c);
+		int delay = 0;
 
-        map += "    \"" + c.id + "\": { "
-               "inCls: " + (inC.empty() ? "null" : ("\"" + inC + "\"")) + ", "
-               "outCls: " + (outC.empty() ? "null" : ("\"" + outC + "\"")) + ", "
-               "delay: " + std::to_string(delay) +
-               " },\n";
-    }
-    map += "  };\n";
+		map += "    \"" + c.id +
+		       "\": { "
+		       "inCls: " +
+		       (inC.empty() ? "null" : ("\"" + inC + "\"")) +
+		       ", outCls: " + (outC.empty() ? "null" : ("\"" + outC + "\"")) +
+		       ", delay: " + std::to_string(delay) + " },\n";
+	}
+	map += "  };\n";
 
-    return std::string(R"JS(
-/* Smart Lower Thirds – Staggered Animation Script */
+	return std::string(R"JS(
+/* Smart Lower Thirds – Animation Script */
 (() => {
   const VISIBLE_URL = "./lt-visible.json";
-  const animMap = )JS") + map + R"JS(
+  const animMap = )JS") +
+	       map + R"JS(
 
   function stripAnimate(el) {
     el.classList.remove("animate__animated");
-    el.style.animationDelay = ""; // Reset delay
+    el.style.animationDelay = "";
     [...el.classList].forEach(c => {
       if (c.startsWith("animate__")) el.classList.remove(c);
     });
@@ -375,20 +377,19 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
   function applyIn(el, cfg) {
     if (el.dataset.state === "showing" || el.dataset.state === "visible") return;
-    
+
     el.dataset.state = "showing";
     stripAnimate(el);
 
-    // FIX: Make the element displayable BEFORE the animation starts
     el.classList.remove("slt-hidden");
-    el.classList.add("slt-visible"); 
+    el.classList.add("slt-visible");
 
     if (hasAnim(cfg.inCls)) {
       if (cfg.delay > 0) el.style.animationDelay = cfg.delay + "ms";
 
       el.classList.add("animate__animated");
       cfg.inCls.split(/\s+/).forEach(c => el.classList.add(c));
-      
+
       el.onanimationend = () => {
         el.dataset.state = "visible";
         el.style.animationDelay = "";
@@ -411,7 +412,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
       el.onanimationend = () => {
         stripAnimate(el);
-        // FIX: Re-apply hidden class to remove from display logic
         el.classList.remove("slt-visible");
         el.classList.add("slt-hidden");
         el.dataset.state = "hidden";
@@ -429,7 +429,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       const r = await fetch(VISIBLE_URL + "?t=" + Date.now(), { cache: "no-store" });
       const visibleIds = await r.json();
       if (!Array.isArray(visibleIds)) return;
-      
+
       const visibleSet = new Set(visibleIds.map(String));
 
       document.querySelectorAll("#slt-root > li[id]").forEach(el => {
@@ -461,342 +461,389 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
 static std::string build_item_script(const lower_third_cfg &c)
 {
-    std::string js = c.js_template;
-    js = replace_all(js, "{{ID}}", c.id);
+	std::string js = c.js_template;
+	js = replace_all(js, "{{ID}}", c.id);
 
-    std::string out;
-    out += "\n/* ---- " + c.id + " ---- */\n";
-    out += "(() => {\n";
-    out += "  const root = document.getElementById(\"" + c.id + "\");\n";
-    out += "  if (!root) return;\n";
-    out += "  try {\n";
-    out += js;
-    out += "\n  } catch(e) { console.error(\"SLT script error for " + c.id + "\", e); }\n";
-    out += "})();\n";
-    return out;
+	std::string out;
+	out += "\n/* ---- " + c.id + " ---- */\n";
+	out += "(() => {\n";
+	out += "  const root = document.getElementById(\"" + c.id + "\");\n";
+	out += "  if (!root) return;\n";
+	out += "  try {\n";
+	out += js;
+	out += "\n  } catch(e) { console.error(\"SLT script error for " + c.id + "\", e); }\n";
+	out += "})();\n";
+	return out;
 }
 
 static std::string build_full_html()
 {
-    std::string html;
-    html += "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\"/>\n";
-    html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n";
-    html += "<link rel=\"stylesheet\" href=\"./lt-styles.css\"/>\n";
-    html += "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css\">\n";
-    html += "</head>\n<body>\n<ul id=\"slt-root\">\n";
+	std::string html;
+	html += "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\"/>\n";
+	html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n";
+	html += "<link rel=\"stylesheet\" href=\"./lt-styles.css\"/>\n";
+	html += "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css\">\n";
+	html += "</head>\n<body>\n<ul id=\"slt-root\">\n";
 
-    for (const auto &c : g_items) {
-        std::string inner = c.html_template;
-        inner = replace_all(inner, "{{ID}}", c.id);
-        inner = replace_all(inner, "{{TITLE}}", c.title);
-        inner = replace_all(inner, "{{SUBTITLE}}", c.subtitle);
-        inner = replace_all(inner, "{{BG_COLOR}}", c.bg_color);
-        inner = replace_all(inner, "{{TEXT_COLOR}}", c.text_color);
-        inner = replace_all(inner, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
+	for (const auto &c : g_items) {
+		std::string inner = c.html_template;
+		inner = replace_all(inner, "{{ID}}", c.id);
+		inner = replace_all(inner, "{{TITLE}}", c.title);
+		inner = replace_all(inner, "{{SUBTITLE}}", c.subtitle);
+		inner = replace_all(inner, "{{BG_COLOR}}", c.bg_color);
+		inner = replace_all(inner, "{{TEXT_COLOR}}", c.text_color);
+		inner = replace_all(inner, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
 
-        // Logic: If empty, we send a string that matches the CSS [src="./"] selector
-        const std::string pic = c.profile_picture.empty() ? "./" : ("./" + c.profile_picture);
-        inner = replace_all(inner, "{{PROFILE_PICTURE_URL}}", pic);
+		const std::string pic = c.profile_picture.empty() ? "./" : ("./" + c.profile_picture);
+		inner = replace_all(inner, "{{PROFILE_PICTURE_URL}}", pic);
 
-        // Safety Inject: Add onerror to any img tags in the user's template 
-        // if they haven't already added it.
-        if (inner.find("onerror") == std::string::npos) {
-            inner = replace_all(inner, "<img ", "<img onerror=\"this.style.display='none'\" ");
-        }
+		if (inner.find("onerror") == std::string::npos) {
+			inner = replace_all(inner, "<img ", "<img onerror=\"this.style.display='none'\" ");
+		}
 
-        html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\">";
-        html += inner;
-        html += "</li>\n";
-    }
+		html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\">";
+		html += inner;
+		html += "</li>\n";
+	}
 
-    html += "</ul>\n<script src=\"./lt-scripts.js\"></script>\n</body>\n</html>\n";
-    return html;
+	html += "</ul>\n<script src=\"./lt-scripts.js\"></script>\n</body>\n</html>\n";
+	return html;
 }
 
 // -------------------------
 // Public
 // -------------------------
-bool has_output_dir() { return !g_output_dir.empty(); }
-std::string output_dir() { return g_output_dir; }
+bool has_output_dir()
+{
+	return !g_output_dir.empty();
+}
 
-std::string path_state_json()   { return has_output_dir() ? join_path(g_output_dir, "lt-state.json") : ""; }
-std::string path_visible_json() { return has_output_dir() ? join_path(g_output_dir, "lt-visible.json") : ""; }
-std::string path_styles_css()   { return has_output_dir() ? join_path(g_output_dir, "lt-styles.css") : ""; }
-std::string path_scripts_js()   { return has_output_dir() ? join_path(g_output_dir, "lt-scripts.js") : ""; }
+std::string output_dir()
+{
+	return g_output_dir;
+}
+
+std::string path_state_json()
+{
+	return has_output_dir() ? join_path(g_output_dir, "lt-state.json") : "";
+}
+
+std::string path_visible_json()
+{
+	return has_output_dir() ? join_path(g_output_dir, "lt-visible.json") : "";
+}
+
+std::string path_styles_css()
+{
+	return has_output_dir() ? join_path(g_output_dir, "lt-styles.css") : "";
+}
+
+std::string path_scripts_js()
+{
+	return has_output_dir() ? join_path(g_output_dir, "lt-scripts.js") : "";
+}
 
 std::string now_timestamp_string()
 {
-    const qint64 ts = QDateTime::currentMSecsSinceEpoch();
-    return std::to_string((long long)ts);
+	const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+	return std::to_string((long long)ts);
 }
 
 std::string new_id()
 {
-    static std::mt19937_64 rng{ std::random_device{}() };
-    static std::uniform_int_distribution<uint64_t> dist;
-    uint64_t a = dist(rng);
-    uint64_t b = dist(rng);
+	static std::mt19937_64 rng{std::random_device{}()};
+	static std::uniform_int_distribution<uint64_t> dist;
+	uint64_t a = dist(rng);
+	uint64_t b = dist(rng);
 
-    std::ostringstream ss;
-    ss << "lt_" << std::hex << a << b;
-    return sanitize_id(ss.str());
+	std::ostringstream ss;
+	ss << "lt_" << std::hex << a << b;
+	return sanitize_id(ss.str());
 }
 
-std::vector<lower_third_cfg> &all() { return g_items; }
-const std::vector<lower_third_cfg> &all_const() { return g_items; }
+std::vector<lower_third_cfg> &all()
+{
+	return g_items;
+}
+
+const std::vector<lower_third_cfg> &all_const()
+{
+	return g_items;
+}
 
 lower_third_cfg *get_by_id(const std::string &id)
 {
-    for (auto &c : g_items)
-        if (c.id == id)
-            return &c;
-    return nullptr;
+	for (auto &c : g_items)
+		if (c.id == id)
+			return &c;
+	return nullptr;
 }
 
-std::vector<std::string> visible_ids() { return g_visible; }
+std::vector<std::string> visible_ids()
+{
+	return g_visible;
+}
 
 bool is_visible(const std::string &id)
 {
-    return std::find(g_visible.begin(), g_visible.end(), id) != g_visible.end();
+	return std::find(g_visible.begin(), g_visible.end(), id) != g_visible.end();
 }
 
 void set_visible(const std::string &id, bool visible)
 {
-    if (id.empty())
-        return;
+	if (id.empty())
+		return;
 
-    if (visible) {
-        if (!is_visible(id))
-            g_visible.push_back(id);
-    } else {
-        g_visible.erase(std::remove(g_visible.begin(), g_visible.end(), id), g_visible.end());
-    }
+	if (visible) {
+		if (!is_visible(id))
+			g_visible.push_back(id);
+	} else {
+		g_visible.erase(std::remove(g_visible.begin(), g_visible.end(), id), g_visible.end());
+	}
 }
 
 void toggle_visible(const std::string &id)
 {
-    set_visible(id, !is_visible(id));
+	set_visible(id, !is_visible(id));
 }
 
 bool ensure_output_artifacts_exist()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    ensure_dir(output_dir());
+	ensure_dir(output_dir());
 
-    if (!QFile::exists(QString::fromStdString(path_state_json()))) {
-        g_items.clear();
-        save_state_json();
-    }
-    if (!QFile::exists(QString::fromStdString(path_visible_json()))) {
-        g_visible.clear();
-        save_visible_json();
-    }
-    if (!QFile::exists(QString::fromStdString(path_styles_css()))) {
-        write_text_file(path_styles_css(), "/* generated */\n");
-    }
-    if (!QFile::exists(QString::fromStdString(path_scripts_js()))) {
-        write_text_file(path_scripts_js(), "/* generated */\n");
-    }
+	if (!QFile::exists(QString::fromStdString(path_state_json()))) {
+		g_items.clear();
+		save_state_json();
+	}
+	if (!QFile::exists(QString::fromStdString(path_visible_json()))) {
+		g_visible.clear();
+		save_visible_json();
+	}
+	if (!QFile::exists(QString::fromStdString(path_styles_css()))) {
+		write_text_file(path_styles_css(), "/* generated */\n");
+	}
+	if (!QFile::exists(QString::fromStdString(path_scripts_js()))) {
+		write_text_file(path_scripts_js(), "/* generated */\n");
+	}
 
-    return true;
+	return true;
 }
 
 bool load_state_json()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    const std::string p = path_state_json();
-    if (!QFile::exists(QString::fromStdString(p))) {
-        g_items.clear();
-        return true;
-    }
+	const std::string p = path_state_json();
+	if (!QFile::exists(QString::fromStdString(p))) {
+		g_items.clear();
+		return true;
+	}
 
-    const std::string txt = read_text_file(p);
-    if (txt.empty()) {
-        g_items.clear();
-        return true;
-    }
+	const std::string txt = read_text_file(p);
+	if (txt.empty()) {
+		g_items.clear();
+		return true;
+	}
 
-    QJsonParseError err{};
-    const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        LOGW("Invalid lt-state.json; reset");
-        g_items.clear();
-        return false;
-    }
+	QJsonParseError err{};
+	const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
+	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+		LOGW("Invalid lt-state.json; reset");
+		g_items.clear();
+		return false;
+	}
 
-    const QJsonObject root = doc.object();
-    const QJsonArray items = root.value("items").toArray();
+	const QJsonObject root = doc.object();
+	const QJsonArray items = root.value("items").toArray();
 
-    std::vector<lower_third_cfg> out;
-    out.reserve((size_t)items.size());
+	std::vector<lower_third_cfg> out;
+	out.reserve((size_t)items.size());
 
-    for (const auto &v : items) {
-        if (!v.isObject()) continue;
-        const QJsonObject o = v.toObject();
+	for (const auto &v : items) {
+		if (!v.isObject())
+			continue;
+		const QJsonObject o = v.toObject();
 
-        lower_third_cfg c;
-        c.id = sanitize_id(o.value("id").toString().toStdString());
-        if (c.id.empty()) c.id = new_id();
+		lower_third_cfg c;
+		c.id = sanitize_id(o.value("id").toString().toStdString());
+		if (c.id.empty())
+			c.id = new_id();
 
-        c.title = o.value("title").toString().toStdString();
-        c.subtitle = o.value("subtitle").toString().toStdString();
-        c.profile_picture = o.value("profile_picture").toString().toStdString();
+		c.title = o.value("title").toString().toStdString();
+		c.subtitle = o.value("subtitle").toString().toStdString();
+		c.profile_picture = o.value("profile_picture").toString().toStdString();
 
-        c.anim_in = o.value("anim_in").toString().toStdString();
-        c.anim_out = o.value("anim_out").toString().toStdString();
-        c.custom_anim_in = o.value("custom_anim_in").toString().toStdString();
-        c.custom_anim_out = o.value("custom_anim_out").toString().toStdString();
+		c.anim_in = o.value("anim_in").toString().toStdString();
+		c.anim_out = o.value("anim_out").toString().toStdString();
+		c.custom_anim_in = o.value("custom_anim_in").toString().toStdString();
+		c.custom_anim_out = o.value("custom_anim_out").toString().toStdString();
 
-        c.font_family = o.value("font_family").toString().toStdString();
-        c.lt_position = o.value("lt_position").toString().toStdString();
+		c.font_family = o.value("font_family").toString().toStdString();
+		c.lt_position = o.value("lt_position").toString().toStdString();
 
-        c.bg_color = o.value("bg_color").toString().toStdString();
-        c.text_color = o.value("text_color").toString().toStdString();
+		c.bg_color = o.value("bg_color").toString().toStdString();
+		c.text_color = o.value("text_color").toString().toStdString();
 
-        c.html_template = o.value("html_template").toString().toStdString();
-        c.css_template  = o.value("css_template").toString().toStdString();
-        c.js_template   = o.value("js_template").toString().toStdString();
+		c.html_template = o.value("html_template").toString().toStdString();
+		c.css_template = o.value("css_template").toString().toStdString();
+		c.js_template = o.value("js_template").toString().toStdString();
 
-        c.hotkey = o.value("hotkey").toString().toStdString();
+		c.hotkey = o.value("hotkey").toString().toStdString();
+		c.repeat_every_sec = o.value("repeat_every_sec").toInt(0);
+		c.repeat_visible_sec = o.value("repeat_visible_sec").toInt(0);
 
-        if (c.html_template.empty() || c.css_template.empty()) {
-            auto d = default_cfg();
-            if (c.html_template.empty()) c.html_template = d.html_template;
-            if (c.css_template.empty())  c.css_template  = d.css_template;
-            if (c.js_template.empty())   c.js_template   = d.js_template;
-        }
+		if (c.repeat_every_sec < 0)
+			c.repeat_every_sec = 0;
+		if (c.repeat_visible_sec < 0)
+			c.repeat_visible_sec = 0;
 
-        if (c.lt_position.empty()) c.lt_position = "lt-pos-bottom-left";
-        if (c.anim_in.empty()) c.anim_in = "animate__fadeInUp";
-        if (c.anim_out.empty()) c.anim_out = "animate__fadeOutDown";
-        if (c.bg_color.empty()) c.bg_color = "#111827";
-        if (c.text_color.empty()) c.text_color = "#F9FAFB";
+		if (c.html_template.empty() || c.css_template.empty()) {
+			auto d = default_cfg();
+			if (c.html_template.empty())
+				c.html_template = d.html_template;
+			if (c.css_template.empty())
+				c.css_template = d.css_template;
+			if (c.js_template.empty())
+				c.js_template = d.js_template;
+		}
 
-        out.push_back(std::move(c));
-    }
+		if (c.lt_position.empty())
+			c.lt_position = "lt-pos-bottom-left";
+		if (c.anim_in.empty())
+			c.anim_in = "animate__fadeInUp";
+		if (c.anim_out.empty())
+			c.anim_out = "animate__fadeOutDown";
+		if (c.bg_color.empty())
+			c.bg_color = "#111827";
+		if (c.text_color.empty())
+			c.text_color = "#F9FAFB";
 
-    g_items = std::move(out);
-    return true;
+		out.push_back(std::move(c));
+	}
+
+	g_items = std::move(out);
+	return true;
 }
 
 bool save_state_json()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    QJsonObject root;
-    root["version"] = 1;
+	QJsonObject root;
+	root["version"] = 1;
 
-    QJsonArray items;
-    for (const auto &c : g_items) {
-        QJsonObject o;
-        o["id"] = QString::fromStdString(c.id);
-        o["title"] = QString::fromStdString(c.title);
-        o["subtitle"] = QString::fromStdString(c.subtitle);
-        o["profile_picture"] = QString::fromStdString(c.profile_picture);
+	QJsonArray items;
+	for (const auto &c : g_items) {
+		QJsonObject o;
+		o["id"] = QString::fromStdString(c.id);
+		o["title"] = QString::fromStdString(c.title);
+		o["subtitle"] = QString::fromStdString(c.subtitle);
+		o["profile_picture"] = QString::fromStdString(c.profile_picture);
 
-        o["anim_in"] = QString::fromStdString(c.anim_in);
-        o["anim_out"] = QString::fromStdString(c.anim_out);
-        o["custom_anim_in"] = QString::fromStdString(c.custom_anim_in);
-        o["custom_anim_out"] = QString::fromStdString(c.custom_anim_out);
+		o["anim_in"] = QString::fromStdString(c.anim_in);
+		o["anim_out"] = QString::fromStdString(c.anim_out);
+		o["custom_anim_in"] = QString::fromStdString(c.custom_anim_in);
+		o["custom_anim_out"] = QString::fromStdString(c.custom_anim_out);
 
-        o["font_family"] = QString::fromStdString(c.font_family);
-        o["lt_position"] = QString::fromStdString(c.lt_position);
+		o["font_family"] = QString::fromStdString(c.font_family);
+		o["lt_position"] = QString::fromStdString(c.lt_position);
 
-        o["bg_color"] = QString::fromStdString(c.bg_color);
-        o["text_color"] = QString::fromStdString(c.text_color);
+		o["bg_color"] = QString::fromStdString(c.bg_color);
+		o["text_color"] = QString::fromStdString(c.text_color);
 
-        o["html_template"] = QString::fromStdString(c.html_template);
-        o["css_template"]  = QString::fromStdString(c.css_template);
-        o["js_template"]   = QString::fromStdString(c.js_template);
+		o["html_template"] = QString::fromStdString(c.html_template);
+		o["css_template"] = QString::fromStdString(c.css_template);
+		o["js_template"] = QString::fromStdString(c.js_template);
 
-        o["hotkey"] = QString::fromStdString(c.hotkey);
+		o["hotkey"] = QString::fromStdString(c.hotkey);
+		o["repeat_every_sec"] = c.repeat_every_sec;
+		o["repeat_visible_sec"] = c.repeat_visible_sec;
 
-        items.append(o);
-    }
+		items.append(o);
+	}
 
-    root["items"] = items;
+	root["items"] = items;
 
-    const QJsonDocument doc(root);
-    return write_text_file(path_state_json(), doc.toJson(QJsonDocument::Indented).toStdString());
+	const QJsonDocument doc(root);
+	return write_text_file(path_state_json(), doc.toJson(QJsonDocument::Indented).toStdString());
 }
 
 bool load_visible_json()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    const std::string p = path_visible_json();
-    if (!QFile::exists(QString::fromStdString(p))) {
-        g_visible.clear();
-        return true;
-    }
+	const std::string p = path_visible_json();
+	if (!QFile::exists(QString::fromStdString(p))) {
+		g_visible.clear();
+		return true;
+	}
 
-    const std::string txt = read_text_file(p);
-    if (txt.empty()) {
-        g_visible.clear();
-        return true;
-    }
+	const std::string txt = read_text_file(p);
+	if (txt.empty()) {
+		g_visible.clear();
+		return true;
+	}
 
-    QJsonParseError err{};
-    const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
-    if (err.error != QJsonParseError::NoError) {
-        LOGW("Invalid lt-visible.json; reset");
-        g_visible.clear();
-        return false;
-    }
+	QJsonParseError err{};
+	const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
+	if (err.error != QJsonParseError::NoError) {
+		LOGW("Invalid lt-visible.json; reset");
+		g_visible.clear();
+		return false;
+	}
 
-    std::vector<std::string> ids;
-    if (doc.isArray()) {
-        const QJsonArray a = doc.array();
-        for (const auto &v : a) {
-            if (v.isString())
-                ids.push_back(sanitize_id(v.toString().toStdString()));
-        }
-    }
+	std::vector<std::string> ids;
+	if (doc.isArray()) {
+		const QJsonArray a = doc.array();
+		for (const auto &v : a) {
+			if (v.isString())
+				ids.push_back(sanitize_id(v.toString().toStdString()));
+		}
+	}
 
-    // keep only existing IDs
-    std::vector<std::string> keep;
-    keep.reserve(ids.size());
-    for (const auto &id : ids)
-        if (get_by_id(id))
-            keep.push_back(id);
+	std::vector<std::string> keep;
+	keep.reserve(ids.size());
+	for (const auto &id : ids)
+		if (get_by_id(id))
+			keep.push_back(id);
 
-    g_visible = std::move(keep);
-    return true;
+	g_visible = std::move(keep);
+	return true;
 }
 
 bool save_visible_json()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    std::vector<std::string> ids = g_visible;
-    ids.erase(std::remove_if(ids.begin(), ids.end(), [](const std::string &s){ return s.empty(); }), ids.end());
-    std::sort(ids.begin(), ids.end());
-    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+	std::vector<std::string> ids = g_visible;
+	ids.erase(std::remove_if(ids.begin(), ids.end(), [](const std::string &s) { return s.empty(); }), ids.end());
+	std::sort(ids.begin(), ids.end());
+	ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
 
-    QJsonArray a;
-    for (const auto &id : ids)
-        a.append(QString::fromStdString(id));
+	QJsonArray a;
+	for (const auto &id : ids)
+		a.append(QString::fromStdString(id));
 
-    const QJsonDocument doc(a);
-    return write_text_file(path_visible_json(), doc.toJson(QJsonDocument::Indented).toStdString());
+	const QJsonDocument doc(a);
+	return write_text_file(path_visible_json(), doc.toJson(QJsonDocument::Indented).toStdString());
 }
 
 bool regenerate_merged_css_js()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    std::string css;
-    css += build_shared_css();
+	std::string css;
+	css += build_shared_css();
 
-    css += R"CSS(
+	css += R"CSS(
 
 /* Position classes */
 .lt-pos-bottom-left  { left: var(--slt-safe-margin); bottom: var(--slt-safe-margin); }
@@ -806,39 +853,39 @@ bool regenerate_merged_css_js()
 .lt-pos-center       { left: 50%; top: 50%; transform: translate(-50%, -50%); }
 )CSS";
 
-    css += "\n/* Per-LT scoped styles */\n";
-    for (const auto &c : g_items)
-        css += "\n" + scope_css_best_effort(c);
+	css += "\n/* Per-LT scoped styles */\n";
+	for (const auto &c : g_items)
+		css += "\n" + scope_css_best_effort(c);
 
-    if (!write_text_file(path_styles_css(), css)) {
-        LOGW("Failed writing lt-styles.css");
-        return false;
-    }
+	if (!write_text_file(path_styles_css(), css)) {
+		LOGW("Failed writing lt-styles.css");
+		return false;
+	}
 
-    std::string js;
-    js += build_base_script(g_items);
-    js += "\n\n/* Per-LT scripts */\n";
-    for (const auto &c : g_items)
-        js += build_item_script(c);
+	std::string js;
+	js += build_base_script(g_items);
+	js += "\n\n/* Per-LT scripts */\n";
+	for (const auto &c : g_items)
+		js += build_item_script(c);
 
-    if (!write_text_file(path_scripts_js(), js)) {
-        LOGW("Failed writing lt-scripts.js");
-        return false;
-    }
+	if (!write_text_file(path_scripts_js(), js)) {
+		LOGW("Failed writing lt-scripts.js");
+		return false;
+	}
 
-    return true;
+	return true;
 }
 
 std::string generate_timestamp_html()
 {
-    if (!has_output_dir())
-        return {};
+	if (!has_output_dir())
+		return {};
 
-    const std::string fn = "lt-" + now_timestamp_string() + ".html";
-    const std::string abs = join_path(output_dir(), fn);
-    if (!write_text_file(abs, build_full_html()))
-        return {};
-    return abs;
+	const std::string fn = "lt-" + now_timestamp_string() + ".html";
+	const std::string abs = join_path(output_dir(), fn);
+	if (!write_text_file(abs, build_full_html()))
+		return {};
+	return abs;
 }
 
 // -------------------------
@@ -846,89 +893,89 @@ std::string generate_timestamp_html()
 // -------------------------
 static obs_source_t *get_browser_by_name()
 {
-    return obs_get_source_by_name(sltBrowserSourceName); // refcounted
+	return obs_get_source_by_name(sltBrowserSourceName);
 }
 
 bool swap_browser_source_to_file(const std::string &absoluteHtmlPath)
 {
-    if (absoluteHtmlPath.empty())
-        return false;
+	if (absoluteHtmlPath.empty())
+		return false;
 
-    obs_source_t *src = get_browser_by_name();
-    if (!src)
-        return false;
+	obs_source_t *src = get_browser_by_name();
+	if (!src)
+		return false;
 
-    obs_data_t *s = obs_source_get_settings(src);
-    obs_data_set_bool(s, "is_local_file", true);
-    obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
-    obs_data_set_bool(s, "smart_lt_managed", true);
-    obs_source_update(src, s);
+	obs_data_t *s = obs_source_get_settings(src);
+	obs_data_set_bool(s, "is_local_file", true);
+	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
+	obs_data_set_bool(s, "smart_lt_managed", true);
+	obs_source_update(src, s);
 
-    obs_data_release(s);
-    obs_source_release(src);
-    return true;
+	obs_data_release(s);
+	obs_source_release(src);
+	return true;
 }
 
 bool ensure_browser_source_in_current_scene()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    if (obs_source_t *existing = get_browser_by_name()) {
-        obs_source_release(existing);
-        return true;
-    }
+	if (obs_source_t *existing = get_browser_by_name()) {
+		obs_source_release(existing);
+		return true;
+	}
 
-    obs_source_t *curSceneSrc = obs_frontend_get_current_scene();
-    if (!curSceneSrc) {
-        LOGW("No current scene");
-        return false;
-    }
+	obs_source_t *curSceneSrc = obs_frontend_get_current_scene();
+	if (!curSceneSrc) {
+		LOGW("No current scene");
+		return false;
+	}
 
-    obs_scene_t *scene = obs_scene_from_source(curSceneSrc);
-    if (!scene) {
-        obs_source_release(curSceneSrc);
-        return false;
-    }
+	obs_scene_t *scene = obs_scene_from_source(curSceneSrc);
+	if (!scene) {
+		obs_source_release(curSceneSrc);
+		return false;
+	}
 
-    if (g_last_html_path.empty()) {
-        regenerate_merged_css_js();
-        g_last_html_path = generate_timestamp_html();
-    }
-    if (g_last_html_path.empty()) {
-        obs_source_release(curSceneSrc);
-        return false;
-    }
+	if (g_last_html_path.empty()) {
+		regenerate_merged_css_js();
+		g_last_html_path = generate_timestamp_html();
+	}
+	if (g_last_html_path.empty()) {
+		obs_source_release(curSceneSrc);
+		return false;
+	}
 
-    obs_data_t *settings = obs_data_create();
-    obs_data_set_bool(settings, "is_local_file", true);
-    obs_data_set_string(settings, "local_file", g_last_html_path.c_str());
-    obs_data_set_bool(settings, "smart_lt_managed", true);
+	obs_data_t *settings = obs_data_create();
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", g_last_html_path.c_str());
+	obs_data_set_bool(settings, "smart_lt_managed", true);
 
-    obs_video_info vi{};
-    if (obs_get_video_info(&vi) == 0) {
-        obs_data_set_int(settings, "width", vi.base_width);
-        obs_data_set_int(settings, "height", vi.base_height);
-    } else {
-        obs_data_set_int(settings, "width", sltBrowserWidth);
-        obs_data_set_int(settings, "height", sltBrowserHeight);
-    }
+	obs_video_info vi{};
+	if (obs_get_video_info(&vi) == 0) {
+		obs_data_set_int(settings, "width", vi.base_width);
+		obs_data_set_int(settings, "height", vi.base_height);
+	} else {
+		obs_data_set_int(settings, "width", sltBrowserWidth);
+		obs_data_set_int(settings, "height", sltBrowserHeight);
+	}
 
-    obs_data_set_bool(settings, "shutdown", false);
+	obs_data_set_bool(settings, "shutdown", false);
 
-    obs_source_t *browser = obs_source_create(sltBrowserSourceId, sltBrowserSourceName, settings, nullptr);
-    obs_data_release(settings);
+	obs_source_t *browser = obs_source_create(sltBrowserSourceId, sltBrowserSourceName, settings, nullptr);
+	obs_data_release(settings);
 
-    if (!browser) {
-        obs_source_release(curSceneSrc);
-        return false;
-    }
+	if (!browser) {
+		obs_source_release(curSceneSrc);
+		return false;
+	}
 
-    obs_scene_add(scene, browser);
+	obs_scene_add(scene, browser);
 
-    obs_source_release(browser);
-    obs_source_release(curSceneSrc);
-    return true;
+	obs_source_release(browser);
+	obs_source_release(curSceneSrc);
+	return true;
 }
 
 // -------------------------
@@ -936,163 +983,159 @@ bool ensure_browser_source_in_current_scene()
 // -------------------------
 bool rebuild_and_swap()
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    if (!regenerate_merged_css_js())
-        return false;
+	if (!regenerate_merged_css_js())
+		return false;
 
-    const std::string newHtml = generate_timestamp_html();
-    if (newHtml.empty())
-        return false;
+	const std::string newHtml = generate_timestamp_html();
+	if (newHtml.empty())
+		return false;
 
-    ensure_browser_source_in_current_scene();
-    swap_browser_source_to_file(newHtml);
+	ensure_browser_source_in_current_scene();
+	swap_browser_source_to_file(newHtml);
 
-    delete_old_lt_html_keep(newHtml);
-    g_last_html_path = newHtml;
-    return true;
+	delete_old_lt_html_keep(newHtml);
+	g_last_html_path = newHtml;
+	return true;
 }
 
 bool set_output_dir_and_load(const std::string &dir)
 {
-    if (dir.empty())
-        return false;
+	if (dir.empty())
+		return false;
 
-    g_output_dir = dir;
-    ensure_dir(output_dir());
+	g_output_dir = dir;
+	ensure_dir(output_dir());
 
-    // Persist for next OBS session (config.json: {"output_dir":"..."})
-    save_global_config();
+	save_global_config();
 
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    // Keep as-is; do not auto-add
-    save_state_json();
-    save_visible_json();
+	save_state_json();
+	save_visible_json();
 
-    // Output dir change is a rebuild trigger
-    rebuild_and_swap();
-    return true;
+	rebuild_and_swap();
+	return true;
 }
 
 void init_from_disk()
 {
-    // Load output_dir from config.json
-    load_global_config();
+	load_global_config();
 
-    if (g_output_dir.empty())
-        return;
+	if (g_output_dir.empty())
+		return;
 
-    ensure_dir(output_dir());
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_dir(output_dir());
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    // Restore latest generated html file and repoint browser source if it exists.
-    g_last_html_path = find_latest_lt_html();
-    if (!g_last_html_path.empty()) {
-        swap_browser_source_to_file(g_last_html_path);
-    }
+	g_last_html_path = find_latest_lt_html();
+	if (!g_last_html_path.empty()) {
+		swap_browser_source_to_file(g_last_html_path);
+	}
 }
 
 // -------------------------
-// CRUD helpers (rebuild triggers)
+// CRUD helpers
 // -------------------------
 std::string add_default_lower_third()
 {
-    if (!has_output_dir())
-        return {};
+	if (!has_output_dir())
+		return {};
 
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    lower_third_cfg c = default_cfg();
-    while (get_by_id(c.id))
-        c.id = new_id();
+	lower_third_cfg c = default_cfg();
+	while (get_by_id(c.id))
+		c.id = new_id();
 
-    g_items.push_back(c);
-    set_visible(c.id, true);
+	g_items.push_back(c);
+	set_visible(c.id, true);
 
-    if (!save_state_json())
-        return {};
-    save_visible_json();
+	if (!save_state_json())
+		return {};
+	save_visible_json();
 
-    if (!rebuild_and_swap())
-        return {};
+	if (!rebuild_and_swap())
+		return {};
 
-    return c.id;
+	return c.id;
 }
 
 std::string clone_lower_third(const std::string &id)
 {
-    if (!has_output_dir())
-        return {};
+	if (!has_output_dir())
+		return {};
 
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    const std::string sid = sanitize_id(id);
-    lower_third_cfg *src = get_by_id(sid);
-    if (!src)
-        return {};
+	const std::string sid = sanitize_id(id);
+	lower_third_cfg *src = get_by_id(sid);
+	if (!src)
+		return {};
 
-    lower_third_cfg c = *src;
-    c.id = new_id();
-    while (get_by_id(c.id))
-        c.id = new_id();
+	lower_third_cfg c = *src;
+	c.id = new_id();
+	while (get_by_id(c.id))
+		c.id = new_id();
 
-    if (!c.title.empty()) c.title += " (Copy)";
-    else c.title = "Lower Third (Copy)";
+	if (!c.title.empty())
+		c.title += " (Copy)";
+	else
+		c.title = "Lower Third (Copy)";
 
-    g_items.push_back(c);
-    set_visible(c.id, true);
+	g_items.push_back(c);
+	set_visible(c.id, true);
 
-    if (!save_state_json())
-        return {};
-    save_visible_json();
+	if (!save_state_json())
+		return {};
+	save_visible_json();
 
-    if (!rebuild_and_swap())
-        return {};
+	if (!rebuild_and_swap())
+		return {};
 
-    return c.id;
+	return c.id;
 }
 
 bool remove_lower_third(const std::string &id)
 {
-    if (!has_output_dir())
-        return false;
+	if (!has_output_dir())
+		return false;
 
-    ensure_output_artifacts_exist();
-    load_state_json();
-    load_visible_json();
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
 
-    const std::string sid = sanitize_id(id);
-    const auto before = g_items.size();
+	const std::string sid = sanitize_id(id);
+	const auto before = g_items.size();
 
-    g_items.erase(
-        std::remove_if(g_items.begin(), g_items.end(),
-                       [&](const lower_third_cfg &c) { return c.id == sid; }),
-        g_items.end());
+	g_items.erase(std::remove_if(g_items.begin(), g_items.end(),
+				     [&](const lower_third_cfg &c) { return c.id == sid; }),
+		      g_items.end());
 
-    const bool removed = (g_items.size() != before);
-    if (!removed)
-        return false;
+	const bool removed = (g_items.size() != before);
+	if (!removed)
+		return false;
 
-    set_visible(sid, false);
+	set_visible(sid, false);
 
-    save_state_json();
-    save_visible_json();
+	save_state_json();
+	save_visible_json();
 
-    return rebuild_and_swap();
+	return rebuild_and_swap();
 }
 
 } // namespace smart_lt

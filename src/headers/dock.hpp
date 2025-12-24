@@ -3,6 +3,8 @@
 
 #include <QWidget>
 #include <QVector>
+#include <QHash>
+#include <QSet>
 
 class QScrollArea;
 class QVBoxLayout;
@@ -13,6 +15,7 @@ class QLabel;
 class QCheckBox;
 class QShortcut;
 class QEvent;
+class QTimer;
 
 namespace smart_lt::ui {
 
@@ -20,8 +23,9 @@ struct LowerThirdRowUi {
 	QString id;
 	QFrame *row = nullptr;
 	QLabel *labelLbl = nullptr;
+	QLabel *subLbl = nullptr;
 	QLabel *thumbnailLbl = nullptr;
-	QCheckBox *visibleCheck = nullptr; // hidden indicator; toggled via row click
+	QCheckBox *visibleCheck = nullptr;
 	QPushButton *cloneBtn = nullptr;
 	QPushButton *settingsBtn = nullptr;
 	QPushButton *removeBtn = nullptr;
@@ -42,6 +46,10 @@ private slots:
 	void onAddLowerThird();
 
 private:
+	static QString formatCountdownMs(qint64 ms);
+	void updateRowCountdowns();
+	void updateRowCountdownFor(const LowerThirdRowUi &rowUi);
+
 	void rebuildList();
 	void updateRowActiveStyles();
 
@@ -52,6 +60,9 @@ private:
 	void handleClone(const QString &id);
 	void handleOpenSettings(const QString &id);
 	void handleRemove(const QString &id);
+
+	void ensureRepeatTimerStarted();
+	void repeatTick();
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
@@ -68,6 +79,10 @@ private:
 
 	QVector<LowerThirdRowUi> rows;
 	QVector<QShortcut *> shortcuts_;
+
+	QTimer *repeatTimer_ = nullptr;
+	QHash<QString, qint64> nextOnMs_;
+	QHash<QString, qint64> offAtMs_;
 };
 
 } // namespace smart_lt::ui

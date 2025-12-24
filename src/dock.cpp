@@ -4,7 +4,7 @@
 
 #include "core.hpp"
 #include "settings.hpp"
-#include "widget.hpp" // use your existing carousel
+#include "widget.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs.h>
@@ -26,6 +26,8 @@
 #include <QPixmap>
 #include <QVariant>
 #include <QSizePolicy>
+#include <QTimer>
+#include <QDateTime>
 
 static QWidget *g_dockWidget = nullptr;
 
@@ -36,7 +38,6 @@ LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 	setObjectName(QStringLiteral("LowerThirdDock"));
 	setAttribute(Qt::WA_StyledBackground, true);
 
-	// Keep your blue overlay effect + hidden checkbox
 	setStyleSheet(R"(
 #LowerThirdDock { background: rgba(39, 42, 51, 1.0); }
 QFrame#sltRowFrame {
@@ -51,6 +52,7 @@ QFrame#sltRowFrame[sltActive="true"] {
   border: 1px solid rgba(88,166,255,0.9);
 }
 QLabel#sltRowLabel { color: #f0f6fc; font-weight: 500; }
+QLabel#sltRowSubLabel { color: rgba(240,246,252,0.72); font-size: 11px; }
 QLabel#sltRowThumbnail { border-radius: 16px; background: rgba(0,0,0,0.35); }
 QScrollArea#LowerThirdContent QPushButton { border: none; background: transparent; padding: 2px; }
 QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0.06); border-radius: 3px; }
@@ -135,10 +137,9 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
 	}
 
-	// Footer: your existing widget carousel
+	// Footer
 	rootLayout->addWidget(create_widget_carousel(this));
 
-	// initial enablement
 	const bool hasDir = smart_lt::has_output_dir();
 	addBtn->setEnabled(hasDir);
 	ensureSourceBtn->setEnabled(hasDir);
@@ -146,7 +147,6 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 
 bool LowerThirdDock::init()
 {
-	// KEY FIX: load saved resources path + state on OBS startup
 	smart_lt::init_from_disk();
 
 	if (smart_lt::has_output_dir())
@@ -162,7 +162,109 @@ bool LowerThirdDock::init()
 		smart_lt::ensure_output_artifacts_exist();
 
 	rebuildList();
+
+	ensureRepeatTimerStarted();
+
 	return true;
+}
+
+void LowerThirdDock::ensureRepeatTimerStarted()
+{
+	if (repeatTimer_)
+		return;
+
+	repeatTimer_ = new QTimer(this);
+	repeatTimer_->setInterval(250);
+	connect(repeatTimer_, &QTimer::timeout, this, &LowerThirdDock::repeatTick);
+	repeatTimer_->start();
+
+	updateRowCountdowns();
+}
+
+void LowerThirdDock::repeatTick()
+{
+	if (!smart_lt::has_output_dir())
+		return;
+
+	// If settings can change repeat values while dock is open, ensure core memory is current.
+	// If your settings dialog already updates core memory, this is still safe (and cheap).
+	// If you prefer, remove it and guarantee core state is always in sync.
+	// smart_lt::load_state_json();
+
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	bool changed = false;
+
+	const auto &items = smart_lt::all();
+
+	{
+		QSet<QString> alive;
+		alive.reserve((int)items.size());
+		for (const auto &c : items)
+			alive.insert(QString::fromStdString(c.id));
+
+		for (auto it = nextOnMs_.begin(); it != nextOnMs_.end();) {
+			if (!alive.contains(it.key()))
+				it = nextOnMs_.erase(it);
+			else
+				++it;
+		}
+		for (auto it = offAtMs_.begin(); it != offAtMs_.end();) {
+			if (!alive.contains(it.key()))
+				it = offAtMs_.erase(it);
+			else
+				++it;
+		}
+	}
+
+	for (const auto &c : items) {
+		const QString qid = QString::fromStdString(c.id);
+
+		const int every = c.repeat_every_sec;
+		if (every <= 0) {
+			nextOnMs_.remove(qid);
+			offAtMs_.remove(qid);
+			continue;
+		}
+
+		int visibleSec = c.repeat_visible_sec;
+		if (visibleSec <= 0)
+			visibleSec = 3;
+
+		if (!nextOnMs_.contains(qid))
+			nextOnMs_[qid] = now + (qint64)every * 1000;
+
+		if (offAtMs_.contains(qid) && now >= offAtMs_[qid]) {
+			if (smart_lt::is_visible(c.id)) {
+				smart_lt::set_visible(c.id, false);
+				changed = true;
+			}
+			offAtMs_.remove(qid);
+		}
+
+		if (now >= nextOnMs_[qid]) {
+			qint64 next = nextOnMs_[qid];
+			const qint64 step = (qint64)every * 1000;
+			while (next <= now)
+				next += step;
+			nextOnMs_[qid] = next;
+
+			if (!smart_lt::is_visible(c.id)) {
+				smart_lt::set_visible(c.id, true);
+				changed = true;
+				offAtMs_[qid] = now + (qint64)visibleSec * 1000;
+			}
+		}
+	}
+
+	if (changed) {
+		smart_lt::save_visible_json();
+		updateRowActiveStyles();
+		updateRowCountdowns();
+		emit requestSave();
+		return;
+	}
+
+	updateRowCountdowns();
 }
 
 void LowerThirdDock::onBrowseOutputFolder()
@@ -171,8 +273,11 @@ void LowerThirdDock::onBrowseOutputFolder()
 	if (dir.isEmpty())
 		return;
 
-	// Path change = rebuild trigger (core handles rebuild + config save)
 	smart_lt::set_output_dir_and_load(dir.toStdString());
+
+	// Reset schedules on output path change to avoid weird countdowns
+	nextOnMs_.clear();
+	offAtMs_.clear();
 
 	outputPathEdit->setText(dir);
 
@@ -181,6 +286,7 @@ void LowerThirdDock::onBrowseOutputFolder()
 	ensureSourceBtn->setEnabled(hasDir);
 
 	rebuildList();
+	updateRowCountdowns();
 	emit requestSave();
 }
 
@@ -193,8 +299,6 @@ void LowerThirdDock::onEnsureBrowserSourceClicked()
 
 	smart_lt::ensure_output_artifacts_exist();
 	smart_lt::ensure_browser_source_in_current_scene();
-
-	// requirement: NO rebuild here
 }
 
 void LowerThirdDock::onAddLowerThird()
@@ -202,12 +306,12 @@ void LowerThirdDock::onAddLowerThird()
 	if (!smart_lt::has_output_dir())
 		return;
 
-	// Add = rebuild trigger (core does save + rebuild)
 	const std::string id = smart_lt::add_default_lower_third();
 	if (id.empty())
 		return;
 
 	rebuildList();
+	updateRowCountdowns();
 	emit requestSave();
 }
 
@@ -235,7 +339,6 @@ void LowerThirdDock::rebuildList()
 		h->setContentsMargins(8, 4, 8, 4);
 		h->setSpacing(6);
 
-		// Hidden checkbox indicator (mouse transparent)
 		auto *visible = new QCheckBox(rowFrame);
 		visible->setChecked(smart_lt::is_visible(cfg.id));
 		visible->setFocusPolicy(Qt::NoFocus);
@@ -244,7 +347,6 @@ void LowerThirdDock::rebuildList()
 		h->addWidget(visible);
 		ui.visibleCheck = visible;
 
-		// Thumbnail
 		auto *thumb = new QLabel(rowFrame);
 		thumb->setObjectName(QStringLiteral("sltRowThumbnail"));
 		thumb->setFixedSize(32, 32);
@@ -255,7 +357,8 @@ void LowerThirdDock::rebuildList()
 			const QString imgPath = QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture));
 			QPixmap px(imgPath);
 			if (!px.isNull()) {
-				thumb->setPixmap(px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+				thumb->setPixmap(
+					px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
 				hasThumb = true;
 			}
 		}
@@ -263,22 +366,41 @@ void LowerThirdDock::rebuildList()
 		h->addWidget(thumb);
 		ui.thumbnailLbl = thumb;
 
-		// Label
-		auto *label = new QLabel(QString::fromStdString(cfg.title), rowFrame);
+		// Label block (Title + Countdown)
+		auto *labelCol = new QWidget(rowFrame);
+		auto *labelColLayout = new QVBoxLayout(labelCol);
+		labelColLayout->setContentsMargins(0, 0, 0, 0);
+		labelColLayout->setSpacing(0);
+
+		// Title
+		auto *label = new QLabel(QString::fromStdString(cfg.title), labelCol);
 		label->setObjectName(QStringLiteral("sltRowLabel"));
 		label->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 		label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-		h->addWidget(label, 1);
-		ui.labelLbl = label;
 
-		// Buttons
+		// Sub label (countdown/status)
+		auto *sub = new QLabel(labelCol);
+		sub->setObjectName(QStringLiteral("sltRowSubLabel"));
+		sub->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+		sub->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		sub->setText(QString());
+
+		labelColLayout->addWidget(label);
+		labelColLayout->addWidget(sub);
+
+		h->addWidget(labelCol, 1);
+
+		ui.labelLbl = label;
+		ui.subLbl = sub;
+
 		auto *cloneBtn = new QPushButton(rowFrame);
 		auto *settingsBtn = new QPushButton(rowFrame);
 		auto *removeBtn = new QPushButton(rowFrame);
 
 		auto *st = rowFrame->style();
 
-		cloneBtn->setIcon(QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
+		cloneBtn->setIcon(
+			QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
 		cloneBtn->setToolTip(tr("Clone lower third"));
 		cloneBtn->setFlat(true);
 
@@ -308,9 +430,9 @@ void LowerThirdDock::rebuildList()
 
 		const QString id = ui.id;
 
-		// Row click toggles visibility
 		rowFrame->installEventFilter(this);
 		label->installEventFilter(this);
+		sub->installEventFilter(this);
 		thumb->installEventFilter(this);
 
 		connect(cloneBtn, &QPushButton::clicked, this, [this, id]() { handleClone(id); });
@@ -322,6 +444,7 @@ void LowerThirdDock::rebuildList()
 
 	rebuildShortcuts();
 	updateRowActiveStyles();
+	updateRowCountdowns();
 }
 
 void LowerThirdDock::updateRowActiveStyles()
@@ -350,7 +473,8 @@ bool LowerThirdDock::eventFilter(QObject *watched, QEvent *event)
 		auto *me = static_cast<QMouseEvent *>(event);
 		if (me->button() == Qt::LeftButton) {
 			for (auto &r : rows) {
-				if (watched == r.row || watched == r.labelLbl || watched == r.thumbnailLbl) {
+				if (watched == r.row || watched == r.labelLbl || watched == r.subLbl ||
+				    watched == r.thumbnailLbl) {
 					handleToggleVisible(r.id);
 					return true;
 				}
@@ -397,11 +521,33 @@ void LowerThirdDock::rebuildShortcuts()
 
 void LowerThirdDock::handleToggleVisible(const QString &id)
 {
-	// Requirement: toggle must NOT rebuild files
-	smart_lt::toggle_visible(id.toStdString());
+	const std::string sid = id.toStdString();
+	const bool wasVisible = smart_lt::is_visible(sid);
+
+	smart_lt::toggle_visible(sid);
 	smart_lt::save_visible_json();
 
+	const bool nowVisible = smart_lt::is_visible(sid);
+
+	if (!wasVisible && nowVisible) {
+		if (auto *cfg = smart_lt::get_by_id(sid)) {
+			if (cfg->repeat_every_sec > 0) {
+				int visibleSec = cfg->repeat_visible_sec;
+				if (visibleSec <= 0)
+					visibleSec = 3;
+
+				const qint64 now = QDateTime::currentMSecsSinceEpoch();
+				offAtMs_[id] = now + (qint64)visibleSec * 1000;
+
+				if (!nextOnMs_.contains(id)) {
+					nextOnMs_[id] = now + (qint64)cfg->repeat_every_sec * 1000;
+				}
+			}
+		}
+	}
+
 	updateRowActiveStyles();
+	updateRowCountdowns();
 	emit requestSave();
 }
 
@@ -410,12 +556,12 @@ void LowerThirdDock::handleClone(const QString &id)
 	if (!smart_lt::has_output_dir())
 		return;
 
-	// Clone = rebuild trigger handled by core helper
 	const std::string newId = smart_lt::clone_lower_third(id.toStdString());
 	if (newId.empty())
 		return;
 
 	rebuildList();
+	updateRowCountdowns();
 	emit requestSave();
 }
 
@@ -423,11 +569,13 @@ void LowerThirdDock::handleOpenSettings(const QString &id)
 {
 	smart_lt::ui::LowerThirdSettingsDialog dlg(this);
 	dlg.setLowerThirdId(id);
-
-	// Save&Apply rebuild is handled inside settings.cpp/core
 	dlg.exec();
 
+	// If settings writes to disk and core doesn't refresh memory
+	// smart_lt::load_state_json();
+
 	rebuildList();
+	updateRowCountdowns();
 	emit requestSave();
 }
 
@@ -436,11 +584,79 @@ void LowerThirdDock::handleRemove(const QString &id)
 	if (!smart_lt::has_output_dir())
 		return;
 
-	// Remove = rebuild trigger handled by core helper
 	smart_lt::remove_lower_third(id.toStdString());
 
+	nextOnMs_.remove(id);
+	offAtMs_.remove(id);
+
 	rebuildList();
+	updateRowCountdowns();
 	emit requestSave();
+}
+
+QString LowerThirdDock::formatCountdownMs(qint64 ms)
+{
+	if (ms < 0)
+		ms = 0;
+	const qint64 totalSec = ms / 1000;
+	const qint64 m = totalSec / 60;
+	const qint64 s = totalSec % 60;
+	return QString("%1:%2").arg(m, 2, 10, QChar('0')).arg(s, 2, 10, QChar('0'));
+}
+
+void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
+{
+	if (!rowUi.subLbl)
+		return;
+
+	const auto *cfg = smart_lt::get_by_id(rowUi.id.toStdString());
+	if (!cfg) {
+		rowUi.subLbl->clear();
+		rowUi.subLbl->setVisible(false);
+		return;
+	}
+
+	const int every = cfg->repeat_every_sec;
+	if (every <= 0) {
+		rowUi.subLbl->clear();
+		rowUi.subLbl->setVisible(false);
+		return;
+	}
+
+	rowUi.subLbl->setVisible(true);
+
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const QString qid = rowUi.id;
+
+	if (!nextOnMs_.contains(qid)) {
+		nextOnMs_[qid] = now + (qint64)every * 1000;
+	}
+
+	const bool isVis = smart_lt::is_visible(cfg->id);
+
+	QStringList parts;
+
+	if (isVis && offAtMs_.contains(qid)) {
+		const qint64 leftHide = offAtMs_[qid] - now;
+		parts << (QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
+	} else if (isVis) {
+		parts << QStringLiteral("Visible");
+	}
+
+	if (nextOnMs_.contains(qid)) {
+		const qint64 leftNext = nextOnMs_[qid] - now;
+		parts << (QStringLiteral("Next in ") + formatCountdownMs(leftNext));
+	} else {
+		parts << QStringLiteral("Repeating");
+	}
+
+	rowUi.subLbl->setText(parts.join(QStringLiteral(" • ")));
+}
+
+void LowerThirdDock::updateRowCountdowns()
+{
+	for (const auto &r : rows)
+		updateRowCountdownFor(r);
 }
 
 } // namespace smart_lt::ui
@@ -473,6 +689,10 @@ void LowerThird_destroy_dock()
 #else
 	obs_frontend_remove_dock(g_dockWidget);
 #endif
+
+	// In some OBS builds, removing the dock does not delete the widget.
+	// If observe timers still firing after removal, uncomment:
+	// g_dockWidget->deleteLater();
 
 	g_dockWidget = nullptr;
 	LOGI("Dock destroyed");

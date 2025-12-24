@@ -14,6 +14,7 @@ class QFontComboBox;
 class QKeySequenceEdit;
 class QLabel;
 class QTabWidget;
+class QSpinBox;
 
 namespace smart_lt::ui {
 
@@ -22,77 +23,77 @@ struct CbxOption {
   const char *value;
 };
 inline const std::vector<CbxOption> AnimInOptions = {
-    // --- Fading Entrances ---
-    {"Fade In", "animate__fadeIn"},
-    {"Fade In Up", "animate__fadeInUp"},
-    {"Fade In Down", "animate__fadeInDown"},
-    {"Fade In Left", "animate__fadeInLeft"},
-    {"Fade In Right", "animate__fadeInRight"},
-    {"Fade In Up Big", "animate__fadeInUpBig"},
-    {"Fade In Down Big", "animate__fadeInDownBig"},
-    {"Fade In Left Big", "animate__fadeInLeftBig"},
-    {"Fade In Right Big", "animate__fadeInRightBig"},
-    {"Fade In Top Left", "animate__fadeInTopLeft"},
-    {"Fade In Top Right", "animate__fadeInTopRight"},
-    {"Fade In Bottom Left", "animate__fadeInBottomLeft"},
-    {"Fade In Bottom Right", "animate__fadeInBottomRight"},
-    
-    // --- Back Entrances ---
-    {"Back In Up", "animate__backInUp"},
-    {"Back In Down", "animate__backInDown"},
-    {"Back In Left", "animate__backInLeft"},
-    {"Back In Right", "animate__backInRight"},
-    
-    // --- Bouncing Entrances ---
-    {"Bounce In", "animate__bounceIn"},
-    {"Bounce In Up", "animate__bounceInUp"},
-    {"Bounce In Down", "animate__bounceInDown"},
-    {"Bounce In Left", "animate__bounceInLeft"},
-    {"Bounce In Right", "animate__bounceInRight"},
-    
-    // --- Zooming Entrances ---
-    {"Zoom In", "animate__zoomIn"},
-    {"Zoom In Up", "animate__zoomInUp"},
-    {"Zoom In Down", "animate__zoomInDown"},
-    {"Zoom In Left", "animate__zoomInLeft"},
-    {"Zoom In Right", "animate__zoomInRight"},
-    
-    // --- Sliding Entrances ---
-    {"Slide In Up", "animate__slideInUp"},
-    {"Slide In Down", "animate__slideInDown"},
-    {"Slide In Left", "animate__slideInLeft"},
-    {"Slide In Right", "animate__slideInRight"},
-    
-    // --- Rotating Entrances ---
-    {"Rotate In", "animate__rotateIn"},
-    {"Rotate In Down Left", "animate__rotateInDownLeft"},
-    {"Rotate In Down Right", "animate__rotateInDownRight"},
-    {"Rotate In Up Left", "animate__rotateInUpLeft"},
-    {"Rotate In Up Right", "animate__rotateInUpRight"},
-    
-    // --- Flippers & Specials ---
-    {"Flip In X", "animate__flipInX"},
-    {"Flip In Y", "animate__flipInY"},
-    {"Light Speed In Left", "animate__lightSpeedInLeft"},
-    {"Light Speed In Right", "animate__lightSpeedInRight"},
-    {"Jack In The Box", "animate__jackInTheBox"},
-    {"Roll In", "animate__rollIn"},
-    
-    // --- Attention Seekers (Can be used as In) ---
-    {"Bounce", "animate__bounce"},
-    {"Flash", "animate__flash"},
-    {"Pulse", "animate__pulse"},
-    {"Rubber Band", "animate__rubberBand"},
-    {"Shake X", "animate__shakeX"},
-    {"Shake Y", "animate__shakeY"},
-    {"Head Shake", "animate__headShake"},
-    {"Swing", "animate__swing"},
-    {"Tada", "animate__tada"},
-    {"Wobble", "animate__wobble"},
-    {"Jello", "animate__jello"},
-    {"Heart Beat", "animate__heartBeat"},
+	// --- Fading Entrances ---
+	{"Fade In", "animate__fadeIn"},
+	{"Fade In Up", "animate__fadeInUp"},
+	{"Fade In Down", "animate__fadeInDown"},
+	{"Fade In Left", "animate__fadeInLeft"},
+	{"Fade In Right", "animate__fadeInRight"},
+	{"Fade In Up Big", "animate__fadeInUpBig"},
+	{"Fade In Down Big", "animate__fadeInDownBig"},
+	{"Fade In Left Big", "animate__fadeInLeftBig"},
+	{"Fade In Right Big", "animate__fadeInRightBig"},
+	{"Fade In Top Left", "animate__fadeInTopLeft"},
+	{"Fade In Top Right", "animate__fadeInTopRight"},
+	{"Fade In Bottom Left", "animate__fadeInBottomLeft"},
+	{"Fade In Bottom Right", "animate__fadeInBottomRight"},
 
-    {"Custom (CSS class)", "custom"},
+	// --- Back Entrances ---
+	{"Back In Up", "animate__backInUp"},
+	{"Back In Down", "animate__backInDown"},
+	{"Back In Left", "animate__backInLeft"},
+	{"Back In Right", "animate__backInRight"},
+
+	// --- Bouncing Entrances ---
+	{"Bounce In", "animate__bounceIn"},
+	{"Bounce In Up", "animate__bounceInUp"},
+	{"Bounce In Down", "animate__bounceInDown"},
+	{"Bounce In Left", "animate__bounceInLeft"},
+	{"Bounce In Right", "animate__bounceInRight"},
+
+	// --- Zooming Entrances ---
+	{"Zoom In", "animate__zoomIn"},
+	{"Zoom In Up", "animate__zoomInUp"},
+	{"Zoom In Down", "animate__zoomInDown"},
+	{"Zoom In Left", "animate__zoomInLeft"},
+	{"Zoom In Right", "animate__zoomInRight"},
+
+	// --- Sliding Entrances ---
+	{"Slide In Up", "animate__slideInUp"},
+	{"Slide In Down", "animate__slideInDown"},
+	{"Slide In Left", "animate__slideInLeft"},
+	{"Slide In Right", "animate__slideInRight"},
+
+	// --- Rotating Entrances ---
+	{"Rotate In", "animate__rotateIn"},
+	{"Rotate In Down Left", "animate__rotateInDownLeft"},
+	{"Rotate In Down Right", "animate__rotateInDownRight"},
+	{"Rotate In Up Left", "animate__rotateInUpLeft"},
+	{"Rotate In Up Right", "animate__rotateInUpRight"},
+
+	// --- Flippers & Specials ---
+	{"Flip In X", "animate__flipInX"},
+	{"Flip In Y", "animate__flipInY"},
+	{"Light Speed In Left", "animate__lightSpeedInLeft"},
+	{"Light Speed In Right", "animate__lightSpeedInRight"},
+	{"Jack In The Box", "animate__jackInTheBox"},
+	{"Roll In", "animate__rollIn"},
+
+	// --- Attention Seekers ---
+	{"Bounce", "animate__bounce"},
+	{"Flash", "animate__flash"},
+	{"Pulse", "animate__pulse"},
+	{"Rubber Band", "animate__rubberBand"},
+	{"Shake X", "animate__shakeX"},
+	{"Shake Y", "animate__shakeY"},
+	{"Head Shake", "animate__headShake"},
+	{"Swing", "animate__swing"},
+	{"Tada", "animate__tada"},
+	{"Wobble", "animate__wobble"},
+	{"Jello", "animate__jello"},
+	{"Heart Beat", "animate__heartBeat"},
+
+	{"Custom (CSS class)", "custom"},
 };
 
 inline const std::vector<CbxOption> AnimOutOptions = {
@@ -233,6 +234,9 @@ private:
 
     QColor *currentBgColor = nullptr;
     QColor *currentTextColor = nullptr;
+
+    QSpinBox *repeatEverySpin = nullptr;
+    QSpinBox *repeatVisibleSpin = nullptr;
 };
 
 } // namespace smart_lt::ui

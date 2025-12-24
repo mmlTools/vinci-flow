@@ -32,6 +32,7 @@
 #include <QStyle>
 #include <QTabWidget>
 #include <QWidget>
+#include <QSpinBox>
 
 #include <unzip.h>
 #include <zip.h>
@@ -202,6 +203,19 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		hkRow->addWidget(hotkeyEdit, 1);
 		hkRow->addWidget(clearHotkeyBtn);
 		g->addLayout(hkRow, row, 1, 1, 3);
+
+		row++;
+		g->addWidget(new QLabel(tr("Repeat every (sec):"), this), row, 0);
+		repeatEverySpin = new QSpinBox(this);
+		repeatEverySpin->setRange(0, 24 * 60 * 60); // up to 24h
+		repeatEverySpin->setToolTip(tr("0 disables auto-repeat"));
+		g->addWidget(repeatEverySpin, row, 1);
+
+		g->addWidget(new QLabel(tr("Keep visible (sec):"), this), row, 2);
+		repeatVisibleSpin = new QSpinBox(this);
+		repeatVisibleSpin->setRange(0, 24 * 60 * 60);
+		repeatVisibleSpin->setToolTip(tr("0 uses default (recommended: 3-8 sec)"));
+		g->addWidget(repeatVisibleSpin, row, 3);
 
 		root->addWidget(contentBox);
 
@@ -417,6 +431,8 @@ void LowerThirdSettingsDialog::loadFromState()
 	setCombo(posCombo, QString::fromStdString(cfg->lt_position));
 
 	hotkeyEdit->setKeySequence(QKeySequence(QString::fromStdString(cfg->hotkey)));
+	repeatEverySpin->setValue(cfg->repeat_every_sec);
+	repeatVisibleSpin->setValue(cfg->repeat_visible_sec);
 
 	htmlEdit->setPlainText(QString::fromStdString(cfg->html_template));
 	cssEdit->setPlainText(QString::fromStdString(cfg->css_template));
@@ -475,6 +491,8 @@ void LowerThirdSettingsDialog::saveToState()
 		cfg->text_color = currentTextColor->name(QColor::HexRgb).toStdString();
 
 	cfg->hotkey = hotkeyEdit->keySequence().toString(QKeySequence::PortableText).toStdString();
+	cfg->repeat_every_sec = repeatEverySpin->value();
+	cfg->repeat_visible_sec = repeatVisibleSpin->value();
 
 	cfg->html_template = htmlEdit->toPlainText().toStdString();
 	cfg->css_template = cssEdit->toPlainText().toStdString();
@@ -680,6 +698,8 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	o["bg_color"] = QString::fromStdString(cfg->bg_color);
 	o["text_color"] = QString::fromStdString(cfg->text_color);
 	o["hotkey"] = QString::fromStdString(cfg->hotkey);
+	o["repeat_every_sec"] = cfg->repeat_every_sec;
+	o["repeat_visible_sec"] = cfg->repeat_visible_sec;
 
 	const QByteArray json = QJsonDocument(o).toJson(QJsonDocument::Indented);
 
@@ -769,6 +789,8 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->bg_color = obj.value("bg_color").toString().toStdString();
 	cfg->text_color = obj.value("text_color").toString().toStdString();
 	cfg->hotkey = obj.value("hotkey").toString().toStdString();
+	cfg->repeat_every_sec = obj.value("repeat_every_sec").toInt(0);
+	cfg->repeat_visible_sec = obj.value("repeat_visible_sec").toInt(0);
 
 	{
 		QFile f(htmlPath);
