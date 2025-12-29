@@ -174,6 +174,7 @@ set(SLT_SRC
   ${SLT_SRC_DIR}/main.cpp
   ${SLT_SRC_DIR}/core.cpp
   ${SLT_SRC_DIR}/widget.cpp
+  ${SLT_SRC_DIR}/websocket_bridge.cpp
 )
 
 list(APPEND SLT_SRC

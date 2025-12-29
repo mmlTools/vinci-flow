@@ -83,6 +83,7 @@ private:
 	QTimer *repeatTimer_ = nullptr;
 	QHash<QString, qint64> nextOnMs_;
 	QHash<QString, qint64> offAtMs_;
+	qint64 lastVisibleMtimeMs_ = 0;
 };
 
 } // namespace smart_lt::ui

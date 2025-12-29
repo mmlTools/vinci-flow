@@ -1,4 +1,4 @@
 #pragma once
 
 #define PLUGIN_NAME "smart-lower-thirds"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "2.0.0"

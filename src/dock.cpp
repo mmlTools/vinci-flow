@@ -147,7 +147,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 
 bool LowerThirdDock::init()
 {
-	smart_lt::init_from_disk();
+	//smart_lt::init_from_disk();
 
 	if (smart_lt::has_output_dir())
 		outputPathEdit->setText(QString::fromStdString(smart_lt::output_dir()));
@@ -162,6 +162,15 @@ bool LowerThirdDock::init()
 		smart_lt::ensure_output_artifacts_exist();
 
 	rebuildList();
+
+	// Track visible.json changes so dock reflects remote (websocket) toggles too
+	lastVisibleMtimeMs_ = 0;
+	if (hasDir) {
+		const QString p = QString::fromStdString(smart_lt::path_visible_json());
+		const QFileInfo fi(p);
+		if (fi.exists())
+			lastVisibleMtimeMs_ = fi.lastModified().toMSecsSinceEpoch();
+	}
 
 	ensureRepeatTimerStarted();
 
@@ -186,16 +195,33 @@ void LowerThirdDock::repeatTick()
 	if (!smart_lt::has_output_dir())
 		return;
 
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+	// ------------------------------------------------------------
+	// 1) Sync dock state with remote changes (obs-websocket toggles)
+	//    by watching lt-visible.json mtime.
+	// ------------------------------------------------------------
+	{
+		const QString p = QString::fromStdString(smart_lt::path_visible_json());
+		const QFileInfo fi(p);
+
+		const qint64 mtime = fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : 0;
+		if (mtime > 0 && mtime != lastVisibleMtimeMs_) {
+			lastVisibleMtimeMs_ = mtime;
+
+			smart_lt::load_visible_json();
+			updateRowActiveStyles();
+			updateRowCountdowns();
+		}
+	}
+
 	// If settings can change repeat values while dock is open, ensure core memory is current.
 	// If your settings dialog already updates core memory, this is still safe (and cheap).
 	// If you prefer, remove it and guarantee core state is always in sync.
 	// smart_lt::load_state_json();
 
-	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	bool changed = false;
-
 	const auto &items = smart_lt::all();
-
 	{
 		QSet<QString> alive;
 		alive.reserve((int)items.size());
@@ -258,6 +284,12 @@ void LowerThirdDock::repeatTick()
 
 	if (changed) {
 		smart_lt::save_visible_json();
+
+		const QString p = QString::fromStdString(smart_lt::path_visible_json());
+		const QFileInfo fi(p);
+		if (fi.exists())
+			lastVisibleMtimeMs_ = fi.lastModified().toMSecsSinceEpoch();
+
 		updateRowActiveStyles();
 		updateRowCountdowns();
 		emit requestSave();

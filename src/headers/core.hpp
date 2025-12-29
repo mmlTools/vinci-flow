@@ -118,6 +118,7 @@ std::string path_state_json();   // lt-state.json
 std::string path_visible_json(); // lt-visible.json
 std::string path_styles_css();   // lt-styles.css
 std::string path_scripts_js();   // lt-scripts.js
+std::string path_animate_css();  // animate.min.css
 
 // -------------------------
 // Utility
