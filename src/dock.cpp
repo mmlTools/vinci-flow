@@ -29,11 +29,80 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QComboBox>
-#include <QFileInfo>
+#include <QMetaObject>
 
 static QWidget *g_dockWidget = nullptr;
 
 namespace smart_lt::ui {
+
+// -------------------------
+// NEW: Core event bus hookup
+// -------------------------
+void LowerThirdDock::coreEventThunk(const smart_lt::core_event &ev, void *user)
+{
+	auto *self = static_cast<LowerThirdDock *>(user);
+	if (!self)
+		return;
+
+	// Always marshal to Qt thread to keep UI safe
+	QMetaObject::invokeMethod(self, [self, ev]() { self->onCoreEvent(ev); }, Qt::QueuedConnection);
+}
+
+LowerThirdDock::~LowerThirdDock()
+{
+	if (coreListenerToken_) {
+		smart_lt::remove_event_listener(coreListenerToken_);
+		coreListenerToken_ = 0;
+	}
+}
+
+// IMPORTANT: adjust enum names below to whatever you implemented in core.hpp.
+// I’m assuming:
+//   enum class event_type { VisibilityChanged, ListChanged, Reloaded };
+//   struct core_event { event_type type; std::string id; bool visible; std::string reason; };
+void LowerThirdDock::onCoreEvent(const smart_lt::core_event &ev)
+{
+	// If your core doesn’t expose these names exactly, change them here only.
+	switch (ev.type) {
+	case smart_lt::event_type::VisibilityChanged: {
+		const QString qid = QString::fromStdString(ev.id);
+		const bool active = ev.visible;
+
+		for (auto &row : rows) {
+			if (row.id != qid)
+				continue;
+
+			if (row.row) {
+				row.row->setProperty("sltActive", QVariant(active));
+				row.row->style()->unpolish(row.row);
+				row.row->style()->polish(row.row);
+				row.row->update();
+			}
+
+			if (row.visibleCheck) {
+				row.visibleCheck->blockSignals(true);
+				row.visibleCheck->setChecked(active);
+				row.visibleCheck->blockSignals(false);
+			}
+
+			updateRowCountdownFor(row);
+			break;
+		}
+		break;
+	}
+
+	case smart_lt::event_type::ListChanged:
+	case smart_lt::event_type::Reloaded: {
+		// Structural changes: recreate list + shortcuts
+		rebuildList();
+		updateRowCountdowns();
+		break;
+	}
+
+	default:
+		break;
+	}
+}
 
 LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 {
@@ -94,7 +163,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	}
 
 	// -------------------------
-	// NEW: Browser Source selector row (combo-only workflow)
+	// Browser Source selector row (combo-only workflow)
 	// -------------------------
 	{
 		auto *row = new QHBoxLayout();
@@ -197,13 +266,9 @@ bool LowerThirdDock::init()
 
 	rebuildList();
 
-	// Track visible.json changes so dock reflects remote (websocket) toggles too
-	lastVisibleMtimeMs_ = 0;
-	if (hasDir) {
-		const QString p = QString::fromStdString(smart_lt::path_visible_json());
-		const QFileInfo fi(p);
-		if (fi.exists())
-			lastVisibleMtimeMs_ = fi.lastModified().toMSecsSinceEpoch();
+	// Subscribe to core events so dock stays in sync with WS + external edits
+	if (!coreListenerToken_) {
+		coreListenerToken_ = smart_lt::add_event_listener(&LowerThirdDock::coreEventThunk, this);
 	}
 
 	ensureRepeatTimerStarted();
@@ -211,7 +276,7 @@ bool LowerThirdDock::init()
 }
 
 // -------------------------
-// NEW: Browser Source selector helpers
+// Browser Source selector helpers
 // -------------------------
 void LowerThirdDock::populateBrowserSources(bool keepSelection)
 {
@@ -235,10 +300,6 @@ void LowerThirdDock::populateBrowserSources(bool keepSelection)
 		browserSourceCombo->addItem(qn, QVariant(qn));
 	}
 
-	// Choose selection priority:
-	// 1) keep current selection if still present
-	// 2) saved selection from config if present
-	// 3) placeholder
 	int idxToSelect = 0;
 
 	auto findByData = [this](const QString &val) -> int {
@@ -286,7 +347,7 @@ void LowerThirdDock::onBrowserSourceChanged(int index)
 }
 
 // -------------------------
-// Repeat timer (unchanged)
+// Repeat timer
 // -------------------------
 void LowerThirdDock::ensureRepeatTimerStarted()
 {
@@ -308,22 +369,6 @@ void LowerThirdDock::repeatTick()
 
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-	// Sync dock with remote changes by watching lt-visible.json mtime.
-	{
-		const QString p = QString::fromStdString(smart_lt::path_visible_json());
-		const QFileInfo fi(p);
-
-		const qint64 mtime = fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : 0;
-		if (mtime > 0 && mtime != lastVisibleMtimeMs_) {
-			lastVisibleMtimeMs_ = mtime;
-
-			smart_lt::load_visible_json();
-			updateRowActiveStyles();
-			updateRowCountdowns();
-		}
-	}
-
-	bool changed = false;
 	const auto &items = smart_lt::all();
 	{
 		QSet<QString> alive;
@@ -362,14 +407,17 @@ void LowerThirdDock::repeatTick()
 		if (!nextOnMs_.contains(qid))
 			nextOnMs_[qid] = now + (qint64)every * 1000;
 
+		// Auto-hide
 		if (offAtMs_.contains(qid) && now >= offAtMs_[qid]) {
-			if (smart_lt::is_visible(c.id)) {
-				smart_lt::set_visible(c.id, false);
-				changed = true;
-			}
 			offAtMs_.remove(qid);
+			if (smart_lt::is_visible(c.id)) {
+				// Persist + emit core event (dock + ws sync)
+				smart_lt::set_visible_persist(c.id, false);
+				emit requestSave();
+			}
 		}
 
+		// Auto-show
 		if (now >= nextOnMs_[qid]) {
 			qint64 next = nextOnMs_[qid];
 			const qint64 step = (qint64)every * 1000;
@@ -378,25 +426,12 @@ void LowerThirdDock::repeatTick()
 			nextOnMs_[qid] = next;
 
 			if (!smart_lt::is_visible(c.id)) {
-				smart_lt::set_visible(c.id, true);
-				changed = true;
+				// Persist + emit core event (dock + ws sync)
+				smart_lt::set_visible_persist(c.id, true);
 				offAtMs_[qid] = now + (qint64)visibleSec * 1000;
+				emit requestSave();
 			}
 		}
-	}
-
-	if (changed) {
-		smart_lt::save_visible_json();
-
-		const QString p = QString::fromStdString(smart_lt::path_visible_json());
-		const QFileInfo fi(p);
-		if (fi.exists())
-			lastVisibleMtimeMs_ = fi.lastModified().toMSecsSinceEpoch();
-
-		updateRowActiveStyles();
-		updateRowCountdowns();
-		emit requestSave();
-		return;
 	}
 
 	updateRowCountdowns();
@@ -435,17 +470,15 @@ void LowerThirdDock::onAddLowerThird()
 	if (!smart_lt::has_output_dir())
 		return;
 
-	const std::string id = smart_lt::add_default_lower_third();
-	if (id.empty())
-		return;
+	smart_lt::add_default_lower_third();
 
-	rebuildList();
+	// core event will rebuild list; we can still update countdowns immediately
 	updateRowCountdowns();
 	emit requestSave();
 }
 
 // -------------------------
-// List rendering (mostly unchanged)
+// List rendering
 // -------------------------
 void LowerThirdDock::rebuildList()
 {
@@ -489,8 +522,7 @@ void LowerThirdDock::rebuildList()
 			const QString imgPath = QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture));
 			QPixmap px(imgPath);
 			if (!px.isNull()) {
-				thumb->setPixmap(
-					px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+				thumb->setPixmap(px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
 				hasThumb = true;
 			}
 		}
@@ -529,8 +561,7 @@ void LowerThirdDock::rebuildList()
 
 		auto *st = rowFrame->style();
 
-		cloneBtn->setIcon(
-			QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
+		cloneBtn->setIcon(QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
 		cloneBtn->setToolTip(tr("Clone lower third"));
 		cloneBtn->setFlat(true);
 
@@ -654,11 +685,14 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 	const std::string sid = id.toStdString();
 	const bool wasVisible = smart_lt::is_visible(sid);
 
-	smart_lt::toggle_visible(sid);
-	smart_lt::save_visible_json();
+	// Persist + notify (dock + ws)
+	const bool ok = smart_lt::toggle_visible_persist(sid);
+	if (!ok)
+		return;
 
 	const bool nowVisible = smart_lt::is_visible(sid);
 
+	// Preserve your repeat scheduling behavior
 	if (!wasVisible && nowVisible) {
 		if (auto *cfg = smart_lt::get_by_id(sid)) {
 			if (cfg->repeat_every_sec > 0) {
@@ -669,14 +703,13 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 				const qint64 now = QDateTime::currentMSecsSinceEpoch();
 				offAtMs_[id] = now + (qint64)visibleSec * 1000;
 
-				if (!nextOnMs_.contains(id)) {
+				if (!nextOnMs_.contains(id))
 					nextOnMs_[id] = now + (qint64)cfg->repeat_every_sec * 1000;
-				}
 			}
 		}
 	}
 
-	updateRowActiveStyles();
+	// UI will be updated by core event; countdown can be updated immediately
 	updateRowCountdowns();
 	emit requestSave();
 }
@@ -686,12 +719,7 @@ void LowerThirdDock::handleClone(const QString &id)
 	if (!smart_lt::has_output_dir())
 		return;
 
-	const std::string newId = smart_lt::clone_lower_third(id.toStdString());
-	if (newId.empty())
-		return;
-
-	rebuildList();
-	updateRowCountdowns();
+	smart_lt::clone_lower_third(id.toStdString());
 	emit requestSave();
 }
 
@@ -701,6 +729,7 @@ void LowerThirdDock::handleOpenSettings(const QString &id)
 	dlg.setLowerThirdId(id);
 	dlg.exec();
 
+	// Settings edits are local; rebuild to reflect title/subtitle, etc.
 	rebuildList();
 	updateRowCountdowns();
 	emit requestSave();
@@ -716,8 +745,6 @@ void LowerThirdDock::handleRemove(const QString &id)
 	nextOnMs_.remove(id);
 	offAtMs_.remove(id);
 
-	rebuildList();
-	updateRowCountdowns();
 	emit requestSave();
 }
 

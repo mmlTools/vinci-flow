@@ -15,12 +15,13 @@ class QKeySequenceEdit;
 class QLabel;
 class QTabWidget;
 class QSpinBox;
+class QSlider;
 
 namespace smart_lt::ui {
 
 struct CbxOption {
-  const char *label;
-  const char *value;
+	const char *label;
+	const char *value;
 };
 inline const std::vector<CbxOption> AnimInOptions = {
 	// --- Fading Entrances ---
@@ -97,146 +98,149 @@ inline const std::vector<CbxOption> AnimInOptions = {
 };
 
 inline const std::vector<CbxOption> AnimOutOptions = {
-    // --- Fading Exits ---
-    {"Fade Out", "animate__fadeOut"},
-    {"Fade Out Up", "animate__fadeOutUp"},
-    {"Fade Out Down", "animate__fadeOutDown"},
-    {"Fade Out Left", "animate__fadeOutLeft"},
-    {"Fade Out Right", "animate__fadeOutRight"},
-    {"Fade Out Up Big", "animate__fadeOutUpBig"},
-    {"Fade Out Down Big", "animate__fadeOutDownBig"},
-    {"Fade Out Left Big", "animate__fadeOutLeftBig"},
-    {"Fade Out Right Big", "animate__fadeOutRightBig"},
-    {"Fade Out Top Left", "animate__fadeOutTopLeft"},
-    {"Fade Out Top Right", "animate__fadeOutTopRight"},
-    {"Fade Out Bottom Left", "animate__fadeOutBottomLeft"},
-    {"Fade Out Bottom Right", "animate__fadeOutBottomRight"},
-    
-    // --- Back Exits ---
-    {"Back Out Up", "animate__backOutUp"},
-    {"Back Out Down", "animate__backOutDown"},
-    {"Back Out Left", "animate__backOutLeft"},
-    {"Back Out Right", "animate__backOutRight"},
-    
-    // --- Bouncing Exits ---
-    {"Bounce Out", "animate__bounceOut"},
-    {"Bounce Out Up", "animate__bounceOutUp"},
-    {"Bounce Out Down", "animate__bounceOutDown"},
-    {"Bounce Out Left", "animate__bounceOutLeft"},
-    {"Bounce Out Right", "animate__bounceOutRight"},
-    
-    // --- Zooming Exits ---
-    {"Zoom Out", "animate__zoomOut"},
-    {"Zoom Out Up", "animate__zoomOutUp"},
-    {"Zoom Out Down", "animate__zoomOutDown"},
-    {"Zoom Out Left", "animate__zoomOutLeft"},
-    {"Zoom Out Right", "animate__zoomOutRight"},
-    
-    // --- Sliding Exits ---
-    {"Slide Out Up", "animate__slideOutUp"},
-    {"Slide Out Down", "animate__slideOutDown"},
-    {"Slide Out Left", "animate__slideOutLeft"},
-    {"Slide Out Right", "animate__slideOutRight"},
+	// --- Fading Exits ---
+	{"Fade Out", "animate__fadeOut"},
+	{"Fade Out Up", "animate__fadeOutUp"},
+	{"Fade Out Down", "animate__fadeOutDown"},
+	{"Fade Out Left", "animate__fadeOutLeft"},
+	{"Fade Out Right", "animate__fadeOutRight"},
+	{"Fade Out Up Big", "animate__fadeOutUpBig"},
+	{"Fade Out Down Big", "animate__fadeOutDownBig"},
+	{"Fade Out Left Big", "animate__fadeOutLeftBig"},
+	{"Fade Out Right Big", "animate__fadeOutRightBig"},
+	{"Fade Out Top Left", "animate__fadeOutTopLeft"},
+	{"Fade Out Top Right", "animate__fadeOutTopRight"},
+	{"Fade Out Bottom Left", "animate__fadeOutBottomLeft"},
+	{"Fade Out Bottom Right", "animate__fadeOutBottomRight"},
 
-    // --- Rotating Exits ---
-    {"Rotate Out", "animate__rotateOut"},
-    {"Rotate Out Down Left", "animate__rotateOutDownLeft"},
-    {"Rotate Out Down Right", "animate__rotateOutDownRight"},
-    {"Rotate Out Up Left", "animate__rotateOutUpLeft"},
-    {"Rotate Out Up Right", "animate__rotateOutUpRight"},
-    
-    // --- Flippers & Specials ---
-    {"Flip Out X", "animate__flipOutX"},
-    {"Flip Out Y", "animate__flipOutY"},
-    {"Light Speed Out Left", "animate__lightSpeedOutLeft"},
-    {"Light Speed Out Right", "animate__lightSpeedOutRight"},
-    {"Hinge", "animate__hinge"},
-    {"Roll Out", "animate__rollOut"},
+	// --- Back Exits ---
+	{"Back Out Up", "animate__backOutUp"},
+	{"Back Out Down", "animate__backOutDown"},
+	{"Back Out Left", "animate__backOutLeft"},
+	{"Back Out Right", "animate__backOutRight"},
 
-    {"Custom (CSS class)", "custom"},
+	// --- Bouncing Exits ---
+	{"Bounce Out", "animate__bounceOut"},
+	{"Bounce Out Up", "animate__bounceOutUp"},
+	{"Bounce Out Down", "animate__bounceOutDown"},
+	{"Bounce Out Left", "animate__bounceOutLeft"},
+	{"Bounce Out Right", "animate__bounceOutRight"},
+
+	// --- Zooming Exits ---
+	{"Zoom Out", "animate__zoomOut"},
+	{"Zoom Out Up", "animate__zoomOutUp"},
+	{"Zoom Out Down", "animate__zoomOutDown"},
+	{"Zoom Out Left", "animate__zoomOutLeft"},
+	{"Zoom Out Right", "animate__zoomOutRight"},
+
+	// --- Sliding Exits ---
+	{"Slide Out Up", "animate__slideOutUp"},
+	{"Slide Out Down", "animate__slideOutDown"},
+	{"Slide Out Left", "animate__slideOutLeft"},
+	{"Slide Out Right", "animate__slideOutRight"},
+
+	// --- Rotating Exits ---
+	{"Rotate Out", "animate__rotateOut"},
+	{"Rotate Out Down Left", "animate__rotateOutDownLeft"},
+	{"Rotate Out Down Right", "animate__rotateOutDownRight"},
+	{"Rotate Out Up Left", "animate__rotateOutUpLeft"},
+	{"Rotate Out Up Right", "animate__rotateOutUpRight"},
+
+	// --- Flippers & Specials ---
+	{"Flip Out X", "animate__flipOutX"},
+	{"Flip Out Y", "animate__flipOutY"},
+	{"Light Speed Out Left", "animate__lightSpeedOutLeft"},
+	{"Light Speed Out Right", "animate__lightSpeedOutRight"},
+	{"Hinge", "animate__hinge"},
+	{"Roll Out", "animate__rollOut"},
+
+	{"Custom (CSS class)", "custom"},
 };
 
 inline const std::vector<CbxOption> LtPositionOptions = {
-  {"Bottom Left", "lt-pos-bottom-left"},
-  {"Bottom Right", "lt-pos-bottom-right"},
-  {"Top Left", "lt-pos-top-left"},
-  {"Top Right", "lt-pos-top-right"},
-  {"Screen Center", "lt-pos-center"},
+	{"Bottom Left", "lt-pos-bottom-left"}, {"Bottom Right", "lt-pos-bottom-right"}, {"Top Left", "lt-pos-top-left"},
+	{"Top Right", "lt-pos-top-right"},     {"Screen Center", "lt-pos-center"},
 };
 
 class LowerThirdSettingsDialog : public QDialog {
-    Q_OBJECT
+	Q_OBJECT
 public:
-    explicit LowerThirdSettingsDialog(QWidget *parent = nullptr);
-    ~LowerThirdSettingsDialog() override;
+	explicit LowerThirdSettingsDialog(QWidget *parent = nullptr);
+	~LowerThirdSettingsDialog() override;
 
-    void setLowerThirdId(const QString &id);
+	void setLowerThirdId(const QString &id);
 
 private slots:
-    void onSaveAndApply();
-    void onBrowseProfilePicture();
-    void onPickBgColor();
-    void onPickTextColor();
+	void onSaveAndApply();
+	void onBrowseProfilePicture();
+	void onPickBgColor();
+	void onPickTextColor();
 
-    void onImportTemplateClicked();
-    void onExportTemplateClicked();
+	void onImportTemplateClicked();
+	void onExportTemplateClicked();
 
-    void onOpenHtmlEditorDialog();
-    void onOpenCssEditorDialog();
-    void onOpenJsEditorDialog();
+	void onOpenHtmlEditorDialog();
+	void onOpenCssEditorDialog();
+	void onOpenJsEditorDialog();
 
-    void onAnimInChanged(int);
-    void onAnimOutChanged(int);
-
-private:
-    void loadFromState();
-    void saveToState();
-
-    void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
-    void updateCustomAnimFieldsVisibility();
-    void updateColorButton(QPushButton *btn, const QColor &c);
+	void onAnimInChanged(int);
+	void onAnimOutChanged(int);
 
 private:
-    QString currentId;
-    QString pendingProfilePicturePath;
+	void loadFromState();
+	void saveToState();
 
-    QLineEdit *titleEdit = nullptr;
-    QLineEdit *subtitleEdit = nullptr;
+	void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
+	void updateCustomAnimFieldsVisibility();
+	void updateColorButton(QPushButton *btn, const QColor &c);
 
-    QLineEdit *profilePictureEdit = nullptr;
-    QPushButton *browseProfilePictureBtn = nullptr;
+private:
+	QString currentId;
+	QString pendingProfilePicturePath;
 
-    QComboBox *animInCombo = nullptr;
-    QComboBox *animOutCombo = nullptr;
-    QLabel *customAnimInLabel = nullptr;
-    QLabel *customAnimOutLabel = nullptr;
-    QLineEdit *customAnimInEdit = nullptr;
-    QLineEdit *customAnimOutEdit = nullptr;
+	QLineEdit *titleEdit = nullptr;
+	QLineEdit *subtitleEdit = nullptr;
 
-    QFontComboBox *fontCombo = nullptr;
-    QComboBox *posCombo = nullptr;
+	QLineEdit *profilePictureEdit = nullptr;
+	QPushButton *browseProfilePictureBtn = nullptr;
 
-    QPushButton *bgColorBtn = nullptr;
-    QPushButton *textColorBtn = nullptr;
+	QComboBox *animInCombo = nullptr;
+	QComboBox *animOutCombo = nullptr;
+	QLabel *customAnimInLabel = nullptr;
+	QLabel *customAnimOutLabel = nullptr;
+	QLineEdit *customAnimInEdit = nullptr;
+	QLineEdit *customAnimOutEdit = nullptr;
 
-    QKeySequenceEdit *hotkeyEdit = nullptr;
-    QPushButton *clearHotkeyBtn = nullptr;
+	QFontComboBox *fontCombo = nullptr;
+	QComboBox *posCombo = nullptr;
 
-    QTabWidget *tplTabs = nullptr;
-    QPlainTextEdit *htmlEdit = nullptr;
-    QPlainTextEdit *cssEdit = nullptr;
-    QPlainTextEdit *jsEdit = nullptr;
+	QPushButton *bgColorBtn = nullptr;
+	QPushButton *textColorBtn = nullptr;
 
-    QPushButton *importBtn = nullptr;
-    QPushButton *exportBtn = nullptr;
+	QKeySequenceEdit *hotkeyEdit = nullptr;
+	QPushButton *clearHotkeyBtn = nullptr;
 
-    QDialogButtonBox *buttonBox = nullptr;
+	QTabWidget *tplTabs = nullptr;
+	QPlainTextEdit *htmlEdit = nullptr;
+	QPlainTextEdit *cssEdit = nullptr;
+	QPlainTextEdit *jsEdit = nullptr;
 
-    QColor *currentBgColor = nullptr;
-    QColor *currentTextColor = nullptr;
+	QPushButton *importBtn = nullptr;
+	QPushButton *exportBtn = nullptr;
 
-    QSpinBox *repeatEverySpin = nullptr;
-    QSpinBox *repeatVisibleSpin = nullptr;
+	QDialogButtonBox *buttonBox = nullptr;
+
+	QColor *currentBgColor = nullptr;
+	QColor *currentTextColor = nullptr;
+
+	QSlider *opacitySlider = nullptr;
+	QLabel *opacityValue = nullptr;
+
+	QSlider *radiusSlider = nullptr;
+	QLabel *radiusValue = nullptr;
+
+	QSpinBox *repeatEverySpin = nullptr;
+	QSpinBox *repeatVisibleSpin = nullptr;
 };
 
 } // namespace smart_lt::ui

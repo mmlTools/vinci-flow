@@ -33,10 +33,11 @@
 #include <QTabWidget>
 #include <QWidget>
 #include <QSpinBox>
+#include <QSlider>
 
 #include <unzip.h>
 #include <zip.h>
-
+#include <algorithm>
 #include <cstring>
 
 namespace smart_lt::ui {
@@ -281,7 +282,54 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		textColorBtn = new QPushButton(tr("Pick"), this);
 		g->addWidget(textColorBtn, row, 3);
 
+		row++;
+		g->addWidget(new QLabel(tr("Opacity:"), this), row, 0);
+
+		opacitySlider = new QSlider(Qt::Horizontal, this);
+		opacitySlider->setRange(0, 100); // 0..100
+		opacitySlider->setSingleStep(5); // 0.05 steps
+		opacitySlider->setPageStep(10);
+		opacitySlider->setToolTip(tr("0 = transparent, 100 = opaque"));
+		g->addWidget(opacitySlider, row, 1);
+
+		opacityValue = new QLabel(this);
+		opacityValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+		g->addWidget(opacityValue, row, 2, 1, 2); // span 2 cols
+
+		row++;
+		g->addWidget(new QLabel(tr("Radius:"), this), row, 0);
+
+		radiusSlider = new QSlider(Qt::Horizontal, this);
+		radiusSlider->setRange(0, 100); // 0..100
+		radiusSlider->setSingleStep(1);
+		radiusSlider->setPageStep(5);
+		radiusSlider->setToolTip(tr("Border radius percentage (0-100)"));
+		g->addWidget(radiusSlider, row, 1);
+
+		radiusValue = new QLabel(this);
+		radiusValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+		g->addWidget(radiusValue, row, 2, 1, 2);
+
 		root->addWidget(styleBox);
+
+		auto updateOpacityLabel = [this]() {
+			const int v = opacitySlider ? opacitySlider->value() : 0;
+			if (opacityValue)
+				opacityValue->setText(QString("%1 Units").arg(v));
+		};
+
+		auto updateRadiusLabel = [this]() {
+			const int v = radiusSlider ? radiusSlider->value() : 0;
+			if (radiusValue)
+				radiusValue->setText(QString("%1 Units").arg(v));
+		};
+
+		connect(opacitySlider, &QSlider::valueChanged, this,
+			[updateOpacityLabel](int) { updateOpacityLabel(); });
+		connect(radiusSlider, &QSlider::valueChanged, this, [updateRadiusLabel](int) { updateRadiusLabel(); });
+
+		updateOpacityLabel();
+		updateRadiusLabel();
 
 		connect(bgColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickBgColor);
 		connect(textColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickTextColor);
@@ -344,7 +392,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		tplLayout->addWidget(tplTabs, 1);
 		root->addWidget(tplCard, 1);
 	}
-	
+
 	// Footer: Import/Export (left) + Cancel / Save&Apply (right)
 	{
 		auto *footer = new QHBoxLayout();
@@ -461,6 +509,34 @@ void LowerThirdSettingsDialog::loadFromState()
 	updateColorButton(bgColorBtn, bg);
 	updateColorButton(textColorBtn, fg);
 
+	// Defaults if missing (defensive)
+	int op = 85;
+	int rad = 18;
+
+	// If you added these to cfg already:
+	op = cfg->opacity;
+	rad = cfg->radius;
+
+	// Clamp defensively
+	op = std::max(0, std::min(100, op));
+	rad = std::max(0, std::min(100, rad));
+
+	// Enforce 0.05 steps on UI (multiple of 5)
+	op = (op / 5) * 5;
+
+	if (opacitySlider)
+		opacitySlider->setValue(op);
+	if (radiusSlider)
+		radiusSlider->setValue(rad);
+
+	// Update labels
+	if (opacityValue) {
+		opacityValue->setText(QString("%1 Units").arg(op));
+	}
+	if (radiusValue) {
+		radiusValue->setText(QString("%1 Units").arg(rad));
+	}
+
 	pendingProfilePicturePath.clear();
 	updateCustomAnimFieldsVisibility();
 }
@@ -489,6 +565,19 @@ void LowerThirdSettingsDialog::saveToState()
 		cfg->bg_color = currentBgColor->name(QColor::HexRgb).toStdString();
 	if (currentTextColor)
 		cfg->text_color = currentTextColor->name(QColor::HexRgb).toStdString();
+
+	if (opacitySlider) {
+		int op = opacitySlider->value();
+		op = std::max(0, std::min(100, op));
+		op = (op / 5) * 5;
+		cfg->opacity = op;
+	}
+
+	if (radiusSlider) {
+		int rad = radiusSlider->value();
+		rad = std::max(0, std::min(100, rad));
+		cfg->radius = rad;
+	}
 
 	cfg->hotkey = hotkeyEdit->keySequence().toString(QKeySequence::PortableText).toStdString();
 	cfg->repeat_every_sec = repeatEverySpin->value();
@@ -697,6 +786,8 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	o["lt_position"] = QString::fromStdString(cfg->lt_position);
 	o["bg_color"] = QString::fromStdString(cfg->bg_color);
 	o["text_color"] = QString::fromStdString(cfg->text_color);
+	o["opacity"] = cfg->opacity;
+	o["radius"] = cfg->radius;
 	o["hotkey"] = QString::fromStdString(cfg->hotkey);
 	o["repeat_every_sec"] = cfg->repeat_every_sec;
 	o["repeat_visible_sec"] = cfg->repeat_visible_sec;
@@ -788,6 +879,13 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->lt_position = obj.value("lt_position").toString().toStdString();
 	cfg->bg_color = obj.value("bg_color").toString().toStdString();
 	cfg->text_color = obj.value("text_color").toString().toStdString();
+	cfg->opacity = obj.value("opacity").toInt(cfg->opacity);
+	cfg->radius = obj.value("radius").toInt(cfg->radius);
+
+	cfg->opacity = std::max(0, std::min(100, cfg->opacity));
+	cfg->opacity = (cfg->opacity / 5) * 5;
+	cfg->radius = std::max(0, std::min(100, cfg->radius));
+
 	cfg->hotkey = obj.value("hotkey").toString().toStdString();
 	cfg->repeat_every_sec = obj.value("repeat_every_sec").toInt(0);
 	cfg->repeat_visible_sec = obj.value("repeat_visible_sec").toInt(0);
