@@ -56,8 +56,11 @@ signals:
 private slots:
 	void onBrowseOutputFolder();
 	void onAddLowerThird();
+	void onManageCarousels();
 
 private:
+	QPushButton *manageCarouselsBtn_ = nullptr;
+
 	static QString formatCountdownMs(qint64 ms);
 	void updateRowCountdowns();
 	void updateRowCountdownFor(const LowerThirdRowUi &rowUi);

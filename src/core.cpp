@@ -7,6 +7,7 @@
 #include <random>
 #include <cctype>
 #include <mutex>
+#include <unordered_set>
 
 #include <QDir>
 #include <QFile>
@@ -30,6 +31,7 @@ static int g_target_browser_width = sltBrowserWidth;
 static int g_target_browser_height = sltBrowserHeight;
 static bool g_dock_exclusive_mode = false;
 static std::vector<lower_third_cfg> g_items;
+static std::vector<carousel_cfg> g_carousels;
 static std::vector<std::string> g_visible;
 static std::string g_last_html_path;
 
@@ -832,6 +834,46 @@ lower_third_cfg *get_by_id(const std::string &id)
 	return nullptr;
 }
 
+
+// -------------------------
+// Carousel state access
+// -------------------------
+std::vector<carousel_cfg> &carousels()
+{
+	return g_carousels;
+}
+
+const std::vector<carousel_cfg> &carousels_const()
+{
+	return g_carousels;
+}
+
+carousel_cfg *get_carousel_by_id(const std::string &id)
+{
+	const std::string sid = sanitize_id(id);
+	for (auto &c : g_carousels) {
+		if (c.id == sid)
+			return &c;
+	}
+	return nullptr;
+}
+
+std::vector<std::string> carousels_containing(const std::string &lower_third_id)
+{
+	std::vector<std::string> out;
+	const std::string sid = sanitize_id(lower_third_id);
+	for (const auto &c : g_carousels) {
+		for (const auto &mid : c.members) {
+			if (mid == sid) {
+				out.push_back(c.id);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+
 std::vector<std::string> visible_ids()
 {
 	return g_visible;
@@ -941,12 +983,14 @@ bool load_state_json()
 	const std::string p = path_state_json();
 	if (!QFile::exists(QString::fromStdString(p))) {
 		g_items.clear();
+		g_carousels.clear();
 		return true;
 	}
 
 	const std::string txt = read_text_file(p);
 	if (txt.empty()) {
 		g_items.clear();
+		g_carousels.clear();
 		return true;
 	}
 
@@ -955,11 +999,13 @@ bool load_state_json()
 	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
 		LOGW("Invalid lt-state.json; reset");
 		g_items.clear();
+		g_carousels.clear();
 		return false;
 	}
 
 	const QJsonObject root = doc.object();
 	const QJsonArray items = root.value("items").toArray();
+	const QJsonArray cars = root.value("carousels").toArray();
 
 	std::vector<lower_third_cfg> out;
 	out.reserve((size_t)items.size());
@@ -1051,7 +1097,98 @@ bool load_state_json()
 		return a.id < b.id;
 	});
 
+	
+// Carousels (dock-only)
+std::vector<carousel_cfg> outCars;
+outCars.reserve((size_t)cars.size());
+for (const QJsonValue v : cars) {
+	if (!v.isObject())
+		continue;
+	const QJsonObject o = v.toObject();
+
+	carousel_cfg c;
+	c.id = sanitize_id(o.value("id").toString().toStdString());
+	if (c.id.empty())
+		c.id = new_id();
+
+	c.title = o.value("title").toString().toStdString();
+	c.order = o.value("order").toInt(-1);
+	c.order_mode = o.value("order_mode").toInt(0);
+	c.loop = o.value("loop").toBool(true);
+	// Defaults are dock-only and can be changed via the Manage Carousels dialog.
+	// Interval: 5000ms, Visible: 15000ms
+	c.visible_ms = o.value("visible_ms").toInt(15000);
+	c.interval_ms = o.value("interval_ms").toInt(5000);
+	c.dock_color = o.value("dock_color").toString().toStdString();
+
+	if (c.visible_ms < 250)
+		c.visible_ms = 250;
+	if (c.interval_ms < 0)
+		c.interval_ms = 0;
+	if (c.order_mode != 1)
+		c.order_mode = 0;
+	if (c.order_mode < 0 || c.order_mode > 1)
+		c.order_mode = 0;
+
+	const QJsonArray mem = o.value("members").toArray();
+	for (const QJsonValue mv : mem) {
+		const std::string mid = sanitize_id(mv.toString().toStdString());
+		if (!mid.empty())
+			c.members.push_back(mid);
+	}
+
+	if (c.title.empty())
+		c.title = "Carousel";
+
+	outCars.push_back(std::move(c));
+}
+
+int nextCarOrder = 0;
+for (auto &c : outCars) {
+	if (c.order < 0)
+		c.order = nextCarOrder;
+	nextCarOrder = std::max(nextCarOrder, c.order + 1);
+}
+std::sort(outCars.begin(), outCars.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+	if (a.order != b.order)
+		return a.order < b.order;
+	return a.id < b.id;
+});
+
+	g_carousels = std::move(outCars);
+
+	// Enforce invariant: a lower third can belong to at most one carousel.
+	// If state contains duplicates, keep the first carousel (by current sort order) and drop from later ones.
+	{
+		std::unordered_set<std::string> claimed;
+		for (auto &car : g_carousels) {
+			std::vector<std::string> uniq;
+			uniq.reserve(car.members.size());
+			for (const auto &midRaw : car.members) {
+				const std::string mid = sanitize_id(midRaw);
+				if (mid.empty())
+					continue;
+				if (claimed.find(mid) != claimed.end())
+					continue;
+				claimed.insert(mid);
+				uniq.push_back(mid);
+			}
+			car.members = std::move(uniq);
+		}
+	}
+
 	g_items = std::move(out);
+
+	// Ensure per-item repeat timers are disabled for any lower third that belongs to a carousel.
+	// This keeps legacy state files consistent with the carousel runner logic.
+	for (const auto &car : g_carousels) {
+		for (const auto &mid : car.members) {
+			if (auto *lt = get_by_id(mid)) {
+				lt->repeat_every_sec = 0;
+				lt->repeat_visible_sec = 0;
+			}
+		}
+	}
 	return true;
 }
 
@@ -1061,7 +1198,7 @@ bool save_state_json()
 		return false;
 
 	QJsonObject root;
-	root["version"] = 2;
+	root["version"] = 3;
 
 	QJsonArray items;
 	for (const auto &c : g_items) {
@@ -1096,6 +1233,28 @@ bool save_state_json()
 
 		items.append(o);
 	}
+
+	
+QJsonArray cars;
+for (const auto &c : g_carousels) {
+	QJsonObject o;
+	o["id"] = QString::fromStdString(c.id);
+	o["title"] = QString::fromStdString(c.title);
+	o["order"] = c.order;
+	o["order_mode"] = c.order_mode;
+	o["loop"] = c.loop;
+	o["visible_ms"] = c.visible_ms;
+	o["interval_ms"] = c.interval_ms;
+	o["dock_color"] = QString::fromStdString(c.dock_color);
+
+	QJsonArray mem;
+	for (const auto &mid : c.members)
+		mem.append(QString::fromStdString(mid));
+	o["members"] = mem;
+
+	cars.append(o);
+}
+root["carousels"] = cars;
 
 	root["items"] = items;
 
@@ -1537,6 +1696,175 @@ void init_from_disk()
 // -------------------------
 // CRUD helpers (persist + notify list change)
 // -------------------------
+
+// -------------------------
+// Carousel CRUD helpers (dock-only; persist + notify list change)
+// -------------------------
+std::string add_default_carousel()
+{
+	if (!has_output_dir())
+		return {};
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg c;
+	c.id = new_id();
+	while (get_carousel_by_id(c.id))
+		c.id = new_id();
+
+	int maxOrder = -1;
+	for (const auto &it : g_carousels)
+		maxOrder = std::max(maxOrder, it.order);
+	c.order = maxOrder + 1;
+
+	c.title = "Carousel";
+	c.order_mode = 0;
+	c.loop = true;
+	// Defaults per request
+	c.visible_ms = 15000;
+	c.interval_ms = 5000;
+	c.dock_color = "#2EA043";
+
+	g_carousels.push_back(c);
+	std::sort(g_carousels.begin(), g_carousels.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+		if (a.order != b.order)
+			return a.order < b.order;
+		return a.id < b.id;
+	});
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c.id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return c.id;
+}
+
+bool update_carousel(const carousel_cfg &c)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg *dst = get_carousel_by_id(c.id);
+	if (!dst)
+		return false;
+
+	*dst = c;
+	if (dst->order_mode != 1)
+		dst->order_mode = 0;
+	// Any lower third that is part of a carousel should not use per-item repeat.
+	for (const auto &mid : dst->members) {
+		if (auto *lt = get_by_id(mid)) {
+			lt->repeat_every_sec = 0;
+			lt->repeat_visible_sec = 0;
+		}
+	}
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c.id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
+bool remove_carousel(const std::string &carousel_id)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	const std::string sid = sanitize_id(carousel_id);
+	const auto before = g_carousels.size();
+
+	g_carousels.erase(std::remove_if(g_carousels.begin(), g_carousels.end(),
+					 [&](const carousel_cfg &c) { return c.id == sid; }),
+			 g_carousels.end());
+
+	const bool removed = (g_carousels.size() != before);
+	if (!removed)
+		return false;
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = sid;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
+bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg *c = get_carousel_by_id(carousel_id);
+	if (!c)
+		return false;
+
+	c->members.clear();
+	c->members.reserve(members.size());
+	for (const auto &m : members) {
+		const std::string mid = sanitize_id(m);
+		if (mid.empty())
+			continue;
+
+		// A lower third may belong to only one carousel at a time.
+		// If it is already claimed by a different carousel, do not move it implicitly.
+		bool ownedByOther = false;
+		for (const auto &other : g_carousels) {
+			if (other.id == c->id)
+				continue;
+			if (std::find(other.members.begin(), other.members.end(), mid) != other.members.end()) {
+				ownedByOther = true;
+				break;
+			}
+		}
+		if (ownedByOther)
+			continue;
+
+		c->members.push_back(mid);
+
+		// When a lower third is added to a carousel, per-item repeat timers become redundant.
+		// Enforce 0 to avoid confusion (dock-only setting; overlay behavior is driven by the carousel runner).
+		if (auto *lt = get_by_id(mid)) {
+			lt->repeat_every_sec = 0;
+			lt->repeat_visible_sec = 0;
+		}
+	}
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c->id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
 std::string add_default_lower_third()
 {
 	if (!has_output_dir())
@@ -1685,6 +2013,11 @@ bool remove_lower_third(const std::string &id)
 		return false;
 
 	set_visible_nosave(sid, false);
+
+	// Remove from any carousels
+	for (auto &car : g_carousels) {
+		car.members.erase(std::remove(car.members.begin(), car.members.end(), sid), car.members.end());
+	}
 
 	save_state_json();
 	save_visible_json();

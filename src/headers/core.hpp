@@ -68,6 +68,34 @@ struct lower_third_cfg {
 	int repeat_visible_sec = 0; // how long to keep visible when auto-shown
 };
 
+
+struct carousel_cfg {
+	std::string id;
+	std::string title;
+	int order = 0;
+
+	// Item ordering when running the carousel
+	// 0 = Linear (in member list order)
+	// 1 = Randomized (shuffled per run / cycle)
+	int order_mode = 0;
+
+	// If true, carousel repeats indefinitely. If false, it stops after the last item is shown once.
+	bool loop = true;
+
+	// Timing controls (milliseconds)
+	// Defaults:
+	//  - visible_ms:  15000 (how long a lower third stays visible)
+	//  - interval_ms: 5000  (time between activating the next lower third)
+	int visible_ms  = 15000;
+	int interval_ms = 5000;
+
+	// Dock-only color for marking items in this carousel (e.g. "#2EA043")
+	std::string dock_color;
+
+	// Member lower-third IDs (in display order)
+	std::vector<std::string> members;
+};
+
 // -------------------------
 // Core event bus (bidirectional sync point)
 // -------------------------
@@ -125,6 +153,21 @@ bool save_global_config();
 std::vector<lower_third_cfg> &all();
 const std::vector<lower_third_cfg> &all_const();
 lower_third_cfg *get_by_id(const std::string &id);
+
+// -------------------------
+// Carousel state access (persisted in lt-state.json; dock-only)
+// -------------------------
+std::vector<carousel_cfg> &carousels();
+const std::vector<carousel_cfg> &carousels_const();
+carousel_cfg *get_carousel_by_id(const std::string &id);
+std::vector<std::string> carousels_containing(const std::string &lower_third_id);
+
+// CRUD helpers for dock actions (persist + notify)
+std::string add_default_carousel();
+bool update_carousel(const carousel_cfg &c);
+bool remove_carousel(const std::string &carousel_id);
+bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members);
+
 
 // -------------------------
 // Visible set

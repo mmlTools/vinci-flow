@@ -11,7 +11,14 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QAbstractItemView>
+#include <QColorDialog>
+#include <QDialog>
+#include <QFormLayout>
+#include <QListWidget>
 #include <QLabel>
+#include <QColor>
+#include <QSet>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QCheckBox>
@@ -35,8 +42,174 @@
 #include <QAbstractButton>
 #include <QDesktopServices>
 #include <QMessageBox>
+#include <QRandomGenerator>
 
 static QWidget *g_dockWidget = nullptr;
+
+
+
+struct CarouselRuntime {
+	bool running = false;
+	int index = 0; // position in seq
+	bool phaseShow = true;
+	QString currentId;
+	QVector<int> seq;
+};
+
+static QHash<QString, CarouselRuntime> g_carouselRuns;
+
+static void applyCarouselRowStyle(QFrame *rowFrame)
+{
+	if (!rowFrame)
+		return;
+
+	const bool active = rowFrame->property("sltActive").toBool();
+	const bool inCar = rowFrame->property("sltInCarousel").toBool();
+	const QString col = rowFrame->property("sltCarouselColor").toString();
+
+	// Only apply custom background when inactive; active styling is handled by QSS.
+	// We still keep the dynamic properties so the global stylesheet can provide a default green tint.
+	if (!active && inCar && !col.isEmpty()) {
+		QColor c(col);
+		if (c.isValid()) {
+			rowFrame->setStyleSheet(QStringLiteral(
+				"QFrame#sltRowFrame{ background: rgba(%1,%2,%3,0.14); border: 1px solid rgba(%1,%2,%3,0.55); }")
+							.arg(c.red())
+							.arg(c.green())
+							.arg(c.blue()));
+			return;
+		}
+	}
+
+	// Clear any per-row override.
+	rowFrame->setStyleSheet(QString());
+}
+
+static void stopCarouselRun(const QString &carouselId)
+{
+	auto it = g_carouselRuns.find(carouselId);
+	if (it == g_carouselRuns.end())
+		return;
+
+	// Best-effort hide currently shown item
+	if (!it->currentId.isEmpty())
+		smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+
+	it->running = false;
+	it->index = 0;
+	it->phaseShow = true;
+	it->currentId.clear();
+	it->seq.clear();
+}
+
+static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId);
+
+static void startCarouselRun(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId)
+{
+	if (!dock)
+		return;
+
+	auto *car = smart_lt::get_carousel_by_id(carouselId.toStdString());
+	if (!car || car->members.empty())
+		return;
+
+	auto &rt = g_carouselRuns[carouselId];
+	rt.running = true;
+	rt.index = 0;
+	rt.phaseShow = true;
+	rt.currentId.clear();
+	rt.seq.clear();
+
+	scheduleCarouselStep(dock, carouselId);
+}
+
+static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId)
+{
+	if (!dock)
+		return;
+
+	auto it = g_carouselRuns.find(carouselId);
+	if (it == g_carouselRuns.end() || !it->running)
+		return;
+
+	auto *car = smart_lt::get_carousel_by_id(carouselId.toStdString());
+	if (!car || car->members.empty()) {
+		stopCarouselRun(carouselId);
+		return;
+	}
+
+	const int visibleMs = std::max(0, car->visible_ms);
+	const int intervalMs = std::max(0, car->interval_ms);
+	const int count = (int)car->members.size();
+
+	// Build / refresh sequence
+	if (it->seq.size() != count) {
+		it->seq.clear();
+		it->seq.reserve(count);
+		for (int i = 0; i < count; ++i)
+			it->seq.push_back(i);
+		if (car->order_mode == 1) {
+			// Shuffle
+			auto *rng = QRandomGenerator::global();
+			for (int i = count - 1; i > 0; --i) {
+				const int j = (int)rng->bounded((quint32)(i + 1));
+				std::swap(it->seq[i], it->seq[j]);
+			}
+		}
+		it->index = 0;
+	}
+
+	if (it->phaseShow) {
+		// hide previous
+		if (!it->currentId.isEmpty())
+			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+
+		// End condition (non-loop): stop before showing beyond last
+		if (!car->loop && it->index >= count) {
+			stopCarouselRun(carouselId);
+			return;
+		}
+
+		// Loop condition: wrap and reshuffle per cycle if randomized
+		if (it->index >= count) {
+			it->index = 0;
+			if (car->order_mode == 1) {
+				auto *rng = QRandomGenerator::global();
+				for (int i = count - 1; i > 0; --i) {
+					const int j = (int)rng->bounded((quint32)(i + 1));
+					std::swap(it->seq[i], it->seq[j]);
+				}
+			}
+		}
+
+		const int memberIdx = it->seq.value(it->index, 0);
+		const QString nextId = QString::fromStdString(car->members[(size_t)memberIdx]);
+		it->currentId = nextId;
+
+		smart_lt::set_visible_persist(nextId.toStdString(), true);
+
+		it->phaseShow = false;
+		QTimer::singleShot(visibleMs, dock, [dock, carouselId]() { scheduleCarouselStep(dock, carouselId); });
+	} else {
+		// hide current and advance index
+		if (!it->currentId.isEmpty())
+			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+
+		it->currentId.clear();
+		it->index++;
+
+		// If we just finished the last item and loop is disabled, stop now.
+		if (!car->loop && it->index >= count) {
+			stopCarouselRun(carouselId);
+			return;
+		}
+
+		it->phaseShow = true;
+		QTimer::singleShot(intervalMs, dock, [dock, carouselId]() { scheduleCarouselStep(dock, carouselId); });
+	}
+}
+
+
 
 namespace smart_lt::ui {
 
@@ -74,6 +247,7 @@ void LowerThirdDock::onCoreEvent(const smart_lt::core_event &ev)
 
 			if (row.row) {
 				row.row->setProperty("sltActive", QVariant(active));
+				applyCarouselRowStyle(row.row);
 				row.row->style()->unpolish(row.row);
 				row.row->style()->polish(row.row);
 				row.row->update();
@@ -117,6 +291,10 @@ QFrame#sltRowFrame {
   background: transparent;
 }
 QFrame#sltRowFrame:hover { background: rgba(255,255,255,0.04); }
+QFrame#sltRowFrame[sltInCarousel="true"] {
+  background: rgba(46,160,67,0.14);
+  border: 1px solid rgba(46,160,67,0.55);
+}
 QFrame#sltRowFrame[sltActive="true"] {
   background: rgba(88,166,255,0.16);
   border: 1px solid rgba(88,166,255,0.9);
@@ -275,6 +453,19 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		addBtn->setToolTip(tr("Add new lower third"));
 		addBtn->setFlat(true);
 
+manageCarouselsBtn_ = new QPushButton(this);
+manageCarouselsBtn_->setCursor(Qt::PointingHandCursor);
+manageCarouselsBtn_->setToolTip(tr("Manage carousels"));
+manageCarouselsBtn_->setFlat(true);
+
+QIcon carIco = QIcon::fromTheme(QStringLiteral("view-media-playlist"));
+if (carIco.isNull())
+	carIco = QIcon::fromTheme(QStringLiteral("media-playlist-shuffle"));
+if (carIco.isNull())
+	carIco = st->standardIcon(QStyle::SP_FileDialogDetailedView);
+manageCarouselsBtn_->setIcon(carIco);
+
+
 		QIcon plus = QIcon::fromTheme(QStringLiteral("list-add"));
 		if (plus.isNull())
 			plus = st->standardIcon(QStyle::SP_DialogYesButton);
@@ -282,9 +473,11 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 
 		row->addWidget(infoBtn);
 		row->addWidget(addBtn);
+		row->addWidget(manageCarouselsBtn_);
 		rootLayout->addLayout(row);
 
 		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
+		connect(manageCarouselsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageCarousels);
 
 		connect(infoBtn, &QPushButton::clicked, this, [this]() {
 			QMessageBox box(this);
@@ -605,6 +798,294 @@ void LowerThirdDock::onAddLowerThird()
 	emit requestSave();
 }
 
+void LowerThirdDock::onManageCarousels()
+{
+	if (!smart_lt::has_output_dir()) {
+		QMessageBox::information(this, tr("Output folder not set"),
+					 tr("Please choose an output folder first."));
+		return;
+	}
+
+	QDialog dlg(this);
+	dlg.setWindowTitle(tr("Lower Third Carousels"));
+	dlg.setModal(true);
+	dlg.resize(860, 520);
+
+	auto *root = new QHBoxLayout(&dlg);
+
+	// Left: carousel list
+	auto *left = new QVBoxLayout();
+	auto *carList = new QListWidget(&dlg);
+	carList->setSelectionMode(QAbstractItemView::SingleSelection);
+	left->addWidget(carList, 1);
+
+	auto *leftBtns = new QHBoxLayout();
+	auto *btnAdd = new QPushButton(tr("Add"), &dlg);
+	auto *btnDel = new QPushButton(tr("Delete"), &dlg);
+	auto *btnStart = new QPushButton(tr("Start"), &dlg);
+	auto *btnStop = new QPushButton(tr("Stop"), &dlg);
+	leftBtns->addWidget(btnAdd);
+	leftBtns->addWidget(btnDel);
+	leftBtns->addStretch(1);
+	leftBtns->addWidget(btnStart);
+	leftBtns->addWidget(btnStop);
+	left->addLayout(leftBtns);
+
+	root->addLayout(left, 1);
+
+	// Right: editor
+	auto *right = new QVBoxLayout();
+	auto *form = new QFormLayout();
+
+	auto *titleEd = new QLineEdit(&dlg);
+	auto *visibleSpin = new QSpinBox(&dlg);
+	visibleSpin->setRange(250, 600000);
+	visibleSpin->setSuffix(tr(" ms"));
+
+	auto *intervalSpin = new QSpinBox(&dlg);
+	intervalSpin->setRange(0, 600000);
+	intervalSpin->setSuffix(tr(" ms"));
+
+	auto *orderCmb = new QComboBox(&dlg);
+	orderCmb->addItem(tr("Linear"), 0);
+	orderCmb->addItem(tr("Randomized"), 1);
+
+	auto *loopChk = new QCheckBox(tr("Loop carousel"), &dlg);
+
+	auto *colorEd = new QLineEdit(&dlg);
+	colorEd->setPlaceholderText(tr("#2EA043"));
+
+	auto *pickColor = new QPushButton(tr("Pick…"), &dlg);
+	auto *colorRow = new QHBoxLayout();
+	colorRow->addWidget(colorEd, 1);
+	colorRow->addWidget(pickColor);
+
+	form->addRow(tr("Title"), titleEd);
+	form->addRow(tr("Order"), orderCmb);
+	form->addRow(QString(), loopChk);
+	form->addRow(tr("Visible duration"), visibleSpin);
+	form->addRow(tr("Time between items"), intervalSpin);
+	form->addRow(tr("Dock highlight color"), colorRow);
+
+	right->addLayout(form);
+
+	auto *membersLbl = new QLabel(tr("Members (lower thirds)"), &dlg);
+	right->addWidget(membersLbl);
+
+	auto *members = new QListWidget(&dlg);
+	members->setSelectionMode(QAbstractItemView::NoSelection);
+	right->addWidget(members, 1);
+
+	auto *btnApply = new QPushButton(tr("Apply"), &dlg);
+	btnApply->setDefault(true);
+	right->addWidget(btnApply, 0, Qt::AlignRight);
+
+	root->addLayout(right, 2);
+
+	// Helpers
+	auto refreshList = [&]() {
+		carList->clear();
+		for (const auto &c : smart_lt::carousels_const()) {
+			auto *it = new QListWidgetItem(QString::fromStdString(c.title.empty() ? c.id : c.title));
+			it->setData(Qt::UserRole, QString::fromStdString(c.id));
+			carList->addItem(it);
+		}
+	};
+
+	auto refreshMembers = [&](const std::string &carouselId) {
+		members->clear();
+		QSet<QString> inSet;
+		if (auto *car = smart_lt::get_carousel_by_id(carouselId)) {
+			for (const auto &m : car->members)
+				inSet.insert(QString::fromStdString(m));
+		}
+
+		// Enforce UX rule: a lower third can belong to only one carousel.
+		// Do not show lower thirds that are already assigned to a different carousel.
+		const QString qCurCarId = QString::fromStdString(carouselId);
+
+		for (const auto &lt : smart_lt::all_const()) {
+			const auto owners = smart_lt::carousels_containing(lt.id);
+			if (!owners.empty() && owners.front() != carouselId)
+				continue;
+
+			auto *it = new QListWidgetItem(QString::fromStdString(lt.label.empty() ? lt.id : lt.label));
+			it->setData(Qt::UserRole, QString::fromStdString(lt.id));
+			it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+			it->setCheckState(inSet.contains(QString::fromStdString(lt.id)) ? Qt::Checked : Qt::Unchecked);
+			members->addItem(it);
+		}
+	};
+
+	auto updateStartStopButtons = [&]() {
+		auto *it = carList->currentItem();
+		const QString qid = it ? it->data(Qt::UserRole).toString() : QString();
+		if (qid.isEmpty()) {
+			btnStart->setEnabled(false);
+			btnStop->setEnabled(false);
+			return;
+		}
+
+		bool running = false;
+		auto rt = g_carouselRuns.find(qid);
+		if (rt != g_carouselRuns.end())
+			running = rt->running;
+
+		bool hasMembers = false;
+		if (auto *car = smart_lt::get_carousel_by_id(qid.toStdString()))
+			hasMembers = !car->members.empty();
+
+		btnStart->setEnabled(!running && hasMembers);
+		btnStop->setEnabled(running);
+	};
+
+	auto loadSelected = [&]() {
+		auto *it = carList->currentItem();
+		const QString qid = it ? it->data(Qt::UserRole).toString() : QString();
+		if (qid.isEmpty()) {
+			titleEd->clear();
+			orderCmb->setCurrentIndex(0);
+			loopChk->setChecked(true);
+			visibleSpin->setValue(15000);
+			intervalSpin->setValue(5000);
+			colorEd->clear();
+			members->clear();
+			updateStartStopButtons();
+			return;
+		}
+
+		if (auto *car = smart_lt::get_carousel_by_id(qid.toStdString())) {
+			titleEd->setText(QString::fromStdString(car->title));
+			orderCmb->setCurrentIndex(car->order_mode == 1 ? 1 : 0);
+			loopChk->setChecked(car->loop);
+			visibleSpin->setValue(std::max(250, car->visible_ms));
+			intervalSpin->setValue(std::max(0, car->interval_ms));
+			colorEd->setText(QString::fromStdString(car->dock_color));
+			refreshMembers(car->id);
+		}
+		updateStartStopButtons();
+	};
+
+	refreshList();
+	if (carList->count() > 0)
+		carList->setCurrentRow(0);
+	loadSelected();
+
+	QObject::connect(carList, &QListWidget::currentItemChanged, &dlg, [&](QListWidgetItem *, QListWidgetItem *) {
+		loadSelected();
+	});
+
+	QObject::connect(pickColor, &QPushButton::clicked, &dlg, [&]() {
+		const QColor cur(colorEd->text().trimmed());
+		const QColor picked = QColorDialog::getColor(cur.isValid() ? cur : QColor("#2EA043"), &dlg, tr("Pick dock color"));
+		if (picked.isValid())
+			colorEd->setText(picked.name(QColor::HexRgb));
+	});
+
+	QObject::connect(btnAdd, &QPushButton::clicked, &dlg, [&]() {
+		const std::string id = smart_lt::add_default_carousel();
+		refreshList();
+		for (int i = 0; i < carList->count(); ++i) {
+			auto *it = carList->item(i);
+			if (it && it->data(Qt::UserRole).toString().toStdString() == id) {
+				carList->setCurrentRow(i);
+				break;
+			}
+		}
+	});
+
+	QObject::connect(btnDel, &QPushButton::clicked, &dlg, [&]() {
+		auto *it = carList->currentItem();
+		if (!it)
+			return;
+		const QString qid = it->data(Qt::UserRole).toString();
+		if (qid.isEmpty())
+			return;
+
+		const auto res = QMessageBox::question(&dlg, tr("Delete carousel"),
+					      tr("Delete this carousel? This will not delete any lower thirds."),
+					      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+		if (res != QMessageBox::Yes)
+			return;
+
+		stopCarouselRun(qid);
+		smart_lt::remove_carousel(qid.toStdString());
+		refreshList();
+		if (carList->count() > 0)
+			carList->setCurrentRow(0);
+		loadSelected();
+	});
+
+	QObject::connect(btnStart, &QPushButton::clicked, &dlg, [&]() {
+		auto *it = carList->currentItem();
+		if (!it)
+			return;
+		const QString qid = it->data(Qt::UserRole).toString();
+		if (qid.isEmpty())
+			return;
+		startCarouselRun(this, qid);
+		updateStartStopButtons();
+	});
+
+	QObject::connect(btnStop, &QPushButton::clicked, &dlg, [&]() {
+		auto *it = carList->currentItem();
+		if (!it)
+			return;
+		const QString qid = it->data(Qt::UserRole).toString();
+		if (qid.isEmpty())
+			return;
+		stopCarouselRun(qid);
+		updateStartStopButtons();
+	});
+
+	QObject::connect(btnApply, &QPushButton::clicked, &dlg, [&]() {
+		auto *it = carList->currentItem();
+		if (!it)
+			return;
+		const QString qid = it->data(Qt::UserRole).toString();
+		if (qid.isEmpty())
+			return;
+
+		auto *car = smart_lt::get_carousel_by_id(qid.toStdString());
+		if (!car)
+			return;
+
+		carousel_cfg upd = *car;
+		upd.title = titleEd->text().trimmed().toStdString();
+		upd.order_mode = orderCmb->currentData().toInt();
+		upd.loop = loopChk->isChecked();
+		upd.visible_ms = visibleSpin->value();
+		upd.interval_ms = intervalSpin->value();
+		upd.dock_color = colorEd->text().trimmed().toStdString();
+
+		smart_lt::update_carousel(upd);
+
+		std::vector<std::string> mem;
+		for (int i = 0; i < members->count(); ++i) {
+			auto *mit = members->item(i);
+			if (!mit)
+				continue;
+			if (mit->checkState() == Qt::Checked)
+				mem.push_back(mit->data(Qt::UserRole).toString().toStdString());
+		}
+		smart_lt::set_carousel_members(qid.toStdString(), mem);
+
+		// Refresh member list: items may become unavailable/available for other carousels after this change.
+		refreshMembers(qid.toStdString());
+		updateStartStopButtons();
+
+		// Update list label and refresh dock styles
+		it->setText(QString::fromStdString(upd.title.empty() ? upd.id : upd.title));
+		rebuildList();
+	});
+
+	dlg.exec();
+
+	// Ensure dock reflects latest persisted carousel state
+	rebuildList();
+}
+
+
 // -------------------------
 // List rendering
 // -------------------------
@@ -626,7 +1107,25 @@ void LowerThirdDock::rebuildList()
 		auto *rowFrame = new QFrame(listContainer);
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
 		rowFrame->setProperty("sltActive", QVariant(smart_lt::is_visible(cfg.id)));
+
+// Mark carousel membership (dock-only; does not affect overlay output)
+const auto carIds = smart_lt::carousels_containing(cfg.id);
+if (!carIds.empty()) {
+	rowFrame->setProperty("sltInCarousel", QVariant(true));
+
+	std::string col = "#2EA043";
+	if (auto *car = smart_lt::get_carousel_by_id(carIds.front())) {
+		if (!car->dock_color.empty())
+			col = car->dock_color;
+	}
+	rowFrame->setProperty("sltCarouselColor", QString::fromStdString(col));
+} else {
+	rowFrame->setProperty("sltInCarousel", QVariant(false));
+	rowFrame->setProperty("sltCarouselColor", QString());
+}
+
 		rowFrame->setCursor(Qt::PointingHandCursor);
+		applyCarouselRowStyle(rowFrame);
 
 		auto *h = new QHBoxLayout(rowFrame);
 		h->setContentsMargins(8, 4, 8, 4);
@@ -784,6 +1283,7 @@ void LowerThirdDock::updateRowActiveStyles()
 
 		if (row.row) {
 			row.row->setProperty("sltActive", QVariant(active));
+				applyCarouselRowStyle(row.row);
 			row.row->style()->unpolish(row.row);
 			row.row->style()->polish(row.row);
 			row.row->update();
@@ -923,6 +1423,22 @@ void LowerThirdDock::handleRemove(const QString &id)
 {
 	if (!smart_lt::has_output_dir())
 		return;
+
+
+// Confirmation (and warn about carousel membership)
+const std::string sid = id.toStdString();
+const auto cars = smart_lt::carousels_containing(sid);
+
+QString msg = tr("Remove this lower third?\n\nThis action cannot be undone.");
+if (!cars.empty()) {
+	msg += tr("\n\nNote: This lower third is part of %1 carousel(s) and will also be removed from those carousels.")
+		       .arg((int)cars.size());
+}
+
+const auto res = QMessageBox::question(this, tr("Confirm Removal"), msg,
+				      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+if (res != QMessageBox::Yes)
+	return;
 
 	smart_lt::remove_lower_third(id.toStdString());
 
