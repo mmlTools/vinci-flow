@@ -26,6 +26,9 @@ namespace smart_lt {
 // -------------------------
 static std::string g_output_dir;
 static std::string g_target_browser_source;
+static int g_target_browser_width = sltBrowserWidth;
+static int g_target_browser_height = sltBrowserHeight;
+static bool g_dock_exclusive_mode = false;
 static std::vector<lower_third_cfg> g_items;
 static std::vector<std::string> g_visible;
 static std::string g_last_html_path;
@@ -214,6 +217,14 @@ static void load_global_config()
 		g_target_browser_source = tgt.toStdString();
 		LOGI("Loaded target_browser_source: '%s'", g_target_browser_source.c_str());
 	}
+
+	const int w = root.value("target_browser_width").toInt(sltBrowserWidth);
+	const int h = root.value("target_browser_height").toInt(sltBrowserHeight);
+	if (w > 0)
+		g_target_browser_width = w;
+	if (h > 0)
+		g_target_browser_height = h;
+	g_dock_exclusive_mode = root.value("dock_exclusive_mode").toBool(false);
 }
 
 bool save_global_config()
@@ -228,6 +239,9 @@ bool save_global_config()
 	QJsonObject root;
 	root["output_dir"] = QString::fromStdString(g_output_dir);
 	root["target_browser_source"] = QString::fromStdString(g_target_browser_source);
+	root["target_browser_width"] = g_target_browser_width;
+	root["target_browser_height"] = g_target_browser_height;
+	root["dock_exclusive_mode"] = g_dock_exclusive_mode;
 
 	const QJsonDocument doc(root);
 	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
@@ -245,6 +259,45 @@ static std::string find_latest_lt_html()
 	return d.filePath(list.first()).toStdString();
 }
 
+static std::string fixed_lt_html_path()
+{
+	return has_output_dir() ? join_path(output_dir(), "lt.html") : std::string();
+}
+
+// Upgrade helper: older versions generated timestamped lt-*.html.
+// If lt.html is missing but lt-*.html exists, rename the newest file to lt.html.
+static std::string migrate_timestamp_html_to_fixed()
+{
+	if (!has_output_dir())
+		return {};
+
+	const std::string fixed = fixed_lt_html_path();
+	if (file_exists(fixed))
+		return fixed;
+
+	const std::string latest = find_latest_lt_html();
+	if (latest.empty())
+		return {};
+
+	QFile f(QString::fromStdString(latest));
+	if (!f.exists())
+		return {};
+
+	QFile::remove(QString::fromStdString(fixed));
+	if (!f.rename(QString::fromStdString(fixed))) {
+		LOGW("Failed migrating '%s' -> 'lt.html'", latest.c_str());
+		return latest; 
+	}
+
+	QDir d(QString::fromStdString(output_dir()));
+	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
+	for (const QString &fn : list)
+		d.remove(fn);
+
+	LOGI("Migrated timestamped html to '%s'", fixed.c_str());
+	return fixed;
+}
+
 // -------------------------
 // Defaults
 // -------------------------
@@ -252,6 +305,8 @@ static lower_third_cfg default_cfg()
 {
 	lower_third_cfg c;
 	c.id = new_id();
+	c.label = "Lower Third Label";
+	c.order = 0;
 	c.title = "New Lower Third";
 	c.subtitle = "Subtitle";
 	c.profile_picture.clear();
@@ -816,13 +871,12 @@ bool set_visible_persist(const std::string &id, bool visible)
 	if (!has_output_dir() || id.empty())
 		return false;
 
-	// keep in sync with existing items only
 	if (!get_by_id(id))
 		return false;
 
 	const bool before = is_visible(id);
 	if (before == visible) {
-		return true; // no-op
+		return true;
 	}
 
 	set_visible_nosave(id, visible);
@@ -920,6 +974,9 @@ bool load_state_json()
 		if (c.id.empty())
 			c.id = new_id();
 
+		c.label = o.value("label").toString().toStdString();
+		c.order = o.value("order").toInt(-1);
+
 		c.title = o.value("title").toString().toStdString();
 		c.subtitle = o.value("subtitle").toString().toStdString();
 		c.profile_picture = o.value("profile_picture").toString().toStdString();
@@ -976,8 +1033,23 @@ bool load_state_json()
 		if (c.text_color.empty())
 			c.text_color = "#F9FAFB";
 
+		if (c.label.empty())
+			c.label = c.title.empty() ? c.id : c.title;
+
 		out.push_back(std::move(c));
 	}
+
+	int nextOrder = 0;
+	for (auto &c : out) {
+		if (c.order < 0)
+			c.order = nextOrder;
+		nextOrder = std::max(nextOrder, c.order + 1);
+	}
+	std::sort(out.begin(), out.end(), [](const lower_third_cfg &a, const lower_third_cfg &b) {
+		if (a.order != b.order)
+			return a.order < b.order;
+		return a.id < b.id;
+	});
 
 	g_items = std::move(out);
 	return true;
@@ -989,12 +1061,14 @@ bool save_state_json()
 		return false;
 
 	QJsonObject root;
-	root["version"] = 1;
+	root["version"] = 2;
 
 	QJsonArray items;
 	for (const auto &c : g_items) {
 		QJsonObject o;
 		o["id"] = QString::fromStdString(c.id);
+		o["label"] = QString::fromStdString(c.label);
+		o["order"] = c.order;
 		o["title"] = QString::fromStdString(c.title);
 		o["subtitle"] = QString::fromStdString(c.subtitle);
 		o["profile_picture"] = QString::fromStdString(c.profile_picture);
@@ -1165,13 +1239,15 @@ bool regenerate_merged_css_js()
 	return true;
 }
 
-std::string generate_timestamp_html()
+static std::string generate_fixed_html()
 {
 	if (!has_output_dir())
 		return {};
 
-	const std::string fn = "lt-" + now_timestamp_string() + ".html";
-	const std::string abs = join_path(output_dir(), fn);
+	const std::string abs = fixed_lt_html_path();
+	if (abs.empty())
+		return {};
+
 	if (!write_text_file(abs, build_full_html()))
 		return {};
 	return abs;
@@ -1186,7 +1262,6 @@ static obs_source_t *get_target_browser_source()
 	if (g_target_browser_source.empty())
 		return nullptr;
 
-	// Returns with refcount +1
 	return obs_get_source_by_name(g_target_browser_source.c_str());
 }
 
@@ -1231,18 +1306,79 @@ bool set_target_browser_source_name(const std::string &name)
 	return save_global_config();
 }
 
+int target_browser_width()
+{
+	return g_target_browser_width;
+}
+
+int target_browser_height()
+{
+	return g_target_browser_height;
+}
+
+bool set_target_browser_dimensions(int width, int height)
+{
+	if (width < 1)
+		width = 1;
+	if (height < 1)
+		height = 1;
+
+	g_target_browser_width = width;
+	g_target_browser_height = height;
+
+	obs_source_t *src = get_target_browser_source();
+	if (src) {
+		obs_data_t *s = obs_source_get_settings(src);
+		obs_data_set_int(s, "width", (int64_t)g_target_browser_width);
+		obs_data_set_int(s, "height", (int64_t)g_target_browser_height);
+		obs_source_update(src, s);
+		obs_data_release(s);
+		obs_source_release(src);
+	}
+
+	return save_global_config();
+}
+
+bool dock_exclusive_mode()
+{
+	return g_dock_exclusive_mode;
+}
+
+bool set_dock_exclusive_mode(bool enabled)
+{
+	g_dock_exclusive_mode = enabled;
+	return save_global_config();
+}
+
 bool target_browser_source_exists()
 {
 	obs_source_t *src = get_target_browser_source();
 	if (!src)
 		return false;
 
-	// Defensive: ensure the selection is still a Browser Source
 	const char *id = obs_source_get_id(src);
 	const bool ok = (id && std::string(id) == sltBrowserSourceId);
 
 	obs_source_release(src);
 	return ok;
+}
+
+static void refreshSourceSettings(obs_source_t *s)
+{
+	if (!s)
+		return;
+
+	obs_data_t *data = obs_source_get_settings(s);
+	obs_source_update(s, data);
+	obs_data_release(data);
+
+	if (strcmp(obs_source_get_id(s), "browser_source") == 0) {
+		obs_properties_t *sourceProperties = obs_source_properties(s);
+		obs_property_t *property = obs_properties_get(sourceProperties, "refreshnocache");
+		if (property)
+			obs_property_button_clicked(property, s);
+		obs_properties_destroy(sourceProperties);
+	}
 }
 
 bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
@@ -1259,7 +1395,6 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 		return false;
 	}
 
-	// Defensive: ensure it's still a browser source
 	const char *id = obs_source_get_id(src);
 	if (!id || std::string(id) != sltBrowserSourceId) {
 		LOGW("Target source '%s' is not a Browser Source.", g_target_browser_source.c_str());
@@ -1271,9 +1406,13 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	obs_data_set_bool(s, "is_local_file", true);
 	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
 	obs_data_set_bool(s, "smart_lt_managed", true);
+	obs_data_set_int(s, "width", (int64_t)g_target_browser_width);
+	obs_data_set_int(s, "height", (int64_t)g_target_browser_height);
 	obs_source_update(src, s);
 
 	obs_data_release(s);
+
+	refreshSourceSettings(src);
 	obs_source_release(src);
 	return true;
 }
@@ -1291,7 +1430,9 @@ bool rebuild_and_swap()
 	if (!regenerate_merged_css_js())
 		return false;
 
-	const std::string newHtml = generate_timestamp_html();
+	migrate_timestamp_html_to_fixed();
+
+	const std::string newHtml = generate_fixed_html();
 	if (newHtml.empty())
 		return false;
 
@@ -1306,12 +1447,10 @@ bool rebuild_and_swap()
 		}
 	}
 
-	delete_old_lt_html_keep(newHtml);
 	g_last_html_path = newHtml;
 	return true;
 }
 
-// Force reload state+visible from disk and rebuild/swap (with notifications)
 bool reload_from_disk_and_rebuild()
 {
 	if (!has_output_dir())
@@ -1324,7 +1463,6 @@ bool reload_from_disk_and_rebuild()
 	const bool okReb   = rebuild_and_swap();
 	const bool ok      = okState && okVis && okReb;
 
-	// Emit Reloaded + ListChanged(reason=Reload)
 	core_event r;
 	r.type = event_type::Reloaded;
 	r.ok = ok;
@@ -1359,7 +1497,6 @@ bool set_output_dir_and_load(const std::string &dir)
 
 	const bool ok = rebuild_and_swap();
 
-	// Treat as reload for listeners
 	core_event l;
 	l.type = event_type::ListChanged;
 	l.reason = list_change_reason::Reload;
@@ -1381,8 +1518,11 @@ void init_from_disk()
 	load_state_json();
 	load_visible_json();
 
-	g_last_html_path = find_latest_lt_html();
-	if (!g_last_html_path.empty()) {
+	g_last_html_path = migrate_timestamp_html_to_fixed();
+	if (g_last_html_path.empty())
+		g_last_html_path = fixed_lt_html_path();
+
+	if (!g_last_html_path.empty() && file_exists(g_last_html_path)) {
 		if (target_browser_source_exists()) {
 			swap_target_browser_source_to_file(g_last_html_path);
 		} else {
@@ -1410,7 +1550,19 @@ std::string add_default_lower_third()
 	while (get_by_id(c.id))
 		c.id = new_id();
 
+	int maxOrder = -1;
+	for (const auto &it : g_items)
+		maxOrder = std::max(maxOrder, it.order);
+	c.order = maxOrder + 1;
+	if (c.label.empty())
+		c.label = c.title.empty() ? c.id : c.title;
+
 	g_items.push_back(c);
+	std::sort(g_items.begin(), g_items.end(), [](const lower_third_cfg &a, const lower_third_cfg &b) {
+		if (a.order != b.order)
+			return a.order < b.order;
+		return a.id < b.id;
+	});
 	set_visible_nosave(c.id, true);
 
 	if (!save_state_json())
@@ -1420,7 +1572,6 @@ std::string add_default_lower_third()
 	if (!rebuild_and_swap())
 		return {};
 
-	// notify list changed + visibility changed (optional but useful)
 	{
 		core_event l;
 		l.type = event_type::ListChanged;
@@ -1464,9 +1615,24 @@ std::string clone_lower_third(const std::string &id)
 	else
 		c.title = "Lower Third (Copy)";
 
+	if (c.label.empty())
+		c.label = c.title;
+	else
+		c.label += " (Copy)";
+
+	int maxOrder = -1;
+	for (const auto &it : g_items)
+		maxOrder = std::max(maxOrder, it.order);
+	c.order = maxOrder + 1;
+
 	const std::string newId = c.id;
 
 	g_items.push_back(c);
+	std::sort(g_items.begin(), g_items.end(), [](const lower_third_cfg &a, const lower_third_cfg &b) {
+		if (a.order != b.order)
+			return a.order < b.order;
+		return a.id < b.id;
+	});
 	set_visible_nosave(newId, true);
 
 	if (!save_state_json())
@@ -1544,6 +1710,53 @@ bool remove_lower_third(const std::string &id)
 	}
 
 	return ok;
+}
+
+bool move_lower_third(const std::string &id, int delta)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
+
+	const std::string sid = sanitize_id(id);
+	if (sid.empty())
+		return false;
+
+	if (g_items.size() < 2)
+		return false;
+
+	int idx = -1;
+	for (int i = 0; i < (int)g_items.size(); ++i) {
+		if (g_items[(size_t)i].id == sid) {
+			idx = i;
+			break;
+		}
+	}
+	if (idx < 0)
+		return false;
+
+	const int newIdx = idx + delta;
+	if (newIdx < 0 || newIdx >= (int)g_items.size())
+		return false;
+
+	std::swap(g_items[(size_t)idx], g_items[(size_t)newIdx]);
+	for (int i = 0; i < (int)g_items.size(); ++i)
+		g_items[(size_t)i].order = i;
+
+	if (!save_state_json())
+		return false;
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = sid;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
 }
 
 } // namespace smart_lt

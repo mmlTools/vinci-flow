@@ -19,6 +19,7 @@ class QShortcut;
 class QEvent;
 class QTimer;
 class QComboBox;
+class QSpinBox;
 
 namespace smart_lt {
 struct core_event; // provided by core (event bus)
@@ -33,6 +34,8 @@ struct LowerThirdRowUi {
 	QLabel *subLbl = nullptr;
 	QLabel *thumbnailLbl = nullptr;
 	QCheckBox *visibleCheck = nullptr;
+	QPushButton *upBtn = nullptr;
+	QPushButton *downBtn = nullptr;
 	QPushButton *cloneBtn = nullptr;
 	QPushButton *settingsBtn = nullptr;
 	QPushButton *removeBtn = nullptr;
@@ -76,6 +79,8 @@ private:
 	// NEW: combo-box workflow
 	void populateBrowserSources(bool keepSelection = true);
 	void onBrowserSourceChanged(int index);
+	void onBrowserSizeChanged();
+	void onExclusiveModeChanged(int state);
 
 	// NEW: core event bus sync (bidirectional with websocket)
 	void onCoreEvent(const smart_lt::core_event &ev);
@@ -92,6 +97,17 @@ private:
 	// Browser Source selector row
 	QComboBox *browserSourceCombo = nullptr;
 	QPushButton *refreshSourcesBtn = nullptr;
+
+	// Browser Source sizing row
+	QSpinBox *browserWidthSpin = nullptr;
+	QSpinBox *browserHeightSpin = nullptr;
+	QPushButton *applyBrowserSizeBtn = nullptr;
+
+	// Dock behavior
+	QCheckBox *exclusiveModeCheck = nullptr;
+
+	// Footer tools
+	QPushButton *infoBtn = nullptr;
 
 	// Add
 	QPushButton *addBtn = nullptr;

@@ -175,6 +175,7 @@ public:
 private slots:
 	void onSaveAndApply();
 	void onBrowseProfilePicture();
+	void onDeleteProfilePicture();
 	void onPickBgColor();
 	void onPickTextColor();
 
@@ -201,10 +202,12 @@ private:
 	QString pendingProfilePicturePath;
 
 	QLineEdit *titleEdit = nullptr;
+	QLineEdit *labelEdit = nullptr;
 	QLineEdit *subtitleEdit = nullptr;
 
 	QLineEdit *profilePictureEdit = nullptr;
 	QPushButton *browseProfilePictureBtn = nullptr;
+	QPushButton *deleteProfilePictureBtn = nullptr;
 
 	QComboBox *animInCombo = nullptr;
 	QComboBox *animOutCombo = nullptr;
