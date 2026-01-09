@@ -8,6 +8,7 @@
 #include <cctype>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 
 #include <QDir>
 #include <QFile>
@@ -144,6 +145,130 @@ static std::string replace_all(std::string s, const std::string &from, const std
 	}
 	return s;
 }
+
+
+// -------------------------
+// CSS keyframes extraction / dedupe
+// -------------------------
+static bool is_ident_char(char c)
+{
+	return std::isalnum((unsigned char)c) || c == '_' || c == '-';
+}
+
+static std::string normalize_ws_no_space(const std::string &s)
+{
+	std::string out;
+	out.reserve(s.size());
+	for (char c : s) {
+		if (!std::isspace((unsigned char)c))
+			out.push_back(c);
+	}
+	return out;
+}
+
+// Replace occurrences of identifier 'from' with 'to' when it appears as a whole identifier.
+// This is used to rewrite animation-name references after resolving keyframe name conflicts.
+static std::string replace_whole_ident(std::string s, const std::string &from, const std::string &to)
+{
+	if (from.empty())
+		return s;
+
+	auto is_boundary = [](char c) { return !is_ident_char(c); };
+
+	size_t pos = 0;
+	while ((pos = s.find(from, pos)) != std::string::npos) {
+		const bool left_ok = (pos == 0) || is_boundary(s[pos - 1]);
+		const bool right_ok = (pos + from.size() >= s.size()) || is_boundary(s[pos + from.size()]);
+		if (left_ok && right_ok) {
+			s.replace(pos, from.size(), to);
+			pos += to.size();
+		} else {
+			pos += from.size();
+		}
+	}
+	return s;
+}
+
+struct extracted_keyframes {
+	std::string at_rule; // "@keyframes" or "@-webkit-keyframes"
+	std::string name;    // parsed name (may be empty if malformed)
+	std::string block;   // full block text
+	std::string norm;    // normalized for dedupe
+};
+
+static void extract_keyframes_blocks(std::string &css, std::vector<extracted_keyframes> &out)
+{
+	auto find_next = [&](size_t start) -> std::pair<size_t, std::string> {
+		const size_t p1 = css.find("@keyframes", start);
+		const size_t p2 = css.find("@-webkit-keyframes", start);
+		if (p1 == std::string::npos && p2 == std::string::npos)
+			return {std::string::npos, {}};
+		if (p2 == std::string::npos || (p1 != std::string::npos && p1 < p2))
+			return {p1, "@keyframes"};
+		return {p2, "@-webkit-keyframes"};
+	};
+
+	size_t cur = 0;
+	while (true) {
+		auto [pos, atr] = find_next(cur);
+		if (pos == std::string::npos)
+			break;
+
+		// Parse name: after at-rule token, skip whitespace, read identifier
+		size_t nameStart = pos + atr.size();
+		while (nameStart < css.size() && std::isspace((unsigned char)css[nameStart]))
+			nameStart++;
+
+		size_t nameEnd = nameStart;
+		while (nameEnd < css.size() && is_ident_char(css[nameEnd]))
+			nameEnd++;
+
+		std::string name;
+		if (nameEnd > nameStart)
+			name = css.substr(nameStart, nameEnd - nameStart);
+
+		// Find opening brace
+		size_t braceOpen = css.find('{', nameEnd);
+		if (braceOpen == std::string::npos) {
+			cur = nameEnd;
+			continue;
+		}
+
+		// Match braces
+		int depth = 0;
+		size_t i = braceOpen;
+		for (; i < css.size(); i++) {
+			if (css[i] == '{')
+				depth++;
+			else if (css[i] == '}') {
+				depth--;
+				if (depth == 0) {
+					const size_t endPos = i + 1;
+					const std::string block = css.substr(pos, endPos - pos);
+
+					extracted_keyframes kf;
+					kf.at_rule = atr;
+					kf.name = name;
+					kf.block = block;
+					kf.norm = normalize_ws_no_space(block);
+
+					out.push_back(std::move(kf));
+
+					// Remove from css (leave a newline to avoid accidental token joining)
+					css.replace(pos, endPos - pos, "\n");
+					cur = pos;
+					break;
+				}
+			}
+		}
+
+		if (depth != 0) {
+			// Unbalanced braces; abort to avoid infinite loop
+			break;
+		}
+	}
+}
+
 
 static void delete_old_lt_html_keep(const std::string &keepAbsPath)
 {
@@ -473,9 +598,11 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 		const std::string inC = resolve_in_class(c);
 		const std::string outC = resolve_out_class(c);
 		int delay = 0;
+		const bool customMode = (c.anim_in == "custom") || (c.anim_out == "custom");
 
 		map += "    \"" + c.id +
 		       "\": { "
+		       "mode: \""+ std::string(customMode ? "custom" : "builtin") + "\", "
 		       "inCls: " +
 		       (inC.empty() ? "null" : ("\"" + inC + "\"")) +
 		       ", outCls: " + (outC.empty() ? "null" : ("\"" + outC + "\"")) +
@@ -519,6 +646,15 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
   function wantsShow(el) { return el.dataset.want === "1"; }
   function wantsHide(el) { return el.dataset.want === "0"; }
+
+  function isCustom(el, cfg) {
+    return (cfg && cfg.mode === "custom") || el.dataset.sltMode === "custom";
+  }
+
+  function dispatch(el, name, detail) {
+    try { el.dispatchEvent(new CustomEvent(name, { detail })); } catch (e) {}
+  }
+
 
   function nextOp(el) {
     el.__slt_op = (el.__slt_op || 0) + 1;
@@ -577,6 +713,51 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       ensureCurrent(el, op);
       return true;
     });
+  }
+
+
+  async function runCustomShow(el, cfg) {
+    const op = nextOp(el);
+    if (!wantsShow(el)) return;
+
+    el.dataset.state = "showing";
+
+    // Mount element into layout without touching opacity/transform.
+    // Custom CSS/JS owns all visual/animation properties.
+    el.style.display = "block";
+    el.classList.remove("slt-hidden");
+    el.classList.remove("slt-visible"); // avoid display forcing clashes
+
+    dispatch(el, "slt:show", { id: el.id, op });
+
+    // Preferred custom hook
+    await runHook(el, "__slt_show", op);
+
+    if (!wantsShow(el)) return;
+
+    el.dataset.state = "visible";
+  }
+
+  async function runCustomHide(el, cfg) {
+    const op = nextOp(el);
+    if (!wantsHide(el)) return;
+
+    el.dataset.state = "hiding";
+
+    dispatch(el, "slt:hide", { id: el.id, op });
+
+    // Preferred custom hook
+    await runHook(el, "__slt_hide", op);
+
+    if (!wantsHide(el)) return;
+
+    el.dataset.state = "hidden";
+
+    // Default: fully unmount after custom hide completes.
+    // Authors can opt out by setting data-slt-auto-display="0" on the <li>.
+    if (el.dataset.sltAutoDisplay !== "0") {
+      el.style.display = "none";
+    }
   }
 
   async function applyIn(el, cfg) {
@@ -678,6 +859,22 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
         const shouldShow = wantsShow(el);
         const state = el.dataset.state || "hidden";
 
+        // Custom mode: the template fully owns all visual state/animation.
+        // Base script only signals lifecycle and (optionally) mounts/unmounts.
+        if (isCustom(el, cfg)) {
+          if (shouldShow) {
+            if (state !== "visible" && state !== "showing") {
+              runCustomShow(el, cfg);
+            }
+          } else {
+            if (state !== "hidden" && state !== "hiding") {
+              runCustomHide(el, cfg);
+            }
+          }
+          continue;
+        }
+
+        // Built-in mode (animate.css): base script owns the animation + visibility classes.
         if (shouldShow) {
           if (state !== "visible" && state !== "showing") {
             applyIn(el, cfg);
@@ -752,7 +949,10 @@ static std::string build_full_html()
 			inner = replace_all(inner, "<img ", "<img onerror=\"this.style.display='none'\" ");
 		}
 
-		html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\">";
+		const bool customMode = (c.anim_in == "custom") || (c.anim_out == "custom");
+
+		html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\"" +
+		        (customMode ? " data-slt-mode=\"custom\"" : "") + ">";
 		html += inner;
 		html += "</li>\n";
 	}
@@ -1360,7 +1560,7 @@ bool regenerate_merged_css_js()
   top: 50%;
   transform: translate(-50%, -50%);
 }
-  
+
 .lt-pos-top-center {
   left: 50%;
   top: var(--slt-safe-margin);
@@ -1376,8 +1576,102 @@ bool regenerate_merged_css_js()
 )CSS";
 
 	css += "\n/* Per-LT scoped styles */\n";
-	for (const auto &c : g_items)
-		css += "\n" + scope_css_best_effort(c);
+
+	// Keyframes registry: dedupe by name+content, resolve conflicts by renaming per-LT.
+	// - If same name + identical content => keep one.
+	// - If same name + different content => rename to <name>_<ltid> and rewrite references in that LT CSS.
+	std::unordered_map<std::string, std::string> kfNameToNorm;
+	std::unordered_map<std::string, std::string> kfNameToBlock;
+	std::vector<std::string> kfOrder;
+
+	for (const auto &c : g_items) {
+		// Expand placeholders up-front (so extracted keyframes are final).
+		std::string per = c.css_template;
+		per = replace_all(per, "{{ID}}", c.id);
+		per = replace_all(per, "{{BG_COLOR}}", c.bg_color);
+		per = replace_all(per, "{{OPACITY}}", std::to_string(c.opacity));
+		per = replace_all(per, "{{RADIUS}}", std::to_string(c.radius));
+		per = replace_all(per, "{{TEXT_COLOR}}", c.text_color);
+		per = replace_all(per, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
+
+		// Extract keyframes so scope_css_best_effort never touches 0%/from/to selectors.
+		std::vector<extracted_keyframes> extracted;
+		extract_keyframes_blocks(per, extracted);
+
+		// Register/dedupe keyframes and resolve name collisions.
+		for (auto &kf : extracted) {
+			// If no parsed name, treat as "content-only" and append if unique.
+			if (kf.name.empty()) {
+				const std::string sig = kf.norm;
+				bool exists = false;
+				for (const auto &kv : kfNameToNorm) {
+					if (kv.second == sig) {
+						exists = true;
+						break;
+					}
+				}
+				if (!exists) {
+					const std::string anonName = "kf_" + c.id + "_" + std::to_string(kfOrder.size());
+					kfNameToNorm[anonName] = sig;
+					kfNameToBlock[anonName] = kf.block;
+					kfOrder.push_back(anonName);
+				}
+				continue;
+			}
+
+			auto it = kfNameToNorm.find(kf.name);
+			if (it == kfNameToNorm.end()) {
+				// First appearance of this name
+				kfNameToNorm[kf.name] = kf.norm;
+				kfNameToBlock[kf.name] = kf.block;
+				kfOrder.push_back(kf.name);
+				continue;
+			}
+
+			if (it->second == kf.norm) {
+				// Exact duplicate: ignore
+				continue;
+			}
+
+			// Conflict: same name, different content => rename this LT's keyframes
+			const std::string oldName = kf.name;
+			const std::string newName = oldName + "_" + c.id;
+
+			// Update header in the extracted block (best-effort, deterministic)
+			const std::string fromHdr = kf.at_rule + std::string(" ") + oldName;
+			const std::string toHdr = kf.at_rule + std::string(" ") + newName;
+			kf.block = replace_all(kf.block, fromHdr, toHdr);
+			kf.name = newName;
+			kf.norm = normalize_ws_no_space(kf.block);
+
+			// Rewrite references in this LT CSS (animation-name and shorthand cases)
+			per = replace_whole_ident(per, oldName, newName);
+
+			// Register renamed variant
+			kfNameToNorm[kf.name] = kf.norm;
+			kfNameToBlock[kf.name] = kf.block;
+			kfOrder.push_back(kf.name);
+		}
+
+		// Now scope per-LT selectors (keyframes removed; safe)
+		lower_third_cfg tmp = c;
+		tmp.css_template = per;
+		css += "\n" + scope_css_best_effort(tmp);
+	}
+
+	// Append deduped keyframes at the end of lt-styles.css
+	css += "\n/* Keyframes (deduped) */\n";
+	{
+		std::unordered_set<std::string> emitted;
+		for (const auto &name : kfOrder) {
+			if (!emitted.insert(name).second)
+				continue;
+			auto it = kfNameToBlock.find(name);
+			if (it != kfNameToBlock.end()) {
+				css += "\n" + it->second + "\n";
+			}
+		}
+	}
 
 	if (!write_text_file(path_styles_css(), css)) {
 		LOGW("Failed writing lt-styles.css");
