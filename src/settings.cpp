@@ -1,4 +1,3 @@
-// settings.cpp
 #define LOG_TAG "[" PLUGIN_NAME "][settings]"
 #include "settings.hpp"
 
@@ -57,9 +56,6 @@
 
 namespace smart_lt::ui {
 
-// ----------------------------
-// unzip / zip helpers (kept)
-// ----------------------------
 static bool unzip_to_dir(const QString &zipPath, const QString &destDir, QString &htmlPath, QString &cssPath,
 			 QString &jsPath, QString &jsonPath, QString &profilePath)
 {
@@ -150,13 +146,13 @@ static bool zip_write_file(zipFile zf, const char *internalName, const QByteArra
 	return true;
 }
 
-// ----------------------------
-// Dialog
-// ----------------------------
 LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(parent)
 {
 	setWindowTitle(tr("Lower Third Settings"));
 	resize(820, 720);
+
+	setWindowModality(Qt::NonModal);
+	setModal(false);
 
 	auto *root = new QVBoxLayout(this);
 	root->setContentsMargins(10, 10, 10, 10);
@@ -231,9 +227,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 			stack->setCurrentIndex(row);
 	});
 
-	// ------------------------------------------------------------
-	// Content & Media page
-	// ------------------------------------------------------------
 	{
 		auto *contentBox = new QGroupBox(tr("Content && Media"), this);
 		auto *g = new QGridLayout(contentBox);
@@ -241,26 +234,22 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		int row = 0;
 
-		// Row 0: Label
 		g->addWidget(new QLabel(tr("Dock Label:"), this), row, 0);
 		labelEdit = new QLineEdit(this);
 		labelEdit->setToolTip(tr("Display-only label used in the dock list"));
 		g->addWidget(labelEdit, row, 1, 1, 3);
 
 		row++;
-		// Row 1: Title
 		g->addWidget(new QLabel(tr("Title:"), this), row, 0);
 		titleEdit = new QLineEdit(this);
 		g->addWidget(titleEdit, row, 1, 1, 3);
 
 		row++;
-		// Row 2: Subtitle
 		g->addWidget(new QLabel(tr("Subtitle:"), this), row, 0);
 		subtitleEdit = new QLineEdit(this);
 		g->addWidget(subtitleEdit, row, 1, 1, 3);
 
 		row++;
-		// Row 3: Profile Picture
 		g->addWidget(new QLabel(tr("Profile picture:"), this), row, 0);
 		auto *picRow = new QHBoxLayout();
 		picRow->setContentsMargins(0, 0, 0, 0);
@@ -428,9 +417,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		contentPageLayout->addStretch(1);
 	}
 
-	// ------------------------------------------------------------
-	// Style page
-	// ------------------------------------------------------------
 	{
 		auto *styleBox = new QGroupBox(tr("Style"), this);
 		auto *g = new QGridLayout(styleBox);
@@ -560,9 +546,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		stylePageLayout->addStretch(1);
 	}
 
-	// ------------------------------------------------------------
-	// Templates page
-	// ------------------------------------------------------------
 	{
 		auto *tplCard = new QGroupBox(tr("Templates"), this);
 		auto *tplLayout = new QVBoxLayout(tplCard);
@@ -615,9 +598,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		tplLayout->addWidget(tplTabs, /*stretch*/ 1);
 
-		// ------------------------------------------------------------
-		// Placeholders panel BELOW the editors (copy/paste friendly)
-		// ------------------------------------------------------------
 		auto *phBox = new QGroupBox(tr("Template Placeholders"), tplCard);
 		auto *phLayout = new QVBoxLayout(phBox);
 		phLayout->setContentsMargins(8, 8, 8, 8);
@@ -667,9 +647,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		templatesPageLayout->addStretch(1);
 	}
 
-	// ------------------------------------------------------------
-	// Footer: Import/Export (left) + Cancel / Save&Apply (right)
-	// ------------------------------------------------------------
 	{
 		auto *footer = new QHBoxLayout();
 		footer->setContentsMargins(0, 0, 0, 0);
@@ -948,10 +925,8 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 	saveToState();
 
 	smart_lt::rebuild_and_swap();
-
-	QMessageBox::information(this, tr("Saved"), tr("Lower third settings were saved and applied."));
+	close();
 }
-
 void LowerThirdSettingsDialog::onBrowseProfilePicture()
 {
 	const QString filter = tr("Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)");
@@ -1170,20 +1145,13 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		ctaCol->setContentsMargins(0, 0, 0, 0);
 		ctaCol->setSpacing(6);
 
-		auto *previewBtn = new QPushButton(tr("Preview"), this);
+		auto *previewBtn = new QPushButton(tr("Get Template"), this);
 		previewBtn->setCursor(Qt::PointingHandCursor);
 		previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
 		previewBtn->setToolTip(tr("Open the template page"));
 		ctaCol->addWidget(previewBtn);
 
 		QPushButton *downloadBtn = nullptr;
-		if (!dl.isEmpty()) {
-			downloadBtn = new QPushButton(tr("Download"), this);
-			downloadBtn->setCursor(Qt::PointingHandCursor);
-			downloadBtn->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-			downloadBtn->setToolTip(tr("Open download link"));
-			ctaCol->addWidget(downloadBtn);
-		}
 
 		ctaCol->addStretch(1);
 		h->addLayout(ctaCol);
@@ -1259,9 +1227,6 @@ void LowerThirdSettingsDialog::onOpenJsEditorDialog()
 	openTemplateEditorDialog(tr("Edit JS Template"), jsEdit);
 }
 
-// ----------------------------
-// Import / Export template ZIP
-// ----------------------------
 void LowerThirdSettingsDialog::onExportTemplateClicked()
 {
 	if (currentId.isEmpty()) {
@@ -1289,7 +1254,6 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	const QByteArray css = cssEdit->toPlainText().toUtf8();
 	const QByteArray js = jsEdit->toPlainText().toUtf8();
 
-	// template.json
 	QJsonObject o;
 	o["title"] = QString::fromStdString(cfg->title);
 	o["subtitle"] = QString::fromStdString(cfg->subtitle);
