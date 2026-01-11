@@ -9,6 +9,7 @@
 #include <obs.h>
 
 #include <QTimer>
+#include <QMetaObject>
 
 OBS_DECLARE_MODULE();
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -23,6 +24,20 @@ MODULE_EXPORT const char *obs_module_description(void)
 	return "Smart Lower Thirds Plugin v" PLUGIN_VERSION;
 }
 
+static void on_frontend_event(enum obs_frontend_event event, void *)
+{
+	if (event != OBS_FRONTEND_EVENT_FINISHED_LOADING &&
+	    event != OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED &&
+	    event != OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED)
+		return;
+
+	auto *dock = LowerThird_get_dock();
+	if (!dock)
+		return;
+
+	QMetaObject::invokeMethod(dock, [dock]() { dock->refreshBrowserSources(); }, Qt::QueuedConnection);
+}
+
 bool obs_module_load(void)
 {
 	LOGI("Plugin loaded (version %s)", PLUGIN_VERSION);
@@ -34,6 +49,7 @@ bool obs_module_load(void)
 
 void obs_module_post_load(void)
 {
+	obs_frontend_add_event_callback(on_frontend_event, nullptr);
 	smart_lt::ws::init();
 	// Marketplace preload (cached for 1h on disk; refresh is async).
 	smart_lt::api::ApiClient::instance().init();

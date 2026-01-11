@@ -26,6 +26,10 @@
 #include <QDir>
 #include <QDateTime>
 #include <QTemporaryDir>
+#include <QSettings>
+#include <QFileSystemWatcher>
+#include <QTimer>
+#include <QProcess>
 #include <QMessageBox>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -33,6 +37,7 @@
 #include <QStyle>
 #include <QTabWidget>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QFrame>
 #include <QWidget>
 #include <QSizePolicy>
@@ -1198,14 +1203,178 @@ void LowerThirdSettingsDialog::openTemplateEditorDialog(const QString &title, QP
 	dlg.setWindowTitle(title);
 	dlg.resize(980, 760);
 
+	QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("MMLTech"), QStringLiteral("smart-lower-thirds"));
+	const int savedMode = s.value(QStringLiteral("slt/template_editor/mode"), 0).toInt();
+	const QString savedPath = s.value(QStringLiteral("slt/template_editor/path"), QString()).toString();
+
 	auto *layout = new QVBoxLayout(&dlg);
+
+	auto *topRow = new QHBoxLayout();
+	topRow->setContentsMargins(0, 0, 0, 0);
+
+	auto *modeLbl = new QLabel(tr("Open with:"), &dlg);
+	auto *modeCbx = new QComboBox(&dlg);
+	modeCbx->addItem(tr("Built-in editor"), 0);
+	modeCbx->addItem(tr("System default"), 1);
+	modeCbx->addItem(tr("Custom app"), 2);
+	const int modeIndex = qMax(0, qMin(2, savedMode));
+	modeCbx->setCurrentIndex(modeIndex);
+
+	auto *pathEdit = new QLineEdit(&dlg);
+	pathEdit->setPlaceholderText(tr("Select an application (optional)"));
+	pathEdit->setText(savedPath);
+
+	auto *browseBtn = new QPushButton(tr("Browse"), &dlg);
+	browseBtn->setCursor(Qt::PointingHandCursor);
+
+	auto *openBtn = new QPushButton(tr("Open"), &dlg);
+	openBtn->setCursor(Qt::PointingHandCursor);
+
+	topRow->addWidget(modeLbl);
+	topRow->addWidget(modeCbx);
+	topRow->addWidget(pathEdit, 1);
+	topRow->addWidget(browseBtn);
+	topRow->addWidget(openBtn);
+	layout->addLayout(topRow);
+
 	auto *big = new QPlainTextEdit(&dlg);
 	big->setPlainText(sourceEdit->toPlainText());
 	big->setLineWrapMode(QPlainTextEdit::NoWrap);
+	layout->addWidget(big, 1);
 
 	auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dlg);
-	layout->addWidget(big, 1);
 	layout->addWidget(box);
+
+	auto syncUi = [&]() {
+		const int m = modeCbx->currentData().toInt();
+		const bool custom = (m == 2);
+		pathEdit->setEnabled(custom);
+		browseBtn->setEnabled(custom);
+		openBtn->setEnabled(m != 0);
+	};
+
+	syncUi();
+	connect(modeCbx, qOverload<int>(&QComboBox::currentIndexChanged), &dlg, [&](int) { syncUi(); });
+
+	connect(modeCbx, qOverload<int>(&QComboBox::currentIndexChanged), &dlg, [&](int) {
+		s.setValue(QStringLiteral("slt/template_editor/mode"), modeCbx->currentData().toInt());
+	});
+
+	connect(pathEdit, &QLineEdit::textChanged, &dlg, [&](const QString &v) {
+		if (modeCbx->currentData().toInt() == 2)
+			s.setValue(QStringLiteral("slt/template_editor/path"), v.trimmed());
+	});
+
+
+	connect(browseBtn, &QPushButton::clicked, &dlg, [&]() {
+		QString f = QFileDialog::getOpenFileName(&dlg, tr("Select editor application"));
+		if (f.isEmpty())
+			return;
+		pathEdit->setText(f);
+	});
+
+	QTemporaryDir tmpDir;
+	tmpDir.setAutoRemove(true);
+
+	auto makeTmpPath = [&]() -> QString {
+		QString ext = QStringLiteral(".txt");
+		if (title.contains(QStringLiteral("HTML"), Qt::CaseInsensitive))
+			ext = QStringLiteral(".html");
+		else if (title.contains(QStringLiteral("CSS"), Qt::CaseInsensitive))
+			ext = QStringLiteral(".css");
+		else if (title.contains(QStringLiteral("JS"), Qt::CaseInsensitive))
+			ext = QStringLiteral(".js");
+		return tmpDir.path() + QLatin1Char('/') + QStringLiteral("template") + ext;
+	};
+
+	QString tmpPath;
+
+	auto writeTmp = [&]() -> bool {
+		if (tmpPath.isEmpty())
+			tmpPath = makeTmpPath();
+		QFile f(tmpPath);
+		if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+			return false;
+		const QByteArray bytes = big->toPlainText().toUtf8();
+		if (f.write(bytes) != bytes.size())
+			return false;
+		return true;
+	};
+
+	auto readTmp = [&]() -> void {
+		if (tmpPath.isEmpty())
+			return;
+		QFile f(tmpPath);
+		if (!f.open(QIODevice::ReadOnly))
+			return;
+		const QString text = QString::fromUtf8(f.readAll());
+		if (text != big->toPlainText()) {
+			const int v = big->verticalScrollBar() ? big->verticalScrollBar()->value() : 0;
+			const int h = big->horizontalScrollBar() ? big->horizontalScrollBar()->value() : 0;
+			big->setPlainText(text);
+			if (big->verticalScrollBar())
+				big->verticalScrollBar()->setValue(v);
+			if (big->horizontalScrollBar())
+				big->horizontalScrollBar()->setValue(h);
+		}
+	};
+
+	QFileSystemWatcher watcher(&dlg);
+	QTimer poll(&dlg);
+	poll.setInterval(750);
+
+	connect(&watcher, &QFileSystemWatcher::fileChanged, &dlg, [&]() {
+		readTmp();
+		if (!tmpPath.isEmpty() && QFileInfo::exists(tmpPath) && !watcher.files().contains(tmpPath))
+			watcher.addPath(tmpPath);
+	});
+
+	connect(&poll, &QTimer::timeout, &dlg, [&]() {
+		readTmp();
+	});
+
+	connect(openBtn, &QPushButton::clicked, &dlg, [&]() {
+		const int m = modeCbx->currentData().toInt();
+		const QString appPath = pathEdit->text().trimmed();
+
+		s.setValue(QStringLiteral("slt/template_editor/mode"), m);
+		s.setValue(QStringLiteral("slt/template_editor/path"), appPath);
+
+		if (!writeTmp())
+			return;
+
+		if (!watcher.files().contains(tmpPath))
+			watcher.addPath(tmpPath);
+		if (!poll.isActive())
+			poll.start();
+
+		const QUrl u = QUrl::fromLocalFile(tmpPath);
+
+		if (m == 1) {
+			QDesktopServices::openUrl(u);
+			return;
+		}
+
+		if (m == 2 && !appPath.isEmpty()) {
+#if defined(Q_OS_MACOS)
+			QString program = appPath;
+			QStringList args;
+			if (program.endsWith(QStringLiteral(".app"), Qt::CaseInsensitive)) {
+				program = QStringLiteral("open");
+				args << QStringLiteral("-a") << appPath << tmpPath;
+			} else {
+				args << tmpPath;
+			}
+			const bool ok = QProcess::startDetached(program, args);
+#else
+			const bool ok = QProcess::startDetached(appPath, QStringList{tmpPath});
+#endif
+			if (ok)
+				return;
+
+			QDesktopServices::openUrl(u);
+		}
+	});
 
 	connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
 	connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);

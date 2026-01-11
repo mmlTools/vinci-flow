@@ -9,6 +9,8 @@
 #include <obs-frontend-api.h>
 #include <obs.h>
 
+#include <cstring>
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QAbstractItemView>
@@ -228,6 +230,7 @@ void LowerThirdDock::coreEventThunk(const smart_lt::core_event &ev, void *user)
 
 LowerThirdDock::~LowerThirdDock()
 {
+	disconnectObsSignals();
 	if (coreListenerToken_) {
 		smart_lt::remove_event_listener(coreListenerToken_);
 		coreListenerToken_ = 0;
@@ -560,6 +563,7 @@ bool LowerThirdDock::init()
 	}
 
 	ensureRepeatTimerStarted();
+	connectObsSignals();
 	return true;
 }
 
@@ -1411,12 +1415,15 @@ void LowerThirdDock::handleClone(const QString &id)
 
 void LowerThirdDock::handleOpenSettings(const QString &id)
 {
-	smart_lt::ui::LowerThirdSettingsDialog dlg(this);
-	dlg.setLowerThirdId(id);
-	dlg.exec();
+	auto *dlg = new smart_lt::ui::LowerThirdSettingsDialog(this);
+	dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+	dlg->setLowerThirdId(id);
+	dlg->setWindowModality(Qt::NonModal);
+	dlg->setModal(false);
+	dlg->show();
+	dlg->raise();
+	dlg->activateWindow();
 	rebuildList();
-	updateRowCountdowns();
-	emit requestSave();
 }
 
 void LowerThirdDock::handleRemove(const QString &id)
@@ -1539,6 +1546,60 @@ void LowerThirdDock::updateRowCountdowns()
 	for (const auto &r : rows)
 		updateRowCountdownFor(r);
 }
+
+
+void LowerThirdDock::connectObsSignals()
+{
+	if (obsSignalsConnected_)
+		return;
+
+	obsSignalHandler_ = obs_get_signal_handler();
+	if (!obsSignalHandler_)
+		return;
+
+	signal_handler_connect(obsSignalHandler_, "source_create", onObsSourceEvent, this);
+	signal_handler_connect(obsSignalHandler_, "source_destroy", onObsSourceEvent, this);
+	signal_handler_connect(obsSignalHandler_, "source_rename", onObsSourceEvent, this);
+	obsSignalsConnected_ = true;
+}
+
+void LowerThirdDock::disconnectObsSignals()
+{
+	if (!obsSignalsConnected_ || !obsSignalHandler_)
+		return;
+
+	signal_handler_disconnect(obsSignalHandler_, "source_create", onObsSourceEvent, this);
+	signal_handler_disconnect(obsSignalHandler_, "source_destroy", onObsSourceEvent, this);
+	signal_handler_disconnect(obsSignalHandler_, "source_rename", onObsSourceEvent, this);
+	obsSignalsConnected_ = false;
+	obsSignalHandler_ = nullptr;
+}
+
+static bool isBrowserSource(obs_source_t *src)
+{
+	if (!src)
+		return false;
+
+	const char *id = obs_source_get_unversioned_id(src);
+	if (!id)
+		id = obs_source_get_id(src);
+
+	return id && strcmp(id, "browser_source") == 0;
+}
+
+void LowerThirdDock::onObsSourceEvent(void *data, calldata_t *cd)
+{
+	auto *self = static_cast<LowerThirdDock *>(data);
+	if (!self || !cd)
+		return;
+
+	auto *src = static_cast<obs_source_t *>(calldata_ptr(cd, "source"));
+	if (!isBrowserSource(src))
+		return;
+
+	QMetaObject::invokeMethod(self, [self]() { self->populateBrowserSources(true); }, Qt::QueuedConnection);
+}
+
 
 void LowerThirdDock::refreshBrowserSources()
 {
