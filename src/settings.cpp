@@ -162,9 +162,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	root->setContentsMargins(10, 10, 10, 10);
 	root->setSpacing(10);
 
-	// ------------------------------------------------------------
-	// Left vertical "tabs" (menu) + right stacked pages
-	// ------------------------------------------------------------
 	auto *body = new QHBoxLayout();
 	body->setContentsMargins(0, 0, 0, 0);
 	body->setSpacing(10);
@@ -196,7 +193,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	stack->setObjectName("ltSettingsStack");
 	stack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-	// Helper: make a scrollable stacked page
 	auto makeScrollPage = [&](QVBoxLayout *&outLayout) -> QScrollArea * {
 		auto *inner = new QWidget(this);
 		outLayout = new QVBoxLayout(inner);
@@ -218,16 +214,15 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	auto *stylePageSa = makeScrollPage(stylePageLayout);
 	auto *templatesPageSa = makeScrollPage(templatesPageLayout);
 
-	stack->addWidget(contentPageSa);   // index 0
-	stack->addWidget(stylePageSa);     // index 1
-	stack->addWidget(templatesPageSa); // index 2
+	stack->addWidget(contentPageSa);
+	stack->addWidget(stylePageSa);
+	stack->addWidget(templatesPageSa);
 
 	body->addWidget(nav);
 	body->addWidget(stack, 1);
 
 	root->addLayout(body, /*stretch*/ 1);
 
-	// Default selection
 	nav->setCurrentRow(0);
 	stack->setCurrentIndex(0);
 
@@ -338,14 +333,10 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		connect(deleteProfilePictureBtn, &QPushButton::clicked, this,
 			&LowerThirdSettingsDialog::onDeleteProfilePicture);
 
-		// ------------------------------------------------------------
-		// Marketplace: curated Lower Thirds (fetched at launch; cached 1h)
-		// ------------------------------------------------------------
 		auto *marketBox = new QGroupBox(tr("Lower Thirds Library"), this);
 		auto *mv = new QVBoxLayout(marketBox);
 		mv->setSpacing(8);
 
-		// Hero / CTA banner
 		auto *hero = new QFrame(this);
 		hero->setObjectName(QStringLiteral("oc_marketHero"));
 		hero->setFrameShape(QFrame::NoFrame);
@@ -393,8 +384,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		marketList = new QListWidget(this);
 		marketList->setSelectionMode(QAbstractItemView::SingleSelection);
-		marketList->setUniformItemSizes(false); // custom widgets
-		// Larger scrollable area for the curated list
+		marketList->setUniformItemSizes(false);
 		marketList->setMinimumHeight(280);
 		marketList->setSpacing(6);
 		marketList->setStyleSheet(QStringLiteral(
@@ -411,7 +401,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		contentPageLayout->addWidget(marketBox);
 
-		// Click row to open resource
 		connect(marketList, &QListWidget::itemActivated, this, [](QListWidgetItem *it) {
 			if (!it)
 				return;
@@ -424,7 +413,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 			QDesktopServices::openUrl(QUrl(QStringLiteral("https://obscountdown.com/?type=lower-thirds-templates")));
 		});
 
-		// Wire API signals
 		auto &api = smart_lt::api::ApiClient::instance();
 		connect(&api, &smart_lt::api::ApiClient::lowerThirdsUpdated, this,
 			&LowerThirdSettingsDialog::onMarketplaceUpdated);
@@ -435,7 +423,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		connect(&api, &smart_lt::api::ApiClient::imageFailed, this,
 			&LowerThirdSettingsDialog::onMarketplaceImageFailed);
 
-		// Build immediately from whatever was preloaded
 		rebuildMarketplaceList();
 
 		contentPageLayout->addStretch(1);
@@ -582,15 +569,12 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		tplLayout->setSpacing(8);
 		tplLayout->setContentsMargins(8, 8, 8, 8);
 
-		// Inner tabs for HTML/CSS/JS
 		tplTabs = new QTabWidget(tplCard);
 		tplTabs->setDocumentMode(true);
 		tplTabs->setObjectName("ltTplTabs");
 		tplTabs->tabBar()->setObjectName("ltTplTabBar");
 		tplTabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-		// Make the edit area a bit taller by default (but still constrained by parent)
-		tplTabs->setMinimumHeight(360); // adjust to taste: 320..420 is typical
+		tplTabs->setMinimumHeight(360);
 
 		auto makeTab = [&](const QString &name, QPlainTextEdit *&edit) {
 			auto *page = new QWidget(tplTabs);
@@ -639,24 +623,20 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		phLayout->setContentsMargins(8, 8, 8, 8);
 		phLayout->setSpacing(6);
 
-		// Optional: a small header row with a Copy All button
 		auto *phTop = new QHBoxLayout();
 		phTop->setContentsMargins(0, 0, 0, 0);
 		phTop->addStretch(1);
 
 		phLayout->addLayout(phTop);
 
-		// Read-only text area (selectable + copyable)
 		auto *phText = new QPlainTextEdit(phBox);
 		phText->setReadOnly(true);
 		phText->setLineWrapMode(QPlainTextEdit::NoWrap);
 		phText->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
 		phText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-		phText->setMinimumHeight(150); // “nicely below” without taking over the page
-		phText->setMaximumHeight(220); // prevents it from eating too much space
+		phText->setMinimumHeight(150);
+		phText->setMaximumHeight(220);
 
-		// Populate with your placeholders list (keep it “nice” and structured)
-		// You can expand this list to match everything your templater supports.
 		phText->setPlainText("Text\n"
 				     "  {{TITLE}}            Title text\n"
 				     "  {{SUBTITLE}}         Subtitle text\n"
@@ -683,7 +663,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		tplLayout->addWidget(phBox);
 
-		// Add to templates page
 		templatesPageLayout->addWidget(tplCard);
 		templatesPageLayout->addStretch(1);
 	}
@@ -715,8 +694,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
 
-		// IMPORTANT: "Save && Apply" must NOT be an "accept" action, otherwise
-		// Qt may trigger both clicked() and accepted(), causing double execution.
 		auto *applyBtn = buttonBox->addButton(tr("Save && Apply"), QDialogButtonBox::ApplyRole);
 		applyBtn->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
 		applyBtn->setAutoDefault(false);
@@ -732,7 +709,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		connect(importBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onImportTemplateClicked);
 		connect(exportBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onExportTemplateClicked);
-		// infoBtn is optional (depends on Templates UI variant)
+
 		if (infoBtn)
 			connect(infoBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onInfoClicked);
 
@@ -740,9 +717,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		connect(applyBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onSaveAndApply, Qt::UniqueConnection);
 	}
 
-	// ------------------------------------------------------------
-	// Optional: style the left nav to look like tabs
-	// ------------------------------------------------------------
 	this->setStyleSheet(R"QSS(
 QListWidget#ltSettingsNav {
   border: none;
@@ -921,7 +895,6 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->repeat_every_sec = repeatEverySpin->value();
 	cfg->repeat_visible_sec = repeatVisibleSpin->value();
 
-	// Sizes (placeholders)
 	if (titleSizeSpin)
 		cfg->title_size = titleSizeSpin->value();
 	if (subtitleSizeSpin)
@@ -976,7 +949,6 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 
 	smart_lt::rebuild_and_swap();
 
-	// Keep the dialog open (user often iterates), but provide clear feedback.
 	QMessageBox::information(this, tr("Saved"), tr("Lower third settings were saved and applied."));
 }
 
@@ -1072,7 +1044,7 @@ void LowerThirdSettingsDialog::onMarketplaceFailed(const QString &err)
 			msg = tr("Could not load recommendations.");
 		marketStatus->setText(tr("Recommendations unavailable: %1").arg(msg));
 	}
-	// Keep whatever is already in the list (cache might still exist).
+
 	rebuildMarketplaceList();
 }
 
@@ -1110,7 +1082,7 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 
 	if (marketStatus) {
 		if (!items.isEmpty()) {
-			marketStatus->setText(tr("Curated templates from obscountdown.com — click a card to preview."));
+			marketStatus->setText(tr("Custom templates library FREE & Paid."));
 		} else {
 			const QString err = api.lastError().trimmed();
 			marketStatus->setText(err.isEmpty() ? tr("No recommendations yet.")
@@ -1139,7 +1111,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		rowItem->setData(Qt::UserRole, url);
 		rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
-		// Card widget
 		auto *card = new QFrame(this);
 		card->setObjectName(QStringLiteral("oc_marketCard"));
 		card->setFrameShape(QFrame::NoFrame);
@@ -1168,7 +1139,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
 		h->addWidget(icon);
 
-		// Keep handle for async image updates
 		if (!ico.isEmpty()) {
 			marketIconByUrl.insert(ico, icon);
 			api.requestImage(ico, iconPx);
@@ -1178,11 +1148,9 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		textCol->setContentsMargins(0, 0, 0, 0);
 		textCol->setSpacing(2);
 
-		// Keep cards compact: truncate title/description
 		auto *t = new QLabel(trunc(title, 62), this);
 		t->setTextFormat(Qt::PlainText);
 		t->setStyleSheet(QStringLiteral("font-weight: 700;"));
-		// Single-line, keep compact; full title available on hover
 		t->setWordWrap(false);
 		t->setToolTip(title);
 		textCol->addWidget(t);
@@ -1190,7 +1158,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		if (!desc.isEmpty()) {
 			auto *d = new QLabel(trunc(desc, 110), this);
 			d->setTextFormat(Qt::PlainText);
-			// Single-line, keep compact; full description available on hover
 			d->setWordWrap(false);
 			d->setToolTip(desc);
 			d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
@@ -1221,7 +1188,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 		ctaCol->addStretch(1);
 		h->addLayout(ctaCol);
 
-		// Wire buttons (capture URLs)
 		connect(previewBtn, &QPushButton::clicked, this, [url]() {
 			if (!url.isEmpty())
 				QDesktopServices::openUrl(QUrl(url));
@@ -1233,7 +1199,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 			});
 		}
 
-		// Tooltip on row for accessibility / quick scan
 		QString tip = title;
 		if (!desc.isEmpty())
 			tip += QStringLiteral("\n\n") + desc;
@@ -1241,7 +1206,6 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 			tip += QStringLiteral("\n\n") + tr("Download: %1").arg(dl);
 		rowItem->setToolTip(tip);
 
-		// Put the custom widget into the list
 		rowItem->setSizeHint(QSize(0, 96));
 		marketList->addItem(rowItem);
 		marketList->setItemWidget(rowItem, card);

@@ -258,7 +258,6 @@ private:
 	QSpinBox *repeatEverySpin = nullptr;
 	QSpinBox *repeatVisibleSpin = nullptr;
 
-	// Marketplace (resources fetched from obscountdown.com)
 	QListWidget *marketList = nullptr;
 	QLabel *marketStatus = nullptr;
 	QPushButton *seeAllLowerThirdsBtn = nullptr;
