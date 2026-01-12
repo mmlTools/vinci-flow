@@ -483,31 +483,7 @@ manageCarouselsBtn_->setIcon(carIco);
 		connect(manageCarouselsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageCarousels);
 
 		connect(infoBtn, &QPushButton::clicked, this, [this]() {
-			QMessageBox box(this);
-			box.setIcon(QMessageBox::Information);
-			box.setWindowTitle(tr("Smart Lower Thirds • Troubleshooting"));
-			box.setText(tr("Resources path must have read and write access from OBS Studio."));
-			box.setInformativeText(tr(
-				"Tip: It is best to store resources in Documents or another location where your user account has full access.\n\n"
-				"Use the buttons below to open the resource page and video guides."));
-			QAbstractButton *openPage = box.addButton(tr("Open Resource Page"), QMessageBox::ActionRole);
-			QAbstractButton *openV1 = box.addButton(tr("Open Video 1"), QMessageBox::ActionRole);
-			QAbstractButton *openV2 = box.addButton(tr("Open Video 2"), QMessageBox::ActionRole);
-			box.addButton(QMessageBox::Ok);
-
-			box.exec();
-
-			QAbstractButton *clicked = box.clickedButton();
-			if (clicked == openPage) {
-				QDesktopServices::openUrl(
-					QUrl(QStringLiteral("https://obscountdown.com/r/smart-lower-thirds")));
-			} else if (clicked == openV1) {
-				QDesktopServices::openUrl(
-					QUrl(QStringLiteral("https://studio.youtube.com/video/AunKJCyrSmM/edit")));
-			} else if (clicked == openV2) {
-				QDesktopServices::openUrl(
-					QUrl(QStringLiteral("https://studio.youtube.com/video/79Qh2hg9Z_o/edit")));
-			}
+			show_troubleshooting_dialog(this);
 		});
 	}
 

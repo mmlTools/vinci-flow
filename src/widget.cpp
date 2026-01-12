@@ -2,6 +2,8 @@
 
 #include <QAbstractAnimation>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
@@ -12,6 +14,7 @@
 #include <QPointer>
 #include <QPropertyAnimation>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSequentialAnimationGroup>
 #include <QSizePolicy>
 #include <QStackedWidget>
@@ -245,4 +248,191 @@ QWidget *create_widget_carousel(QWidget *parent)
 
 	timer->start();
 	return wrapper;
+}
+
+static QFrame *make_link_card(QWidget *parent, const QString &emoji, const QString &title,
+                              const QString &subtitle, const QString &buttonText, const QUrl &url)
+{
+    auto *card = new QFrame(parent);
+    card->setObjectName(QStringLiteral("ocHelpCard"));
+    card->setFrameShape(QFrame::NoFrame);
+
+    auto *lay = new QHBoxLayout(card);
+    lay->setContentsMargins(12, 10, 12, 10);
+    lay->setSpacing(10);
+
+    auto *ico = new QLabel(card);
+    ico->setText(emoji);
+    ico->setMinimumWidth(34);
+    ico->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    ico->setStyleSheet(QStringLiteral("font-size:22px;"));
+
+    auto *textCol = new QVBoxLayout();
+    textCol->setContentsMargins(0, 0, 0, 0);
+    textCol->setSpacing(2);
+
+    auto *t = new QLabel(card);
+    t->setText(QStringLiteral("<b>%1</b>").arg(title));
+    t->setTextFormat(Qt::RichText);
+
+    auto *sub = new QLabel(card);
+    sub->setText(subtitle);
+    sub->setWordWrap(true);
+    sub->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.75);"));
+
+    textCol->addWidget(t);
+    textCol->addWidget(sub);
+
+    auto *btn = new QPushButton(buttonText, card);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setMinimumHeight(30);
+    btn->setObjectName(QStringLiteral("ocHelpCta"));
+    QObject::connect(btn, &QPushButton::clicked, card, [url]() { QDesktopServices::openUrl(url); });
+
+    lay->addWidget(ico, 0, Qt::AlignTop);
+    lay->addLayout(textCol, 1);
+    lay->addWidget(btn, 0, Qt::AlignVCenter);
+
+    return card;
+}
+
+void show_troubleshooting_dialog(QWidget *parent)
+{
+    auto *dlg = new QDialog(parent);
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowTitle(QObject::tr("Smart Lower Thirds • Help & Links"));
+    dlg->setModal(true);
+    dlg->resize(720, 560);
+
+    // Root
+    auto *root = new QVBoxLayout(dlg);
+    root->setContentsMargins(14, 14, 14, 14);
+    root->setSpacing(10);
+
+    // Header
+    {
+        auto *hdr = new QFrame(dlg);
+        hdr->setObjectName(QStringLiteral("ocHelpHeader"));
+        hdr->setFrameShape(QFrame::NoFrame);
+        auto *hl = new QVBoxLayout(hdr);
+        hl->setContentsMargins(14, 12, 14, 12);
+        hl->setSpacing(6);
+
+        auto *title = new QLabel(QObject::tr("Troubleshooting & Official Links"), hdr);
+        title->setStyleSheet(QStringLiteral("font-size:16px; font-weight:700;"));
+
+        auto *desc = new QLabel(
+            QObject::tr("If changes do not apply, confirm your Resources path has read/write access (Documents is recommended). "
+                        "Use the links below for guides, downloads, and community support."),
+            hdr);
+        desc->setWordWrap(true);
+        desc->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.78);"));
+
+        hl->addWidget(title);
+        hl->addWidget(desc);
+        root->addWidget(hdr);
+    }
+
+    // Scroll content (so the dialog stays usable on smaller screens)
+    auto *scroll = new QScrollArea(dlg);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+
+    auto *content = new QWidget(scroll);
+    auto *cl = new QVBoxLayout(content);
+    cl->setContentsMargins(0, 0, 0, 0);
+    cl->setSpacing(10);
+
+    // Quick links
+    {
+        auto *secTitle = new QLabel(QObject::tr("Quick Links"), content);
+        secTitle->setStyleSheet(QStringLiteral("font-weight:700;"));
+        cl->addWidget(secTitle);
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("🌐"), QObject::tr("Visit the Website"),
+            QObject::tr("Downloads, updates, documentation, and templates."),
+            QObject::tr("Open obscountdown.com"), QUrl(QStringLiteral("https://obscountdown.com/r/smart-lower-thirds"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("💬"), QObject::tr("Join Discord"),
+            QObject::tr("Community support, feedback, and announcements."),
+            QObject::tr("Join Discord"), QUrl(QStringLiteral("https://discord.gg/2yD6B2PTuQ"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("𝕏"), QObject::tr("Follow on X (Twitter)"),
+            QObject::tr("Release notes, feature previews, and tips."),
+            QObject::tr("Open X"), QUrl(QStringLiteral("https://x.com/streamcd_net"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("👥"), QObject::tr("Facebook Group"),
+            QObject::tr("Promotions, community posts, and livestreaming discussions."),
+            QObject::tr("Open Facebook"), QUrl(QStringLiteral("https://www.facebook.com/groups/freestreamerspromotion"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("🐘"), QObject::tr("Mastodon"),
+            QObject::tr("Federated updates and community posts."),
+            QObject::tr("Open Mastodon"), QUrl(QStringLiteral("https://mastodon.social/@obscountdown"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("📸"), QObject::tr("Instagram"),
+            QObject::tr("Design previews, templates, and behind-the-scenes."),
+            QObject::tr("Open Instagram"), QUrl(QStringLiteral("https://www.instagram.com/obscountdown/"))));
+    }
+
+    // Video guides
+    {
+        auto *secTitle = new QLabel(QObject::tr("Video Guides"), content);
+        secTitle->setStyleSheet(QStringLiteral("font-weight:700;"));
+        cl->addWidget(secTitle);
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("▶"), QObject::tr("Guide 1"),
+            QObject::tr("Setup, browser source, and basic workflow."),
+            QObject::tr("Watch on YouTube"), QUrl(QStringLiteral("https://www.youtube.com/watch?v=AunKJCyrSmM"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("▶"), QObject::tr("Guide 2"),
+            QObject::tr("Advanced configuration, templates, and automation."),
+            QObject::tr("Watch on YouTube"), QUrl(QStringLiteral("https://www.youtube.com/watch?v=79Qh2hg9Z_o"))));
+    }
+
+    cl->addStretch(1);
+    scroll->setWidget(content);
+    root->addWidget(scroll, 1);
+
+    // Footer buttons
+    {
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
+        QObject::connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::close);
+        root->addWidget(bb);
+    }
+
+    // Styling (self-contained)
+    dlg->setStyleSheet(
+        "#ocHelpHeader {"
+        "  background: rgba(255,255,255,0.06);"
+        "  border: 1px solid rgba(255,255,255,0.10);"
+        "  border-radius: 12px;"
+        "}"
+        "QScrollArea { background: transparent; }"
+        "QDialog { background: #141416; color: white; }"
+        "#ocHelpCard {"
+        "  background: rgba(255,255,255,0.05);"
+        "  border: 1px solid rgba(255,255,255,0.10);"
+        "  border-radius: 12px;"
+        "}"
+        "#ocHelpCard:hover { border-color: rgba(255,255,255,0.18); }"
+        "#ocHelpCta {"
+        "  background: rgba(255,255,255,0.10);"
+        "  border: 1px solid rgba(255,255,255,0.12);"
+        "  border-radius: 10px;"
+        "  padding: 6px 12px;"
+        "  font-weight: 700;"
+        "}"
+        "#ocHelpCta:hover { background: rgba(255,255,255,0.14); }"
+        "#ocHelpCta:pressed { background: rgba(255,255,255,0.18); }"
+    );
+
+    dlg->show();
 }

@@ -38,6 +38,8 @@
 #include <QTabWidget>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QClipboard>
+#include <QApplication>
 #include <QFrame>
 #include <QWidget>
 #include <QSizePolicy>
@@ -929,7 +931,11 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 {
 	saveToState();
 
-	smart_lt::rebuild_and_swap();
+	// Rebuild/swap updates the Browser Source, but the dock UI still needs a
+	// model refresh. Emit a core list-change event so any listeners re-sync.
+	if (smart_lt::rebuild_and_swap()) {
+		smart_lt::notify_list_updated(currentId.toStdString());
+	}
 	close();
 }
 void LowerThirdSettingsDialog::onBrowseProfilePicture()
@@ -1501,7 +1507,73 @@ void LowerThirdSettingsDialog::onInfoClicked()
 	text += tr("- CSS templates are auto-scoped to the lower third id when possible.") + "\n";
 	text += tr("- JS templates run with a 'root' variable pointing to the <li> element.") + "\n";
 
-	QMessageBox::information(this, tr("Template Placeholders"), text);
+	// Show a richer, copy-friendly dialog instead of a plain message box.
+	auto *dlg = new QDialog(this);
+	dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+	dlg->setWindowTitle(tr("Template Placeholders"));
+	dlg->setModal(true);
+	dlg->resize(720, 560);
+
+	auto *root = new QVBoxLayout(dlg);
+	root->setContentsMargins(14, 14, 14, 14);
+	root->setSpacing(10);
+
+	auto *lead = new QLabel(tr("Copy / paste placeholders into your templates. They are replaced at runtime per lower third."), dlg);
+	lead->setWordWrap(true);
+	lead->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.80);"));
+	root->addWidget(lead);
+
+	auto *box = new QPlainTextEdit(dlg);
+	box->setPlainText(text);
+	box->setReadOnly(true);
+	box->setLineWrapMode(QPlainTextEdit::NoWrap);
+	box->setStyleSheet(QStringLiteral(
+		"QPlainTextEdit {"
+		"  background: rgba(255,255,255,0.06);"
+		"  border: 1px solid rgba(255,255,255,0.10);"
+		"  border-radius: 10px;"
+		"  padding: 10px;"
+		"  font-family: 'Consolas','Courier New',monospace;"
+		"  font-size: 12px;"
+		"}"
+	));
+	root->addWidget(box, 1);
+
+	auto *btnRow = new QHBoxLayout();
+	btnRow->setContentsMargins(0, 0, 0, 0);
+	btnRow->setSpacing(8);
+
+	auto *copyBtn = new QPushButton(tr("Copy All"), dlg);
+	copyBtn->setCursor(Qt::PointingHandCursor);
+	copyBtn->setMinimumHeight(30);
+	copyBtn->setStyleSheet(QStringLiteral(
+		"QPushButton {"
+		"  background: rgba(255,255,255,0.10);"
+		"  border: 1px solid rgba(255,255,255,0.12);"
+		"  border-radius: 10px;"
+		"  padding: 6px 12px;"
+		"  font-weight: 700;"
+		"}"
+		"QPushButton:hover { background: rgba(255,255,255,0.14); }"
+		"QPushButton:pressed { background: rgba(255,255,255,0.18); }"
+	));
+	QObject::connect(copyBtn, &QPushButton::clicked, dlg, [box]() {
+		QApplication::clipboard()->setText(box->toPlainText());
+	});
+
+	btnRow->addWidget(copyBtn);
+	btnRow->addStretch(1);
+
+	auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
+	QObject::connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::close);
+	btnRow->addWidget(bb);
+
+	root->addLayout(btnRow);
+
+	// Keep styling self-contained.
+	dlg->setStyleSheet(QStringLiteral("QDialog { background: #141416; color: white; }"));
+
+	dlg->show();
 }
 
 void LowerThirdSettingsDialog::onImportTemplateClicked()

@@ -395,8 +395,6 @@ static std::string fixed_lt_html_path()
 	return has_output_dir() ? join_path(output_dir(), "lt.html") : std::string();
 }
 
-// Upgrade helper: older versions generated timestamped lt-*.html.
-// If lt.html is missing but lt-*.html exists, rename the newest file to lt.html.
 static std::string migrate_timestamp_html_to_fixed()
 {
 	if (!has_output_dir())
@@ -448,7 +446,6 @@ static lower_third_cfg default_cfg()
 	c.avatar_width = 100;
 	c.avatar_height = 100;
 
-
 	c.anim_in = "animate__fadeInUp";
 	c.anim_out = "animate__fadeOutDown";
 
@@ -462,13 +459,18 @@ static lower_third_cfg default_cfg()
 
 	c.html_template =
 		R"HTML(
-<div class="slt-card">
-  <div class="slt-left">
-    <img class="slt-avatar" src="{{PROFILE_PICTURE_URL}}" alt="" onerror="this.style.display='none'">
-  </div>
-  <div class="slt-right">
-    <div class="slt-title">{{TITLE}}</div>
-    <div class="slt-subtitle">{{SUBTITLE}}</div>
+<div class="slt-card" data-slt-root>
+  <div class="slt-bg" aria-hidden="true"></div>
+
+  <div class="slt-content">
+    <div class="slt-left">
+      <img class="slt-avatar" src="{{PROFILE_PICTURE_URL}}" alt="" onerror="this.style.display='none'">
+    </div>
+
+    <div class="slt-right">
+      <div class="slt-title">{{TITLE}}</div>
+      <div class="slt-subtitle">{{SUBTITLE}}</div>
+    </div>
   </div>
 </div>
 )HTML";
@@ -476,18 +478,39 @@ static lower_third_cfg default_cfg()
 	c.css_template =
 		R"CSS(
 .slt-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px;
-  border-radius: {{RADIUS}}%;
-  background: {{BG_COLOR}};
-  color: {{TEXT_COLOR}};
+  position: relative;
+  display: inline-block;
+  border-radius: {{RADIUS}}px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.35);
   font-family: {{FONT_FAMILY}}, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
+/* Background overlay layer (controls opacity without dimming text/avatar) */
+.slt-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: {{BG_COLOR}};
+  opacity: calc({{OPACITY}} / 100);
+  pointer-events: none;
+}
+
+.slt-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  color: {{TEXT_COLOR}};
+}
+
 .slt-avatar {
-  width: {{AVATAR_WIDTH}}px; height: {{AVATAR_HEIGHT}}px; border-radius: 50%;
-  object-fit: cover; background: rgba(255,255,255,0.08);
+  width: {{AVATAR_WIDTH}}px;
+  height: {{AVATAR_HEIGHT}}px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255,255,255,0.08);
   flex-shrink: 0;
 }
 
@@ -497,13 +520,101 @@ static lower_third_cfg default_cfg()
   display: none !important;
 }
 
-.slt-title { font-weight: 700; font-size: {{TITLE_SIZE}}px; line-height: 1.1; }
-.slt-subtitle { opacity: 0.9; font-size: {{SUBTITLE_SIZE}}px; margin-top: 2px; }
+.slt-title {
+  font-weight: 700;
+  font-size: {{TITLE_SIZE}}px;
+  line-height: 1.1;
+}
+
+.slt-subtitle {
+  opacity: 0.9;
+  font-size: {{SUBTITLE_SIZE}}px;
+  margin-top: 2px;
+}
 )CSS";
 
-	c.js_template = "// Custom JS logic here";
+	c.js_template =
+		R"JS(
+/* Base template script (Smart Lower Thirds)
+   - Provides required hooks:
+     root.__slt_show()  : called by plugin when showing this LT
+     root.__slt_hide()  : called by plugin when hiding this LT (may return Promise)
+   - Place your custom animation things in the marked area.
+*/
+(() => {
+  'use strict';
+
+  const root = document.querySelector('[data-slt-root]') || document.querySelector('.slt-card');
+  if (!root) return;
+
+  console.log("LT template running for", root.id || "(no-id)");
+
+  function waitForAnimationEnd(target, name, fallbackMs = 2500) {
+    return new Promise((resolve) => {
+      let done = false;
+
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        target.removeEventListener("animationend", onEnd, true);
+      };
+
+      const onEnd = (ev) => {
+        // strict match (same pattern as your custom scripts)
+        if (ev.target !== target) return;
+        if (name && ev.animationName !== name) return;
+        cleanup();
+        resolve();
+      };
+
+      target.addEventListener("animationend", onEnd, true);
+
+      setTimeout(() => {
+        cleanup();
+        resolve();
+      }, fallbackMs);
+    });
+  }
+
+  // ---- Place your custom animation things here ----
+  // Tip: If you use CSS keyframes on an element, return waitForAnimationEnd(el, "YourKeyframeName", 3000)
+  // from __slt_hide to let the plugin wait before removing/hiding the <li>.
+  // ------------------------------------------------
+
+  // Default hooks: if no animation, fall back to animate.css classes using plugin-provided animations.
+  // Note: animate.css expects "animate__animated" + the effect class.
+  const animInClass  = "{{ANIM_IN}}";
+  const animOutClass = "{{ANIM_OUT}}";
+
+  function applyAnimateCss(el, effectClass) {
+    if (!el) return;
+    el.classList.remove("animate__animated", animInClass, animOutClass);
+    // reflow to restart animation reliably
+    void el.offsetWidth;
+    el.classList.add("animate__animated");
+    if (effectClass && effectClass.trim()) el.classList.add(effectClass.trim());
+  }
+
+  root.__slt_show = function () {
+    // Apply animate.css to the whole card by default
+    applyAnimateCss(root, animInClass);
+  };
+
+  root.__slt_hide = function () {
+    // Apply animate.css out; if no animOut provided, resolve immediately
+    if (!animOutClass || !animOutClass.trim()) return Promise.resolve();
+
+    applyAnimateCss(root, animOutClass);
+
+    // If animate.css is used, animationName is not stable across effects/browsers,
+    // so we wait for ANY animationend on the root (by passing empty name).
+    return waitForAnimationEnd(root, "", 3000);
+  };
+})();
+)JS";
+
 	c.repeat_every_sec = 0;
-	c.repeat_visible_sec = 3;
+	c.repeat_visible_sec = 0;
 	c.hotkey.clear();
 	return c;
 }
@@ -1839,6 +1950,16 @@ bool rebuild_and_swap()
 
 	g_last_html_path = newHtml;
 	return true;
+}
+
+void notify_list_updated(const std::string &id)
+{
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id2 = id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
 }
 
 bool reload_from_disk_and_rebuild()

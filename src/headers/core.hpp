@@ -204,6 +204,11 @@ bool ensure_output_artifacts_exist();
 bool regenerate_merged_css_js();
 bool rebuild_and_swap();
 
+// Notify UI listeners (dock, websocket bridge, etc.) that the lower-third list
+// has been updated in-place (e.g. settings changed for an existing item).
+// This does not rebuild artifacts; it only emits a core event.
+void notify_list_updated(const std::string &id = std::string());
+
 // Force reload state+visible from disk and rebuild/swap (with notifications)
 bool reload_from_disk_and_rebuild();
 
