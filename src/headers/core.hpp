@@ -45,10 +45,16 @@ struct lower_third_cfg {
 	std::string subtitle;
 	std::string profile_picture;
 
-	std::string anim_in;         // animate.css class OR "custom"
-	std::string anim_out;        // animate.css class OR "custom"
-	std::string custom_anim_in;  // used if anim_in == "custom"
-	std::string custom_anim_out; // used if anim_out == "custom"
+	// Optional font sizes (px). Used by {{TITLE_SIZE}} / {{SUBTITLE_SIZE}} placeholders.
+	int title_size = 46;
+	int subtitle_size = 24;
+
+	// Optional avatar size (px). Used by {{AVATAR_WIDTH}} / {{AVATAR_HEIGHT}} placeholders.
+	int avatar_width = 100;
+	int avatar_height = 100;
+
+	std::string anim_in;  // animate.css class OR "custom_handled_in"
+	std::string anim_out; // animate.css class OR "custom_handled_out"
 
 	std::string font_family;
 	std::string lt_position; // class name: e.g. "lt-pos-bottom-left"
@@ -66,6 +72,34 @@ struct lower_third_cfg {
 
 	int repeat_every_sec   = 0; // 0 = disabled
 	int repeat_visible_sec = 0; // how long to keep visible when auto-shown
+};
+
+
+struct carousel_cfg {
+	std::string id;
+	std::string title;
+	int order = 0;
+
+	// Item ordering when running the carousel
+	// 0 = Linear (in member list order)
+	// 1 = Randomized (shuffled per run / cycle)
+	int order_mode = 0;
+
+	// If true, carousel repeats indefinitely. If false, it stops after the last item is shown once.
+	bool loop = true;
+
+	// Timing controls (milliseconds)
+	// Defaults:
+	//  - visible_ms:  15000 (how long a lower third stays visible)
+	//  - interval_ms: 5000  (time between activating the next lower third)
+	int visible_ms  = 15000;
+	int interval_ms = 5000;
+
+	// Dock-only color for marking items in this carousel (e.g. "#2EA043")
+	std::string dock_color;
+
+	// Member lower-third IDs (in display order)
+	std::vector<std::string> members;
 };
 
 // -------------------------
@@ -127,6 +161,21 @@ const std::vector<lower_third_cfg> &all_const();
 lower_third_cfg *get_by_id(const std::string &id);
 
 // -------------------------
+// Carousel state access (persisted in lt-state.json; dock-only)
+// -------------------------
+std::vector<carousel_cfg> &carousels();
+const std::vector<carousel_cfg> &carousels_const();
+carousel_cfg *get_carousel_by_id(const std::string &id);
+std::vector<std::string> carousels_containing(const std::string &lower_third_id);
+
+// CRUD helpers for dock actions (persist + notify)
+std::string add_default_carousel();
+bool update_carousel(const carousel_cfg &c);
+bool remove_carousel(const std::string &carousel_id);
+bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members);
+
+
+// -------------------------
 // Visible set
 // -------------------------
 std::vector<std::string> visible_ids();
@@ -154,6 +203,11 @@ bool save_visible_json();
 bool ensure_output_artifacts_exist();
 bool regenerate_merged_css_js();
 bool rebuild_and_swap();
+
+// Notify UI listeners (dock, websocket bridge, etc.) that the lower-third list
+// has been updated in-place (e.g. settings changed for an existing item).
+// This does not rebuild artifacts; it only emits a core event.
+void notify_list_updated(const std::string &id = std::string());
 
 // Force reload state+visible from disk and rebuild/swap (with notifications)
 bool reload_from_disk_and_rebuild();

@@ -2,6 +2,8 @@
 
 #include <QAbstractAnimation>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
@@ -12,6 +14,7 @@
 #include <QPointer>
 #include <QPropertyAnimation>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSequentialAnimationGroup>
 #include <QSizePolicy>
 #include <QStackedWidget>
@@ -20,83 +23,6 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVector>
-
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
-
-static const QString kBaseUrl = QStringLiteral("https://obscountdown.com");
-static const QString kAdStyleEndpoint = kBaseUrl + QStringLiteral("/api/plugin/ads/slot");
-static const QString kAdClickEndpoint = kBaseUrl + QStringLiteral("/api/plugin/ads/click");
-static const QString kAdvertiseContactUrl = kBaseUrl + QStringLiteral("/advertise");
-static const QString kContactUrl = kBaseUrl + QStringLiteral("/contact");
-static const QString kAdSlotKey = QStringLiteral("plugin-ads");
-
-static QString jsonStr(const QJsonObject &o, const char *k, const QString &def = {})
-{
-	const auto v = o.value(QLatin1String(k));
-	return v.isString() ? v.toString() : def;
-}
-
-static QString jsonStr(const QJsonObject &o, const QString &k, const QString &def = {})
-{
-	const auto v = o.value(k);
-	return v.isString() ? v.toString() : def;
-}
-
-static void apply_ad_style(QFrame *card, QLabel *icon, QLabel *title, QLabel *subtitle, QPushButton *cta,
-			   QLabel *sponsorLine, const QJsonObject &adStyle)
-{
-	const QString gradientA = jsonStr(adStyle, "gradient_a", "#2a2d30");
-	const QString gradientB = jsonStr(adStyle, "gradient_b", "#1e2124");
-	const QString border = jsonStr(adStyle, "border", "rgba(255,255,255,0.16)");
-	const QString text = jsonStr(adStyle, "text", "#ffffff");
-	const QString muted = jsonStr(adStyle, "muted", "rgba(255,255,255,0.85)");
-
-	const QString btnBg = jsonStr(adStyle, "button_bg", "rgba(255,255,255,0.10)");
-	const QString btnBorder = jsonStr(adStyle, "button_border", "rgba(255,255,255,0.30)");
-	const QString btnHover = jsonStr(adStyle, "button_hover", "rgba(255,255,255,0.20)");
-
-	if (icon)
-		icon->setText(jsonStr(adStyle, "icon", "📣"));
-
-	if (title)
-		title->setText(QStringLiteral("<b>%1</b>").arg(jsonStr(adStyle, "title", "Sponsored spot")));
-
-	if (subtitle) {
-		subtitle->setText(jsonStr(adStyle, "subtitle", "Your brand could be here."));
-		subtitle->setWordWrap(true);
-	}
-
-	if (cta)
-		cta->setText(jsonStr(adStyle, "cta", "Learn more"));
-
-	if (sponsorLine) {
-		sponsorLine->setText(jsonStr(adStyle, "sponsor", "Sponsored"));
-		sponsorLine->setVisible(!sponsorLine->text().trimmed().isEmpty());
-	}
-
-	card->setStyleSheet(QString("QFrame#adShowCard {"
-				    "  border-radius: 10px;"
-				    "  border: 1px solid %1;"
-				    "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 %2, stop:1 %3);"
-				    "  padding: 6px;"
-				    "}"
-				    "QLabel#adShowTitle { color: %4; font-size: 12px; font-weight: 700; }"
-				    "QLabel#adShowSubtitle { color: %5; font-size: 10px; }"
-				    "QLabel#adShowSponsor { color: rgba(255,255,255,0.65); font-size: 9px; }"
-				    "QPushButton#adShowCTA {"
-				    "  padding: 5px 10px;"
-				    "  border-radius: 6px;"
-				    "  border: 1px solid %6;"
-				    "  background: %7;"
-				    "  color: %4;"
-				    "  font-size: 10px;"
-				    "  font-weight: 700;"
-				    "}"
-				    "QPushButton#adShowCTA:hover { background: %8; }")
-				    .arg(border, gradientA, gradientB, text, muted, btnBorder, btnBg, btnHover));
-}
 
 QWidget *widget_create_kofi_card(QWidget *parent)
 {
@@ -208,366 +134,6 @@ QWidget *widget_create_discord_card(QWidget *parent)
 	return discordCard;
 }
 
-QWidget *widget_create_shopping_card(QWidget *parent)
-{
-	auto *card = new QFrame(parent);
-	card->setObjectName(QStringLiteral("sltShopCard"));
-
-	auto *layout = new QVBoxLayout(card);
-	layout->setContentsMargins(10, 10, 10, 10);
-	layout->setSpacing(6);
-
-	auto *headerRow = new QHBoxLayout();
-	headerRow->setContentsMargins(0, 0, 0, 0);
-	headerRow->setSpacing(6);
-
-	auto *badge = new QLabel(QStringLiteral("PRO"), card);
-	badge->setObjectName(QStringLiteral("sltShopBadge"));
-
-	auto *title = new QLabel(QObject::tr("Get custom Lower Third styles"), card);
-	title->setObjectName(QStringLiteral("sltShopTitle"));
-
-	headerRow->addWidget(badge);
-	headerRow->addWidget(title, 1);
-	headerRow->addStretch();
-
-	auto *subtitle = new QLabel(QObject::tr("Want unique, animated lower thirds tailored to your stream?\n"
-						"Visit my web shop and order custom styles ready for this plugin."),
-				    card);
-	subtitle->setObjectName(QStringLiteral("sltShopSubtitle"));
-	subtitle->setWordWrap(true);
-
-	auto *buttonRow = new QHBoxLayout();
-	buttonRow->setContentsMargins(0, 0, 0, 0);
-	buttonRow->setSpacing(8);
-
-	auto *shopBtn = new QPushButton(QObject::tr("Open Web Shop"), card);
-	shopBtn->setCursor(Qt::PointingHandCursor);
-	shopBtn->setObjectName(QStringLiteral("sltShopButton"));
-
-	auto *supportLbl = new QLabel(QObject::tr("Your support helps future updates ❤️"), card);
-	supportLbl->setObjectName(QStringLiteral("sltShopSupport"));
-	supportLbl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-	buttonRow->addWidget(shopBtn, 0);
-	buttonRow->addStretch();
-	buttonRow->addWidget(supportLbl, 0);
-
-	layout->addLayout(headerRow);
-	layout->addWidget(subtitle);
-	layout->addLayout(buttonRow);
-
-	card->setStyleSheet("QFrame#sltShopCard {"
-			    "  border-radius: 6px;"
-			    "  border: 1px solid rgba(255, 255, 255, 40);"
-			    "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-			    "    stop:0 rgba(45, 50, 65, 255),"
-			    "    stop:1 rgba(18, 105, 160, 255));"
-			    "}"
-			    "QLabel#sltShopBadge {"
-			    "  padding: 2px 6px;"
-			    "  border-radius: 4px;"
-			    "  background: rgba(255, 255, 255, 0.12);"
-			    "  color: #ffffff;"
-			    "  font-weight: 700;"
-			    "  font-size: 9px;"
-			    "  letter-spacing: 0.12em;"
-			    "  text-transform: uppercase;"
-			    "}"
-			    "QLabel#sltShopTitle {"
-			    "  color: #ffffff;"
-			    "  font-size: 12px;"
-			    "  font-weight: 600;"
-			    "}"
-			    "QLabel#sltShopSubtitle {"
-			    "  color: rgba(255, 255, 255, 0.85);"
-			    "  font-size: 10px;"
-			    "}"
-			    "QLabel#sltShopSupport {"
-			    "  color: rgba(255, 255, 255, 0.7);"
-			    "  font-size: 9px;"
-			    "}"
-			    "QPushButton#sltShopButton {"
-			    "  padding: 4px 10px;"
-			    "  border-radius: 4px;"
-			    "  border: 1px solid rgba(255, 255, 255, 80);"
-			    "  background: rgba(255, 255, 255, 0.08);"
-			    "  color: #ffffff;"
-			    "  font-size: 10px;"
-			    "  font-weight: 600;"
-			    "}"
-			    "QPushButton#sltShopButton:hover {"
-			    "  background: rgba(255, 255, 255, 0.20);"
-			    "}"
-			    "QPushButton#sltShopButton:pressed {"
-			    "  background: rgba(255, 255, 255, 0.30);"
-			    "}");
-
-	const QUrl shopUrl(QStringLiteral("https://ko-fi.com/mmltech/shop"));
-	QObject::connect(shopBtn, &QPushButton::clicked, card, [shopUrl]() { QDesktopServices::openUrl(shopUrl); });
-
-	return card;
-}
-
-QWidget *widget_create_advertise_card(QWidget *parent)
-{
-	auto *card = new QFrame(parent);
-	card->setObjectName(QStringLiteral("adSellCard"));
-	card->setFrameShape(QFrame::NoFrame);
-	card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-
-	auto *lay = new QHBoxLayout(card);
-	lay->setContentsMargins(12, 10, 12, 10);
-	lay->setSpacing(10);
-
-	auto *icon = new QLabel(card);
-	icon->setText(QString::fromUtf8("📣"));
-	icon->setStyleSheet(QStringLiteral("font-size:30px;"));
-
-	auto *text = new QLabel(card);
-	text->setTextFormat(Qt::RichText);
-	text->setWordWrap(true);
-	text->setText("<b>Advertise in this plugin</b><br>"
-		      "Get a sponsored spot inside the UI.<br>"
-		      "Contact me to reserve the slot.");
-
-	auto *btn = new QPushButton(QStringLiteral("Contact for pricing"), card);
-	btn->setCursor(Qt::PointingHandCursor);
-	btn->setMinimumHeight(28);
-	btn->setStyleSheet("QPushButton { background: rgba(255,255,255,0.10); color: white; "
-			   "border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; "
-			   "padding: 6px 10px; font-weight: 700; }"
-			   "QPushButton:hover { background: rgba(255,255,255,0.18); }"
-			   "QPushButton:pressed { background: rgba(255,255,255,0.25); }");
-
-	const QUrl contactUrl(kContactUrl);
-	QObject::connect(btn, &QPushButton::clicked, card, [contactUrl]() { QDesktopServices::openUrl(contactUrl); });
-
-	lay->addWidget(icon, 0, Qt::AlignVCenter);
-	lay->addWidget(text, 1);
-	lay->addWidget(btn, 0, Qt::AlignVCenter);
-
-	card->setStyleSheet("#adSellCard {"
-			    "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-			    "    stop:0 #2a2d30, stop:1 #1e2124);"
-			    "  border:1px solid #3a3d40; border-radius:10px; padding:6px; }"
-			    "#adSellCard QLabel { color:#ffffff; }");
-
-	return card;
-}
-
-QWidget *widget_create_show_advertise_card(QWidget *parent)
-{
-	auto *card = new QFrame(parent);
-	card->setObjectName(QStringLiteral("adShowCard"));
-	card->setFrameShape(QFrame::NoFrame);
-	card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-
-	auto *root = new QVBoxLayout(card);
-	root->setContentsMargins(10, 10, 10, 10);
-	root->setSpacing(6);
-
-	auto *header = new QHBoxLayout();
-	header->setContentsMargins(0, 0, 0, 0);
-	header->setSpacing(8);
-
-	auto *icon = new QLabel(QString::fromUtf8("⭐"), card);
-	icon->setStyleSheet(QStringLiteral("font-size:28px;"));
-
-	auto *title = new QLabel(card);
-	title->setObjectName(QStringLiteral("adShowTitle"));
-	title->setText(QStringLiteral("<b>Sponsored</b>"));
-
-	auto *sponsorLine = new QLabel(card);
-	sponsorLine->setObjectName(QStringLiteral("adShowSponsor"));
-	sponsorLine->setText(QStringLiteral("Loading…"));
-	sponsorLine->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-	header->addWidget(icon, 0, Qt::AlignVCenter);
-	header->addWidget(title, 1, Qt::AlignVCenter);
-	header->addWidget(sponsorLine, 0, Qt::AlignVCenter);
-
-	auto *subtitle = new QLabel(card);
-	subtitle->setObjectName(QStringLiteral("adShowSubtitle"));
-	subtitle->setWordWrap(true);
-	subtitle->setText(QStringLiteral("Fetching sponsored content…"));
-
-	auto *btnRow = new QHBoxLayout();
-	btnRow->setContentsMargins(0, 0, 0, 0);
-	btnRow->setSpacing(8);
-
-	auto *cta = new QPushButton(QStringLiteral("Open"), card);
-	cta->setObjectName(QStringLiteral("adShowCTA"));
-	cta->setCursor(Qt::PointingHandCursor);
-	cta->setMinimumHeight(28);
-
-	btnRow->addWidget(cta, 0);
-	btnRow->addStretch(1);
-
-	root->addLayout(header);
-	root->addWidget(subtitle);
-	root->addLayout(btnRow);
-
-	{
-		QJsonObject def;
-		def.insert(QStringLiteral("icon"), QStringLiteral("⭐"));
-		def.insert(QStringLiteral("title"), QStringLiteral("Sponsored spot"));
-		def.insert(QStringLiteral("subtitle"), QStringLiteral("Loading…"));
-		def.insert(QStringLiteral("cta"), QStringLiteral("Open"));
-		def.insert(QStringLiteral("sponsor"), QStringLiteral("Sponsored"));
-		apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, def);
-	}
-
-	card->setProperty("ad_click_url", QString());
-	card->setProperty("ad_loaded", false);
-
-	QObject::connect(cta, &QPushButton::clicked, card, [card]() {
-		const QString urlStr = card->property("ad_click_url").toString();
-		if (urlStr.isEmpty()) {
-			QDesktopServices::openUrl(QUrl(kAdvertiseContactUrl));
-			return;
-		}
-		QDesktopServices::openUrl(QUrl(urlStr));
-	});
-
-	auto startFetch = [card, icon, title, subtitle, cta, sponsorLine]() {
-		if (!card)
-			return;
-
-		if (card->property("ad_loaded").toBool())
-			return;
-
-		card->setProperty("ad_loaded", true);
-
-		auto *nam = new QNetworkAccessManager(card);
-
-		QUrl styleUrl(kAdStyleEndpoint);
-		{
-			QUrlQuery q(styleUrl);
-			q.addQueryItem(QStringLiteral("key"), kAdSlotKey);
-			styleUrl.setQuery(q);
-		}
-
-		QNetworkRequest req(styleUrl);
-		req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("obs-plugin/smart-lower-thirds"));
-
-		QNetworkReply *replyRaw = nam->get(req);
-		if (!replyRaw) {
-			QJsonObject noad;
-			noad.insert(QStringLiteral("icon"), QStringLiteral("🧩"));
-			noad.insert(QStringLiteral("title"), QStringLiteral("No sponsor available"));
-			noad.insert(QStringLiteral("subtitle"), QStringLiteral("Check back later."));
-			noad.insert(QStringLiteral("cta"), QStringLiteral("Advertise here"));
-			noad.insert(QStringLiteral("sponsor"), QStringLiteral(""));
-			apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, noad);
-			card->setProperty("ad_click_url", kAdvertiseContactUrl);
-			return;
-		}
-
-		QPointer<QNetworkReply> reply(replyRaw);
-
-		QObject::connect(
-			replyRaw, &QNetworkReply::finished, card,
-			[card, reply, icon, title, subtitle, cta, sponsorLine]() {
-				if (!card || !reply)
-					return;
-
-				const QByteArray body = reply->readAll();
-				const int httpStatus =
-					reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-				const bool ok = (reply->error() == QNetworkReply::NoError && httpStatus >= 200 &&
-						 httpStatus < 300);
-
-				reply->deleteLater();
-
-				if (!ok) {
-					QJsonObject noad;
-					noad.insert(QStringLiteral("icon"), QStringLiteral("🧩"));
-					noad.insert(QStringLiteral("title"), QStringLiteral("No sponsor available"));
-					noad.insert(QStringLiteral("subtitle"), QStringLiteral("Check back later."));
-					noad.insert(QStringLiteral("cta"), QStringLiteral("Advertise here"));
-					noad.insert(QStringLiteral("sponsor"), QStringLiteral(""));
-					apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, noad);
-					card->setProperty("ad_click_url", kAdvertiseContactUrl);
-					return;
-				}
-
-				QJsonParseError jerr{};
-				const QJsonDocument doc = QJsonDocument::fromJson(body, &jerr);
-				const QJsonObject rootObj = doc.isObject() ? doc.object() : QJsonObject();
-
-				const bool apiOk = rootObj.value(QStringLiteral("ok")).toBool(false);
-
-				const QJsonObject slotObj = rootObj.value(QStringLiteral("slot")).isObject()
-								    ? rootObj.value(QStringLiteral("slot")).toObject()
-								    : QJsonObject();
-
-				const QJsonObject adObj = rootObj.value(QStringLiteral("ad")).isObject()
-								  ? rootObj.value(QStringLiteral("ad")).toObject()
-								  : QJsonObject();
-
-				const QString clickUrlFromApi = rootObj.value(QStringLiteral("click_url")).toString();
-
-				if (!apiOk || adObj.isEmpty()) {
-					QJsonObject noad;
-					noad.insert(QStringLiteral("icon"), QStringLiteral("🧩"));
-					noad.insert(QStringLiteral("title"), QStringLiteral("No sponsor available"));
-					noad.insert(QStringLiteral("subtitle"), QStringLiteral("Check back later."));
-					noad.insert(QStringLiteral("cta"), QStringLiteral("Advertise here"));
-					noad.insert(QStringLiteral("sponsor"), QStringLiteral(""));
-					apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, noad);
-					card->setProperty("ad_click_url", kAdvertiseContactUrl);
-					return;
-				}
-
-				const bool enabled = adObj.value(QStringLiteral("enabled")).toBool(true);
-				if (!enabled) {
-					QJsonObject off;
-					off.insert(QStringLiteral("icon"), QStringLiteral("🧩"));
-					off.insert(QStringLiteral("title"),
-						   QStringLiteral("Sponsored content disabled"));
-					off.insert(QStringLiteral("subtitle"),
-						   QStringLiteral("No ads are being shown right now."));
-					off.insert(QStringLiteral("cta"), QStringLiteral("Advertise here"));
-					off.insert(QStringLiteral("sponsor"), QStringLiteral(""));
-					apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, off);
-					card->setProperty("ad_click_url", kAdvertiseContactUrl);
-					return;
-				}
-
-				apply_ad_style(card, icon, title, subtitle, cta, sponsorLine, adObj);
-
-				QString finalClickUrl = clickUrlFromApi;
-
-				if (finalClickUrl.isEmpty()) {
-					const QString adGuid = adObj.value(QStringLiteral("guid")).toString();
-					const QString slotGuid = slotObj.value(QStringLiteral("guid")).toString();
-
-					if (!adGuid.isEmpty()) {
-						QUrl u(kAdClickEndpoint);
-						QUrlQuery q(u);
-
-						q.addQueryItem(QStringLiteral("key"), kAdSlotKey);
-						if (!slotGuid.isEmpty())
-							q.addQueryItem(QStringLiteral("slot"), slotGuid);
-						q.addQueryItem(QStringLiteral("ad"), adGuid);
-
-						u.setQuery(q);
-						finalClickUrl = u.toString();
-					}
-				}
-
-				if (finalClickUrl.isEmpty())
-					finalClickUrl = kAdvertiseContactUrl;
-
-				card->setProperty("ad_click_url", finalClickUrl);
-			});
-	};
-
-	QTimer::singleShot(0, card, startFetch);
-	return card;
-}
-
 QWidget *create_widget_carousel(QWidget *parent)
 {
 	auto *wrapper = new QWidget(parent);
@@ -580,11 +146,8 @@ QWidget *create_widget_carousel(QWidget *parent)
 	auto *stack = new QStackedWidget(wrapper);
 	stack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
-	//stack->addWidget(widget_create_show_advertise_card(stack));
-	stack->addWidget(widget_create_shopping_card(stack));
 	stack->addWidget(widget_create_discord_card(stack));
 	stack->addWidget(widget_create_kofi_card(stack));
-	//stack->addWidget(widget_create_advertise_card(stack));
 
 	root->addWidget(stack);
 
@@ -685,4 +248,191 @@ QWidget *create_widget_carousel(QWidget *parent)
 
 	timer->start();
 	return wrapper;
+}
+
+static QFrame *make_link_card(QWidget *parent, const QString &emoji, const QString &title,
+                              const QString &subtitle, const QString &buttonText, const QUrl &url)
+{
+    auto *card = new QFrame(parent);
+    card->setObjectName(QStringLiteral("ocHelpCard"));
+    card->setFrameShape(QFrame::NoFrame);
+
+    auto *lay = new QHBoxLayout(card);
+    lay->setContentsMargins(12, 10, 12, 10);
+    lay->setSpacing(10);
+
+    auto *ico = new QLabel(card);
+    ico->setText(emoji);
+    ico->setMinimumWidth(34);
+    ico->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    ico->setStyleSheet(QStringLiteral("font-size:22px;"));
+
+    auto *textCol = new QVBoxLayout();
+    textCol->setContentsMargins(0, 0, 0, 0);
+    textCol->setSpacing(2);
+
+    auto *t = new QLabel(card);
+    t->setText(QStringLiteral("<b>%1</b>").arg(title));
+    t->setTextFormat(Qt::RichText);
+
+    auto *sub = new QLabel(card);
+    sub->setText(subtitle);
+    sub->setWordWrap(true);
+    sub->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.75);"));
+
+    textCol->addWidget(t);
+    textCol->addWidget(sub);
+
+    auto *btn = new QPushButton(buttonText, card);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setMinimumHeight(30);
+    btn->setObjectName(QStringLiteral("ocHelpCta"));
+    QObject::connect(btn, &QPushButton::clicked, card, [url]() { QDesktopServices::openUrl(url); });
+
+    lay->addWidget(ico, 0, Qt::AlignTop);
+    lay->addLayout(textCol, 1);
+    lay->addWidget(btn, 0, Qt::AlignVCenter);
+
+    return card;
+}
+
+void show_troubleshooting_dialog(QWidget *parent)
+{
+    auto *dlg = new QDialog(parent);
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowTitle(QObject::tr("Smart Lower Thirds • Help & Links"));
+    dlg->setModal(true);
+    dlg->resize(720, 560);
+
+    // Root
+    auto *root = new QVBoxLayout(dlg);
+    root->setContentsMargins(14, 14, 14, 14);
+    root->setSpacing(10);
+
+    // Header
+    {
+        auto *hdr = new QFrame(dlg);
+        hdr->setObjectName(QStringLiteral("ocHelpHeader"));
+        hdr->setFrameShape(QFrame::NoFrame);
+        auto *hl = new QVBoxLayout(hdr);
+        hl->setContentsMargins(14, 12, 14, 12);
+        hl->setSpacing(6);
+
+        auto *title = new QLabel(QObject::tr("Troubleshooting & Official Links"), hdr);
+        title->setStyleSheet(QStringLiteral("font-size:16px; font-weight:700;"));
+
+        auto *desc = new QLabel(
+            QObject::tr("If changes do not apply, confirm your Resources path has read/write access (Documents is recommended). "
+                        "Use the links below for guides, downloads, and community support."),
+            hdr);
+        desc->setWordWrap(true);
+        desc->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.78);"));
+
+        hl->addWidget(title);
+        hl->addWidget(desc);
+        root->addWidget(hdr);
+    }
+
+    // Scroll content (so the dialog stays usable on smaller screens)
+    auto *scroll = new QScrollArea(dlg);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+
+    auto *content = new QWidget(scroll);
+    auto *cl = new QVBoxLayout(content);
+    cl->setContentsMargins(0, 0, 0, 0);
+    cl->setSpacing(10);
+
+    // Quick links
+    {
+        auto *secTitle = new QLabel(QObject::tr("Quick Links"), content);
+        secTitle->setStyleSheet(QStringLiteral("font-weight:700;"));
+        cl->addWidget(secTitle);
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("🌐"), QObject::tr("Visit the Website"),
+            QObject::tr("Downloads, updates, documentation, and templates."),
+            QObject::tr("Open obscountdown.com"), QUrl(QStringLiteral("https://obscountdown.com/r/smart-lower-thirds"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("💬"), QObject::tr("Join Discord"),
+            QObject::tr("Community support, feedback, and announcements."),
+            QObject::tr("Join Discord"), QUrl(QStringLiteral("https://discord.gg/2yD6B2PTuQ"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("𝕏"), QObject::tr("Follow on X (Twitter)"),
+            QObject::tr("Release notes, feature previews, and tips."),
+            QObject::tr("Open X"), QUrl(QStringLiteral("https://x.com/streamcd_net"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("👥"), QObject::tr("Facebook Group"),
+            QObject::tr("Promotions, community posts, and livestreaming discussions."),
+            QObject::tr("Open Facebook"), QUrl(QStringLiteral("https://www.facebook.com/groups/freestreamerspromotion"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("🐘"), QObject::tr("Mastodon"),
+            QObject::tr("Federated updates and community posts."),
+            QObject::tr("Open Mastodon"), QUrl(QStringLiteral("https://mastodon.social/@obscountdown"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("📸"), QObject::tr("Instagram"),
+            QObject::tr("Design previews, templates, and behind-the-scenes."),
+            QObject::tr("Open Instagram"), QUrl(QStringLiteral("https://www.instagram.com/obscountdown/"))));
+    }
+
+    // Video guides
+    {
+        auto *secTitle = new QLabel(QObject::tr("Video Guides"), content);
+        secTitle->setStyleSheet(QStringLiteral("font-weight:700;"));
+        cl->addWidget(secTitle);
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("▶"), QObject::tr("Guide 1"),
+            QObject::tr("Setup, browser source, and basic workflow."),
+            QObject::tr("Watch on YouTube"), QUrl(QStringLiteral("https://www.youtube.com/watch?v=AunKJCyrSmM"))));
+
+        cl->addWidget(make_link_card(
+            content, QString::fromUtf8("▶"), QObject::tr("Guide 2"),
+            QObject::tr("Advanced configuration, templates, and automation."),
+            QObject::tr("Watch on YouTube"), QUrl(QStringLiteral("https://www.youtube.com/watch?v=79Qh2hg9Z_o"))));
+    }
+
+    cl->addStretch(1);
+    scroll->setWidget(content);
+    root->addWidget(scroll, 1);
+
+    // Footer buttons
+    {
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
+        QObject::connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::close);
+        root->addWidget(bb);
+    }
+
+    // Styling (self-contained)
+    dlg->setStyleSheet(
+        "#ocHelpHeader {"
+        "  background: rgba(255,255,255,0.06);"
+        "  border: 1px solid rgba(255,255,255,0.10);"
+        "  border-radius: 12px;"
+        "}"
+        "QScrollArea { background: transparent; }"
+        "QDialog { background: #141416; color: white; }"
+        "#ocHelpCard {"
+        "  background: rgba(255,255,255,0.05);"
+        "  border: 1px solid rgba(255,255,255,0.10);"
+        "  border-radius: 12px;"
+        "}"
+        "#ocHelpCard:hover { border-color: rgba(255,255,255,0.18); }"
+        "#ocHelpCta {"
+        "  background: rgba(255,255,255,0.10);"
+        "  border: 1px solid rgba(255,255,255,0.12);"
+        "  border-radius: 10px;"
+        "  padding: 6px 12px;"
+        "  font-weight: 700;"
+        "}"
+        "#ocHelpCta:hover { background: rgba(255,255,255,0.14); }"
+        "#ocHelpCta:pressed { background: rgba(255,255,255,0.18); }"
+    );
+
+    dlg->show();
 }

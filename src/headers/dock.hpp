@@ -8,6 +8,13 @@
 #include <QHash>
 #include <QSet>
 
+struct obs_source;
+typedef struct obs_source obs_source_t;
+struct calldata;
+typedef struct calldata calldata_t;
+struct signal_handler;
+typedef struct signal_handler signal_handler_t;
+
 class QScrollArea;
 class QVBoxLayout;
 class QLineEdit;
@@ -56,8 +63,11 @@ signals:
 private slots:
 	void onBrowseOutputFolder();
 	void onAddLowerThird();
+	void onManageCarousels();
 
 private:
+	QPushButton *manageCarouselsBtn_ = nullptr;
+
 	static QString formatCountdownMs(qint64 ms);
 	void updateRowCountdowns();
 	void updateRowCountdownFor(const LowerThirdRowUi &rowUi);
@@ -85,6 +95,10 @@ private:
 	// NEW: core event bus sync (bidirectional with websocket)
 	void onCoreEvent(const smart_lt::core_event &ev);
 	static void coreEventThunk(const smart_lt::core_event &ev, void *user);
+
+	static void onObsSourceEvent(void *data, calldata_t *cd);
+	void connectObsSignals();
+	void disconnectObsSignals();
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
@@ -125,6 +139,8 @@ private:
 
 	// Helps avoid recursive signals while repopulating
 	bool populatingSources_ = false;
+	signal_handler_t *obsSignalHandler_ = nullptr;
+	bool obsSignalsConnected_ = false;
 
 	// Core event bus listener token
 	uint64_t coreListenerToken_ = 0;

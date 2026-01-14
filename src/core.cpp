@@ -7,6 +7,10 @@
 #include <random>
 #include <cctype>
 #include <mutex>
+#include <unordered_set>
+#include <unordered_map>
+
+#include <chrono>
 
 #include <QDir>
 #include <QFile>
@@ -18,6 +22,8 @@
 
 #include <obs.h>
 #include <obs-module.h>
+#include <filesystem>
+#include <system_error>
 
 namespace smart_lt {
 
@@ -30,6 +36,7 @@ static int g_target_browser_width = sltBrowserWidth;
 static int g_target_browser_height = sltBrowserHeight;
 static bool g_dock_exclusive_mode = false;
 static std::vector<lower_third_cfg> g_items;
+static std::vector<carousel_cfg> g_carousels;
 static std::vector<std::string> g_visible;
 static std::string g_last_html_path;
 
@@ -142,6 +149,130 @@ static std::string replace_all(std::string s, const std::string &from, const std
 	}
 	return s;
 }
+
+
+// -------------------------
+// CSS keyframes extraction / dedupe
+// -------------------------
+static bool is_ident_char(char c)
+{
+	return std::isalnum((unsigned char)c) || c == '_' || c == '-';
+}
+
+static std::string normalize_ws_no_space(const std::string &s)
+{
+	std::string out;
+	out.reserve(s.size());
+	for (char c : s) {
+		if (!std::isspace((unsigned char)c))
+			out.push_back(c);
+	}
+	return out;
+}
+
+// Replace occurrences of identifier 'from' with 'to' when it appears as a whole identifier.
+// This is used to rewrite animation-name references after resolving keyframe name conflicts.
+static std::string replace_whole_ident(std::string s, const std::string &from, const std::string &to)
+{
+	if (from.empty())
+		return s;
+
+	auto is_boundary = [](char c) { return !is_ident_char(c); };
+
+	size_t pos = 0;
+	while ((pos = s.find(from, pos)) != std::string::npos) {
+		const bool left_ok = (pos == 0) || is_boundary(s[pos - 1]);
+		const bool right_ok = (pos + from.size() >= s.size()) || is_boundary(s[pos + from.size()]);
+		if (left_ok && right_ok) {
+			s.replace(pos, from.size(), to);
+			pos += to.size();
+		} else {
+			pos += from.size();
+		}
+	}
+	return s;
+}
+
+struct extracted_keyframes {
+	std::string at_rule; // "@keyframes" or "@-webkit-keyframes"
+	std::string name;    // parsed name (may be empty if malformed)
+	std::string block;   // full block text
+	std::string norm;    // normalized for dedupe
+};
+
+static void extract_keyframes_blocks(std::string &css, std::vector<extracted_keyframes> &out)
+{
+	auto find_next = [&](size_t start) -> std::pair<size_t, std::string> {
+		const size_t p1 = css.find("@keyframes", start);
+		const size_t p2 = css.find("@-webkit-keyframes", start);
+		if (p1 == std::string::npos && p2 == std::string::npos)
+			return {std::string::npos, {}};
+		if (p2 == std::string::npos || (p1 != std::string::npos && p1 < p2))
+			return {p1, "@keyframes"};
+		return {p2, "@-webkit-keyframes"};
+	};
+
+	size_t cur = 0;
+	while (true) {
+		auto [pos, atr] = find_next(cur);
+		if (pos == std::string::npos)
+			break;
+
+		// Parse name: after at-rule token, skip whitespace, read identifier
+		size_t nameStart = pos + atr.size();
+		while (nameStart < css.size() && std::isspace((unsigned char)css[nameStart]))
+			nameStart++;
+
+		size_t nameEnd = nameStart;
+		while (nameEnd < css.size() && is_ident_char(css[nameEnd]))
+			nameEnd++;
+
+		std::string name;
+		if (nameEnd > nameStart)
+			name = css.substr(nameStart, nameEnd - nameStart);
+
+		// Find opening brace
+		size_t braceOpen = css.find('{', nameEnd);
+		if (braceOpen == std::string::npos) {
+			cur = nameEnd;
+			continue;
+		}
+
+		// Match braces
+		int depth = 0;
+		size_t i = braceOpen;
+		for (; i < css.size(); i++) {
+			if (css[i] == '{')
+				depth++;
+			else if (css[i] == '}') {
+				depth--;
+				if (depth == 0) {
+					const size_t endPos = i + 1;
+					const std::string block = css.substr(pos, endPos - pos);
+
+					extracted_keyframes kf;
+					kf.at_rule = atr;
+					kf.name = name;
+					kf.block = block;
+					kf.norm = normalize_ws_no_space(block);
+
+					out.push_back(std::move(kf));
+
+					// Remove from css (leave a newline to avoid accidental token joining)
+					css.replace(pos, endPos - pos, "\n");
+					cur = pos;
+					break;
+				}
+			}
+		}
+
+		if (depth != 0) {
+			// Unbalanced braces; abort to avoid infinite loop
+			break;
+		}
+	}
+}
+
 
 static void delete_old_lt_html_keep(const std::string &keepAbsPath)
 {
@@ -264,8 +395,6 @@ static std::string fixed_lt_html_path()
 	return has_output_dir() ? join_path(output_dir(), "lt.html") : std::string();
 }
 
-// Upgrade helper: older versions generated timestamped lt-*.html.
-// If lt.html is missing but lt-*.html exists, rename the newest file to lt.html.
 static std::string migrate_timestamp_html_to_fixed()
 {
 	if (!has_output_dir())
@@ -311,10 +440,14 @@ static lower_third_cfg default_cfg()
 	c.subtitle = "Subtitle";
 	c.profile_picture.clear();
 
+	c.title_size = 46;
+	c.subtitle_size = 24;
+
+	c.avatar_width = 100;
+	c.avatar_height = 100;
+
 	c.anim_in = "animate__fadeInUp";
 	c.anim_out = "animate__fadeOutDown";
-	c.custom_anim_in.clear();
-	c.custom_anim_out.clear();
 
 	c.font_family = "Inter";
 	c.lt_position = "lt-pos-bottom-left";
@@ -326,13 +459,18 @@ static lower_third_cfg default_cfg()
 
 	c.html_template =
 		R"HTML(
-<div class="slt-card">
-  <div class="slt-left">
-    <img class="slt-avatar" src="{{PROFILE_PICTURE_URL}}" alt="" onerror="this.style.display='none'">
-  </div>
-  <div class="slt-right">
-    <div class="slt-title">{{TITLE}}</div>
-    <div class="slt-subtitle">{{SUBTITLE}}</div>
+<div class="slt-card" data-slt-root>
+  <div class="slt-bg" aria-hidden="true"></div>
+
+  <div class="slt-content">
+    <div class="slt-left">
+      <img class="slt-avatar" src="{{PROFILE_PICTURE_URL}}" alt="" onerror="this.style.display='none'">
+    </div>
+
+    <div class="slt-right">
+      <div class="slt-title">{{TITLE}}</div>
+      <div class="slt-subtitle">{{SUBTITLE}}</div>
+    </div>
   </div>
 </div>
 )HTML";
@@ -340,18 +478,39 @@ static lower_third_cfg default_cfg()
 	c.css_template =
 		R"CSS(
 .slt-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px;
-  border-radius: {{RADIUS}}%;
-  background: {{BG_COLOR}};
-  color: {{TEXT_COLOR}};
+  position: relative;
+  display: inline-block;
+  border-radius: {{RADIUS}}px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.35);
   font-family: {{FONT_FAMILY}}, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
+/* Background overlay layer (controls opacity without dimming text/avatar) */
+.slt-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: {{BG_COLOR}};
+  opacity: calc({{OPACITY}} / 100);
+  pointer-events: none;
+}
+
+.slt-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  color: {{TEXT_COLOR}};
+}
+
 .slt-avatar {
-  width: 100px; height: 100px; border-radius: 50%;
-  object-fit: cover; background: rgba(255,255,255,0.08);
+  width: {{AVATAR_WIDTH}}px;
+  height: {{AVATAR_HEIGHT}}px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255,255,255,0.08);
   flex-shrink: 0;
 }
 
@@ -361,28 +520,116 @@ static lower_third_cfg default_cfg()
   display: none !important;
 }
 
-.slt-title { font-weight: 700; font-size: 46px; line-height: 1.1; }
-.slt-subtitle { opacity: 0.9; font-size: 24px; margin-top: 2px; }
+.slt-title {
+  font-weight: 700;
+  font-size: {{TITLE_SIZE}}px;
+  line-height: 1.1;
+}
+
+.slt-subtitle {
+  opacity: 0.9;
+  font-size: {{SUBTITLE_SIZE}}px;
+  margin-top: 2px;
+}
 )CSS";
 
-	c.js_template = "// Custom JS logic here";
+	c.js_template =
+		R"JS(
+/* Base template script (Smart Lower Thirds)
+   - Provides required hooks:
+     root.__slt_show()  : called by plugin when showing this LT
+     root.__slt_hide()  : called by plugin when hiding this LT (may return Promise)
+   - Place your custom animation things in the marked area.
+*/
+(() => {
+  'use strict';
+
+  const root = document.querySelector('[data-slt-root]') || document.querySelector('.slt-card');
+  if (!root) return;
+
+  console.log("LT template running for", root.id || "(no-id)");
+
+  function waitForAnimationEnd(target, name, fallbackMs = 2500) {
+    return new Promise((resolve) => {
+      let done = false;
+
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        target.removeEventListener("animationend", onEnd, true);
+      };
+
+      const onEnd = (ev) => {
+        // strict match (same pattern as your custom scripts)
+        if (ev.target !== target) return;
+        if (name && ev.animationName !== name) return;
+        cleanup();
+        resolve();
+      };
+
+      target.addEventListener("animationend", onEnd, true);
+
+      setTimeout(() => {
+        cleanup();
+        resolve();
+      }, fallbackMs);
+    });
+  }
+
+  // ---- Place your custom animation things here ----
+  // Tip: If you use CSS keyframes on an element, return waitForAnimationEnd(el, "YourKeyframeName", 3000)
+  // from __slt_hide to let the plugin wait before removing/hiding the <li>.
+  // ------------------------------------------------
+
+  // Default hooks: if no animation, fall back to animate.css classes using plugin-provided animations.
+  // Note: animate.css expects "animate__animated" + the effect class.
+  const animInClass  = "{{ANIM_IN}}";
+  const animOutClass = "{{ANIM_OUT}}";
+
+  function applyAnimateCss(el, effectClass) {
+    if (!el) return;
+    el.classList.remove("animate__animated", animInClass, animOutClass);
+    // reflow to restart animation reliably
+    void el.offsetWidth;
+    el.classList.add("animate__animated");
+    if (effectClass && effectClass.trim()) el.classList.add(effectClass.trim());
+  }
+
+  root.__slt_show = function () {
+    // Apply animate.css to the whole card by default
+    applyAnimateCss(root, animInClass);
+  };
+
+  root.__slt_hide = function () {
+    // Apply animate.css out; if no animOut provided, resolve immediately
+    if (!animOutClass || !animOutClass.trim()) return Promise.resolve();
+
+    applyAnimateCss(root, animOutClass);
+
+    // If animate.css is used, animationName is not stable across effects/browsers,
+    // so we wait for ANY animationend on the root (by passing empty name).
+    return waitForAnimationEnd(root, "", 3000);
+  };
+})();
+)JS";
+
 	c.repeat_every_sec = 0;
-	c.repeat_visible_sec = 3;
+	c.repeat_visible_sec = 0;
 	c.hotkey.clear();
 	return c;
 }
 
 static std::string resolve_in_class(const lower_third_cfg &c)
 {
-	if (c.anim_in == "custom")
-		return c.custom_anim_in;
+	if (c.anim_in == "custom_handled_in")
+		return std::string();
 	return c.anim_in;
 }
 
 static std::string resolve_out_class(const lower_third_cfg &c)
 {
-	if (c.anim_out == "custom")
-		return c.custom_anim_out;
+	if (c.anim_out == "custom_handled_out")
+		return std::string();
 	return c.anim_out;
 }
 
@@ -422,6 +669,10 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 	css = replace_all(css, "{{RADIUS}}", std::to_string(c.radius));
 	css = replace_all(css, "{{TEXT_COLOR}}", c.text_color);
 	css = replace_all(css, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
+	css = replace_all(css, "{{TITLE_SIZE}}", std::to_string(c.title_size));
+	css = replace_all(css, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
+	css = replace_all(css, "{{AVATAR_WIDTH}}", std::to_string(c.avatar_width));
+	css = replace_all(css, "{{AVATAR_HEIGHT}}", std::to_string(c.avatar_height));
 
 	if (css.find("#" + c.id) != std::string::npos) {
 		return "/* ---- " + c.id + " ---- */\n" + css + "\n";
@@ -466,86 +717,76 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 
 static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 {
+	// Build per-item animation config map consumed by the base JS.
+	// Custom Handled contract:
+	//   - For IN:  attach root.__slt_show() on the <li>
+	//   - For OUT: attach root.__slt_hide() and return a Promise that resolves when exit finishes
 	std::string map = "{\n";
 	for (const auto &c : items) {
-		const std::string inC = resolve_in_class(c);
-		const std::string outC = resolve_out_class(c);
+		const bool inCustom  = (c.anim_in == "custom_handled_in");
+		const bool outCustom = (c.anim_out == "custom_handled_out");
+
+		const std::string inCls  = inCustom ? std::string() : c.anim_in;
+		const std::string outCls = outCustom ? std::string() : c.anim_out;
+
 		int delay = 0;
 
-		map += "    \"" + c.id +
-		       "\": { "
-		       "inCls: " +
-		       (inC.empty() ? "null" : ("\"" + inC + "\"")) +
-		       ", outCls: " + (outC.empty() ? "null" : ("\"" + outC + "\"")) +
-		       ", delay: " + std::to_string(delay) + " },\n";
+		map += "  \"" + c.id + "\": { "
+		       "inCustom: " + std::string(inCustom ? "true" : "false") + ", "
+		       "outCustom: " + std::string(outCustom ? "true" : "false") + ", "
+		       "inCls: " + (inCls.empty() ? "null" : ("\"" + inCls + "\"")) + ", "
+		       "outCls: " + (outCls.empty() ? "null" : ("\"" + outCls + "\"")) + ", "
+		       "delay: " + std::to_string(delay) + " },\n";
 	}
-	map += "  };\n";
+	map += "};\n";
 
 	return std::string(R"JS(
-/* Smart Lower Thirds – Animation Script (lifecycle + race-safe) */
+/* Smart Lower Thirds – Base Animation Script (simple polling + per-item transition lock) */
 (() => {
   const VISIBLE_URL = "./lt-visible.json";
   const animMap = )JS") +
-	       map + R"JS(
+	       map +
+	       std::string(R"JS(
 
-  // Safety bounds (avoid deadlocks)
-  const MAX_HOOK_WAIT_MS = 1200;
-  const MAX_ANIM_WAIT_MS = 1600;
+  // Safety bounds (avoid deadlocks if a template forgets to resolve)
+  const MAX_CUSTOM_WAIT_MS = 8000;
+  const MAX_ANIM_WAIT_MS   = 2000;
 
-  function stripAnimate(el) {
-    el.classList.remove("animate__animated");
-    el.style.animationDelay = "";
-    el.style.animationDuration = "";
-    el.style.animationTimingFunction = "";
-    [...el.classList].forEach(c => {
-      if (c.startsWith("animate__")) el.classList.remove(c);
-    });
-  }
-
-  function hasAnim(cls) {
-    return cls && String(cls).trim().length > 0;
-  }
+  function hasAnim(v) { return v && String(v).trim().length > 0; }
 
   function getHook(el, name) {
     const fn = el && el[name];
     return (typeof fn === "function") ? fn : null;
   }
 
-  function markWant(el, shouldShow) {
-    el.dataset.want = shouldShow ? "1" : "0";
+  function stripAnimate(el) {
+    // Remove only what we might have applied (do not destroy author classes).
+    try { el.classList.remove("animate__animated"); } catch (e) {}
+    const added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
+    for (const c of added) {
+      try { el.classList.remove(c); } catch (e) {}
+    }
+    el.__slt_added = [];
+    el.style.animationDelay = "";
+    el.style.animationDuration = "";
+    el.style.animationTimingFunction = "";
   }
 
-  function wantsShow(el) { return el.dataset.want === "1"; }
-  function wantsHide(el) { return el.dataset.want === "0"; }
-
-  function nextOp(el) {
-    el.__slt_op = (el.__slt_op || 0) + 1;
-    return el.__slt_op;
-  }
-
-  function ensureCurrent(el, op) {
-    if ((el.__slt_op || 0) !== op) throw new Error("superseded");
-  }
-
-  async function runHook(el, name, op) {
-    const fn = getHook(el, name);
-    if (!fn) return;
-
+  function addAnimClasses(el, cls) {
+    el.__slt_added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
     try {
-      const r = fn();
-      if (r && typeof r.then === "function") {
-        await Promise.race([
-          r,
-          new Promise(res => setTimeout(res, MAX_HOOK_WAIT_MS))
-        ]);
-      }
+      el.classList.add("animate__animated");
+      el.__slt_added.push("animate__animated");
     } catch (e) {}
 
-    ensureCurrent(el, op);
+    String(cls).split(/\s+/).filter(Boolean).forEach(c => {
+      try { el.classList.add(c); } catch (e) {}
+      el.__slt_added.push(c);
+    });
   }
 
-  function waitForOwnAnimationEnd(el, op) {
-    return new Promise(resolve => {
+  function waitOwnAnimationEnd(el, timeoutMs) {
+    return new Promise((resolve) => {
       let done = false;
 
       const cleanup = () => {
@@ -555,138 +796,131 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       };
 
       const onEnd = (ev) => {
-        // Only end when the <li> itself ends its animation (ignore child animation events)
+        // Only end when the <li> itself ends its animation (ignore child animations)
         if (ev.target !== el) return;
         cleanup();
-        resolve(true);
+        resolve();
       };
 
-      // Capture = true so we still receive it even if user scripts stop propagation
       el.addEventListener("animationend", onEnd, true);
-
-      // Failsafe (e.g., missing animate.css or browser quirks)
-      setTimeout(() => {
-        if (!done) {
-          cleanup();
-          resolve(true);
-        }
-      }, MAX_ANIM_WAIT_MS);
-    }).then(() => {
-      ensureCurrent(el, op);
-      return true;
+      setTimeout(() => { cleanup(); resolve(); }, timeoutMs);
     });
   }
 
-  async function applyIn(el, cfg) {
-    const op = nextOp(el);
+  async function runHookWithTimeout(el, name, timeoutMs) {
+    const fn = getHook(el, name);
+    if (!fn) return;
 
-    // If intent changed already, abort.
-    if (!wantsShow(el)) return;
-
-    el.dataset.state = "showing";
-
-    // Cancel any in-flight out animation visually and force displayed
-    stripAnimate(el);
-    el.classList.remove("slt-hidden");
-    el.classList.add("slt-visible");
-
-    if (hasAnim(cfg.inCls)) {
-      if (cfg.delay > 0) el.style.animationDelay = cfg.delay + "ms";
-
-      el.classList.add("animate__animated");
-      cfg.inCls.split(/\s+/).forEach(c => el.classList.add(c));
-
-      await waitForOwnAnimationEnd(el, op);
-
-      // Might have been superseded or intent flipped
-      if (!wantsShow(el)) return;
-
-      el.dataset.state = "visible";
-      el.style.animationDelay = "";
-    } else {
-      el.dataset.state = "visible";
+    try {
+      const ret = fn.call(el);
+      if (ret && typeof ret.then === "function") {
+        await Promise.race([
+          ret,
+          new Promise(res => setTimeout(res, timeoutMs))
+        ]);
+      }
+    } catch (e) {
+      // Swallow template errors: base script must remain operational.
     }
-
-    // Lifecycle: after shown (template may run inner sequencing)
-    await runHook(el, "__slt_onShown", op);
-
-    // Final sanity: don't force visible if user toggled hide during hook
-    if (!wantsShow(el)) return;
-
-    el.dataset.state = "visible";
-    el.classList.remove("slt-hidden");
-    el.classList.add("slt-visible");
   }
 
-  async function applyOut(el, cfg) {
-    const op = nextOp(el);
-
-    // If intent changed already, abort.
-    if (!wantsHide(el)) return;
-
-    // Lifecycle: template can animate inner exit BEFORE parent out anim
-    el.dataset.state = "hiding_pending";
-    await runHook(el, "__slt_beforeHide", op);
-
-    // If user toggled back to show while we waited, abort hide.
-    if (!wantsHide(el)) return;
-
-    el.dataset.state = "hiding";
-
-    // Ensure we start parent out cleanly (remove any in classes)
-    stripAnimate(el);
-
-    if (hasAnim(cfg.outCls)) {
-      el.classList.add("animate__animated");
-      cfg.outCls.split(/\s+/).forEach(c => el.classList.add(c));
-
-      await waitForOwnAnimationEnd(el, op);
-
-      // If user toggled show during parent out, abort final hide.
-      if (!wantsHide(el)) return;
-
-      stripAnimate(el);
-      el.classList.remove("slt-visible");
-      el.classList.add("slt-hidden");
-      el.dataset.state = "hidden";
+  function setMounted(el, mounted) {
+    if (mounted) {
+      el.style.display = "block";
+      el.classList.add("slt-visible");
+      el.classList.remove("slt-hidden");
     } else {
       el.classList.remove("slt-visible");
       el.classList.add("slt-hidden");
-      el.dataset.state = "hidden";
+      el.style.display = "none";
     }
+  }
+
+  async function doShow(el, cfg) {
+    setMounted(el, true);
+    stripAnimate(el);
+
+    if (cfg && cfg.inCustom) {
+      await runHookWithTimeout(el, "__slt_show", MAX_CUSTOM_WAIT_MS);
+      return;
+    }
+
+    if (cfg && hasAnim(cfg.inCls)) {
+      if (cfg.delay > 0) el.style.animationDelay = cfg.delay + "ms";
+      addAnimClasses(el, cfg.inCls);
+      await waitOwnAnimationEnd(el, MAX_ANIM_WAIT_MS);
+      stripAnimate(el);
+      el.style.animationDelay = "";
+    }
+  }
+
+  async function doHide(el, cfg) {
+    stripAnimate(el);
+
+    if (cfg && cfg.outCustom) {
+      // Wait for the template-driven exit animation before unmounting the <li>
+      await runHookWithTimeout(el, "__slt_hide", MAX_CUSTOM_WAIT_MS);
+      setMounted(el, false);
+      return;
+    }
+
+    if (cfg && hasAnim(cfg.outCls)) {
+      addAnimClasses(el, cfg.outCls);
+      await waitOwnAnimationEnd(el, MAX_ANIM_WAIT_MS);
+      stripAnimate(el);
+    }
+
+    setMounted(el, false);
+  }
+
+  function enqueue(el, job) {
+    // Serialize transitions per <li> so polling never overlaps operations.
+    el.__slt_queue = (el.__slt_queue || Promise.resolve())
+      .then(job)
+      .catch(() => {}); // never break the chain
   }
 
   async function tick() {
+    let visibleIds;
     try {
       const r = await fetch(VISIBLE_URL + "?t=" + Date.now(), { cache: "no-store" });
-      const visibleIds = await r.json();
+      visibleIds = await r.json();
       if (!Array.isArray(visibleIds)) return;
+    } catch (e) {
+      return;
+    }
 
-      const visibleSet = new Set(visibleIds.map(String));
-      const els = Array.from(document.querySelectorAll("#slt-root > li[id]"));
+    const visibleSet = new Set(visibleIds.map(String));
+    const els = Array.from(document.querySelectorAll("#slt-root > li[id]"));
 
-      // Pass 1: update intent for all elements (prevents per-element races)
-      for (const el of els) {
-        markWant(el, visibleSet.has(el.id));
-      }
+    for (const el of els) {
+      const cfg = animMap[el.id] || {};
+      const want = visibleSet.has(el.id);
 
-      // Pass 2: drive state machine (fire-and-forget; op token makes it safe)
-      for (const el of els) {
-        const cfg = animMap[el.id] || {};
-        const shouldShow = wantsShow(el);
-        const state = el.dataset.state || "hidden";
+      // Store desired state
+      el.dataset.want = want ? "1" : "0";
 
-        if (shouldShow) {
-          if (state !== "visible" && state !== "showing") {
-            applyIn(el, cfg);
-          }
-        } else {
-          if (state !== "hidden" && state !== "hiding" && state !== "hiding_pending") {
-            applyOut(el, cfg);
-          }
+      const isMounted = el.classList.contains("slt-visible") || el.style.display === "block";
+
+      // Already in desired mounted state
+      if (want && isMounted) continue;
+      if (!want && !isMounted) continue;
+
+      // Avoid enqueuing duplicates while one is active
+      if (el.dataset.busy === "1") continue;
+
+      el.dataset.busy = "1";
+      enqueue(el, async () => {
+        try {
+          // Re-check desire at execution time (poll may have changed)
+          const stillWant = el.dataset.want === "1";
+          if (stillWant) await doShow(el, cfg);
+          else await doHide(el, cfg);
+        } finally {
+          el.dataset.busy = "0";
         }
-      }
-    } catch (e) {}
+      });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -694,7 +928,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     setInterval(tick, 350);
   });
 })();
-)JS";
+)JS");
 }
 
 static std::string build_item_script(const lower_third_cfg &c)
@@ -750,7 +984,10 @@ static std::string build_full_html()
 			inner = replace_all(inner, "<img ", "<img onerror=\"this.style.display='none'\" ");
 		}
 
-		html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\">";
+		const bool customMode = (c.anim_in == "custom_handled_in") || (c.anim_out == "custom_handled_out");
+
+		html += "  <li id=\"" + c.id + "\" class=\"" + c.lt_position + "\"" +
+		        (customMode ? " data-slt-mode=\"custom\"" : "") + ">";
 		html += inner;
 		html += "</li>\n";
 	}
@@ -831,6 +1068,46 @@ lower_third_cfg *get_by_id(const std::string &id)
 			return &c;
 	return nullptr;
 }
+
+
+// -------------------------
+// Carousel state access
+// -------------------------
+std::vector<carousel_cfg> &carousels()
+{
+	return g_carousels;
+}
+
+const std::vector<carousel_cfg> &carousels_const()
+{
+	return g_carousels;
+}
+
+carousel_cfg *get_carousel_by_id(const std::string &id)
+{
+	const std::string sid = sanitize_id(id);
+	for (auto &c : g_carousels) {
+		if (c.id == sid)
+			return &c;
+	}
+	return nullptr;
+}
+
+std::vector<std::string> carousels_containing(const std::string &lower_third_id)
+{
+	std::vector<std::string> out;
+	const std::string sid = sanitize_id(lower_third_id);
+	for (const auto &c : g_carousels) {
+		for (const auto &mid : c.members) {
+			if (mid == sid) {
+				out.push_back(c.id);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
 
 std::vector<std::string> visible_ids()
 {
@@ -941,12 +1218,14 @@ bool load_state_json()
 	const std::string p = path_state_json();
 	if (!QFile::exists(QString::fromStdString(p))) {
 		g_items.clear();
+		g_carousels.clear();
 		return true;
 	}
 
 	const std::string txt = read_text_file(p);
 	if (txt.empty()) {
 		g_items.clear();
+		g_carousels.clear();
 		return true;
 	}
 
@@ -955,11 +1234,13 @@ bool load_state_json()
 	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
 		LOGW("Invalid lt-state.json; reset");
 		g_items.clear();
+		g_carousels.clear();
 		return false;
 	}
 
 	const QJsonObject root = doc.object();
 	const QJsonArray items = root.value("items").toArray();
+	const QJsonArray cars = root.value("carousels").toArray();
 
 	std::vector<lower_third_cfg> out;
 	out.reserve((size_t)items.size());
@@ -981,10 +1262,18 @@ bool load_state_json()
 		c.subtitle = o.value("subtitle").toString().toStdString();
 		c.profile_picture = o.value("profile_picture").toString().toStdString();
 
+		c.title_size = o.value("title_size").toInt(46);
+		c.subtitle_size = o.value("subtitle_size").toInt(24);
+		c.title_size = std::max(6, std::min(200, c.title_size));
+		c.subtitle_size = std::max(6, std::min(200, c.subtitle_size));
+
+		c.avatar_width = o.value("avatar_width").toInt(100);
+		c.avatar_height = o.value("avatar_height").toInt(100);
+		c.avatar_width = std::max(10, std::min(400, c.avatar_width));
+		c.avatar_height = std::max(10, std::min(400, c.avatar_height));
+
 		c.anim_in = o.value("anim_in").toString().toStdString();
 		c.anim_out = o.value("anim_out").toString().toStdString();
-		c.custom_anim_in = o.value("custom_anim_in").toString().toStdString();
-		c.custom_anim_out = o.value("custom_anim_out").toString().toStdString();
 
 		c.font_family = o.value("font_family").toString().toStdString();
 		c.lt_position = o.value("lt_position").toString().toStdString();
@@ -1051,7 +1340,98 @@ bool load_state_json()
 		return a.id < b.id;
 	});
 
+	
+// Carousels (dock-only)
+std::vector<carousel_cfg> outCars;
+outCars.reserve((size_t)cars.size());
+for (const QJsonValue v : cars) {
+	if (!v.isObject())
+		continue;
+	const QJsonObject o = v.toObject();
+
+	carousel_cfg c;
+	c.id = sanitize_id(o.value("id").toString().toStdString());
+	if (c.id.empty())
+		c.id = new_id();
+
+	c.title = o.value("title").toString().toStdString();
+	c.order = o.value("order").toInt(-1);
+	c.order_mode = o.value("order_mode").toInt(0);
+	c.loop = o.value("loop").toBool(true);
+	// Defaults are dock-only and can be changed via the Manage Carousels dialog.
+	// Interval: 5000ms, Visible: 15000ms
+	c.visible_ms = o.value("visible_ms").toInt(15000);
+	c.interval_ms = o.value("interval_ms").toInt(5000);
+	c.dock_color = o.value("dock_color").toString().toStdString();
+
+	if (c.visible_ms < 250)
+		c.visible_ms = 250;
+	if (c.interval_ms < 0)
+		c.interval_ms = 0;
+	if (c.order_mode != 1)
+		c.order_mode = 0;
+	if (c.order_mode < 0 || c.order_mode > 1)
+		c.order_mode = 0;
+
+	const QJsonArray mem = o.value("members").toArray();
+	for (const QJsonValue mv : mem) {
+		const std::string mid = sanitize_id(mv.toString().toStdString());
+		if (!mid.empty())
+			c.members.push_back(mid);
+	}
+
+	if (c.title.empty())
+		c.title = "Carousel";
+
+	outCars.push_back(std::move(c));
+}
+
+int nextCarOrder = 0;
+for (auto &c : outCars) {
+	if (c.order < 0)
+		c.order = nextCarOrder;
+	nextCarOrder = std::max(nextCarOrder, c.order + 1);
+}
+std::sort(outCars.begin(), outCars.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+	if (a.order != b.order)
+		return a.order < b.order;
+	return a.id < b.id;
+});
+
+	g_carousels = std::move(outCars);
+
+	// Enforce invariant: a lower third can belong to at most one carousel.
+	// If state contains duplicates, keep the first carousel (by current sort order) and drop from later ones.
+	{
+		std::unordered_set<std::string> claimed;
+		for (auto &car : g_carousels) {
+			std::vector<std::string> uniq;
+			uniq.reserve(car.members.size());
+			for (const auto &midRaw : car.members) {
+				const std::string mid = sanitize_id(midRaw);
+				if (mid.empty())
+					continue;
+				if (claimed.find(mid) != claimed.end())
+					continue;
+				claimed.insert(mid);
+				uniq.push_back(mid);
+			}
+			car.members = std::move(uniq);
+		}
+	}
+
 	g_items = std::move(out);
+
+	// Ensure per-item repeat timers are disabled for any lower third that belongs to a carousel.
+	// This keeps legacy state files consistent with the carousel runner logic.
+	for (const auto &car : g_carousels) {
+		for (const auto &mid : car.members) {
+			if (auto *lt = get_by_id(mid)) {
+				lt->repeat_every_sec = 0;
+				lt->repeat_visible_sec = 0;
+			}
+		}
+	}
 	return true;
 }
 
@@ -1061,7 +1441,7 @@ bool save_state_json()
 		return false;
 
 	QJsonObject root;
-	root["version"] = 2;
+	root["version"] = 3;
 
 	QJsonArray items;
 	for (const auto &c : g_items) {
@@ -1073,10 +1453,13 @@ bool save_state_json()
 		o["subtitle"] = QString::fromStdString(c.subtitle);
 		o["profile_picture"] = QString::fromStdString(c.profile_picture);
 
+		o["title_size"] = c.title_size;
+		o["subtitle_size"] = c.subtitle_size;
+		o["avatar_width"] = c.avatar_width;
+		o["avatar_height"] = c.avatar_height;
+
 		o["anim_in"] = QString::fromStdString(c.anim_in);
 		o["anim_out"] = QString::fromStdString(c.anim_out);
-		o["custom_anim_in"] = QString::fromStdString(c.custom_anim_in);
-		o["custom_anim_out"] = QString::fromStdString(c.custom_anim_out);
 
 		o["font_family"] = QString::fromStdString(c.font_family);
 		o["lt_position"] = QString::fromStdString(c.lt_position);
@@ -1096,6 +1479,28 @@ bool save_state_json()
 
 		items.append(o);
 	}
+
+	
+QJsonArray cars;
+for (const auto &c : g_carousels) {
+	QJsonObject o;
+	o["id"] = QString::fromStdString(c.id);
+	o["title"] = QString::fromStdString(c.title);
+	o["order"] = c.order;
+	o["order_mode"] = c.order_mode;
+	o["loop"] = c.loop;
+	o["visible_ms"] = c.visible_ms;
+	o["interval_ms"] = c.interval_ms;
+	o["dock_color"] = QString::fromStdString(c.dock_color);
+
+	QJsonArray mem;
+	for (const auto &mid : c.members)
+		mem.append(QString::fromStdString(mid));
+	o["members"] = mem;
+
+	cars.append(o);
+}
+root["carousels"] = cars;
 
 	root["items"] = items;
 
@@ -1201,7 +1606,7 @@ bool regenerate_merged_css_js()
   top: 50%;
   transform: translate(-50%, -50%);
 }
-  
+
 .lt-pos-top-center {
   left: 50%;
   top: var(--slt-safe-margin);
@@ -1217,8 +1622,104 @@ bool regenerate_merged_css_js()
 )CSS";
 
 	css += "\n/* Per-LT scoped styles */\n";
-	for (const auto &c : g_items)
-		css += "\n" + scope_css_best_effort(c);
+
+	// Keyframes registry: dedupe by name+content, resolve conflicts by renaming per-LT.
+	// - If same name + identical content => keep one.
+	// - If same name + different content => rename to <name>_<ltid> and rewrite references in that LT CSS.
+	std::unordered_map<std::string, std::string> kfNameToNorm;
+	std::unordered_map<std::string, std::string> kfNameToBlock;
+	std::vector<std::string> kfOrder;
+
+	for (const auto &c : g_items) {
+		// Expand placeholders up-front (so extracted keyframes are final).
+		std::string per = c.css_template;
+		per = replace_all(per, "{{ID}}", c.id);
+		per = replace_all(per, "{{BG_COLOR}}", c.bg_color);
+		per = replace_all(per, "{{OPACITY}}", std::to_string(c.opacity));
+		per = replace_all(per, "{{RADIUS}}", std::to_string(c.radius));
+		per = replace_all(per, "{{TEXT_COLOR}}", c.text_color);
+		per = replace_all(per, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
+		per = replace_all(per, "{{TITLE_SIZE}}", std::to_string(c.title_size));
+		per = replace_all(per, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
+
+		// Extract keyframes so scope_css_best_effort never touches 0%/from/to selectors.
+		std::vector<extracted_keyframes> extracted;
+		extract_keyframes_blocks(per, extracted);
+
+		// Register/dedupe keyframes and resolve name collisions.
+		for (auto &kf : extracted) {
+			// If no parsed name, treat as "content-only" and append if unique.
+			if (kf.name.empty()) {
+				const std::string sig = kf.norm;
+				bool exists = false;
+				for (const auto &kv : kfNameToNorm) {
+					if (kv.second == sig) {
+						exists = true;
+						break;
+					}
+				}
+				if (!exists) {
+					const std::string anonName = "kf_" + c.id + "_" + std::to_string(kfOrder.size());
+					kfNameToNorm[anonName] = sig;
+					kfNameToBlock[anonName] = kf.block;
+					kfOrder.push_back(anonName);
+				}
+				continue;
+			}
+
+			auto it = kfNameToNorm.find(kf.name);
+			if (it == kfNameToNorm.end()) {
+				// First appearance of this name
+				kfNameToNorm[kf.name] = kf.norm;
+				kfNameToBlock[kf.name] = kf.block;
+				kfOrder.push_back(kf.name);
+				continue;
+			}
+
+			if (it->second == kf.norm) {
+				// Exact duplicate: ignore
+				continue;
+			}
+
+			// Conflict: same name, different content => rename this LT's keyframes
+			const std::string oldName = kf.name;
+			const std::string newName = oldName + "_" + c.id;
+
+			// Update header in the extracted block (best-effort, deterministic)
+			const std::string fromHdr = kf.at_rule + std::string(" ") + oldName;
+			const std::string toHdr = kf.at_rule + std::string(" ") + newName;
+			kf.block = replace_all(kf.block, fromHdr, toHdr);
+			kf.name = newName;
+			kf.norm = normalize_ws_no_space(kf.block);
+
+			// Rewrite references in this LT CSS (animation-name and shorthand cases)
+			per = replace_whole_ident(per, oldName, newName);
+
+			// Register renamed variant
+			kfNameToNorm[kf.name] = kf.norm;
+			kfNameToBlock[kf.name] = kf.block;
+			kfOrder.push_back(kf.name);
+		}
+
+		// Now scope per-LT selectors (keyframes removed; safe)
+		lower_third_cfg tmp = c;
+		tmp.css_template = per;
+		css += "\n" + scope_css_best_effort(tmp);
+	}
+
+	// Append deduped keyframes at the end of lt-styles.css
+	css += "\n/* Keyframes (deduped) */\n";
+	{
+		std::unordered_set<std::string> emitted;
+		for (const auto &name : kfOrder) {
+			if (!emitted.insert(name).second)
+				continue;
+			auto it = kfNameToBlock.find(name);
+			if (it != kfNameToBlock.end()) {
+				css += "\n" + it->second + "\n";
+			}
+		}
+	}
 
 	if (!write_text_file(path_styles_css(), css)) {
 		LOGW("Failed writing lt-styles.css");
@@ -1451,6 +1952,16 @@ bool rebuild_and_swap()
 	return true;
 }
 
+void notify_list_updated(const std::string &id)
+{
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id2 = id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+}
+
 bool reload_from_disk_and_rebuild()
 {
 	if (!has_output_dir())
@@ -1537,6 +2048,175 @@ void init_from_disk()
 // -------------------------
 // CRUD helpers (persist + notify list change)
 // -------------------------
+
+// -------------------------
+// Carousel CRUD helpers (dock-only; persist + notify list change)
+// -------------------------
+std::string add_default_carousel()
+{
+	if (!has_output_dir())
+		return {};
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg c;
+	c.id = new_id();
+	while (get_carousel_by_id(c.id))
+		c.id = new_id();
+
+	int maxOrder = -1;
+	for (const auto &it : g_carousels)
+		maxOrder = std::max(maxOrder, it.order);
+	c.order = maxOrder + 1;
+
+	c.title = "Carousel";
+	c.order_mode = 0;
+	c.loop = true;
+	// Defaults per request
+	c.visible_ms = 15000;
+	c.interval_ms = 5000;
+	c.dock_color = "#2EA043";
+
+	g_carousels.push_back(c);
+	std::sort(g_carousels.begin(), g_carousels.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+		if (a.order != b.order)
+			return a.order < b.order;
+		return a.id < b.id;
+	});
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c.id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return c.id;
+}
+
+bool update_carousel(const carousel_cfg &c)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg *dst = get_carousel_by_id(c.id);
+	if (!dst)
+		return false;
+
+	*dst = c;
+	if (dst->order_mode != 1)
+		dst->order_mode = 0;
+	// Any lower third that is part of a carousel should not use per-item repeat.
+	for (const auto &mid : dst->members) {
+		if (auto *lt = get_by_id(mid)) {
+			lt->repeat_every_sec = 0;
+			lt->repeat_visible_sec = 0;
+		}
+	}
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c.id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
+bool remove_carousel(const std::string &carousel_id)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	const std::string sid = sanitize_id(carousel_id);
+	const auto before = g_carousels.size();
+
+	g_carousels.erase(std::remove_if(g_carousels.begin(), g_carousels.end(),
+					 [&](const carousel_cfg &c) { return c.id == sid; }),
+			 g_carousels.end());
+
+	const bool removed = (g_carousels.size() != before);
+	if (!removed)
+		return false;
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = sid;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
+bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members)
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+
+	carousel_cfg *c = get_carousel_by_id(carousel_id);
+	if (!c)
+		return false;
+
+	c->members.clear();
+	c->members.reserve(members.size());
+	for (const auto &m : members) {
+		const std::string mid = sanitize_id(m);
+		if (mid.empty())
+			continue;
+
+		// A lower third may belong to only one carousel at a time.
+		// If it is already claimed by a different carousel, do not move it implicitly.
+		bool ownedByOther = false;
+		for (const auto &other : g_carousels) {
+			if (other.id == c->id)
+				continue;
+			if (std::find(other.members.begin(), other.members.end(), mid) != other.members.end()) {
+				ownedByOther = true;
+				break;
+			}
+		}
+		if (ownedByOther)
+			continue;
+
+		c->members.push_back(mid);
+
+		// When a lower third is added to a carousel, per-item repeat timers become redundant.
+		// Enforce 0 to avoid confusion (dock-only setting; overlay behavior is driven by the carousel runner).
+		if (auto *lt = get_by_id(mid)) {
+			lt->repeat_every_sec = 0;
+			lt->repeat_visible_sec = 0;
+		}
+	}
+
+	save_state_json();
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = c->id;
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
 std::string add_default_lower_third()
 {
 	if (!has_output_dir())
@@ -1620,6 +2300,47 @@ std::string clone_lower_third(const std::string &id)
 	else
 		c.label += " (Copy)";
 
+	// If the source lower third has an owned profile picture copied into output_dir,
+	// clone it as well so each item owns its file lifecycle. Otherwise removing one
+	// item could delete the image used by the other.
+	if (!c.profile_picture.empty()) {
+		const std::string srcRel = c.profile_picture;
+		const std::string srcPath = output_dir() + "/" + srcRel;
+
+		// Derive extension (if any)
+		std::string ext;
+		const auto dot = srcRel.find_last_of('.');
+		if (dot != std::string::npos && dot + 1 < srcRel.size())
+			ext = srcRel.substr(dot + 1);
+
+		// New unique name based on new id + timestamp
+		using namespace std::chrono;
+		const auto ts = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+		std::string newName = c.id + "_" + std::to_string((long long)ts);
+		if (!ext.empty())
+			newName += "." + ext;
+
+		const std::string dstPath = output_dir() + "/" + newName;
+
+		std::error_code ec;
+		if (std::filesystem::exists(std::filesystem::path(srcPath), ec) && !ec) {
+			ec.clear();
+			std::filesystem::copy_file(std::filesystem::path(srcPath), std::filesystem::path(dstPath),
+						  std::filesystem::copy_options::overwrite_existing, ec);
+			if (!ec) {
+				c.profile_picture = newName;
+			} else {
+				LOGW("clone_lower_third: failed to copy profile picture '%s' -> '%s' (%d)",
+				     srcPath.c_str(), dstPath.c_str(), (int)ec.value());
+				// Avoid sharing a file pointer to a different item's owned file.
+				c.profile_picture.clear();
+			}
+		} else {
+			// Source file missing; clear so the clone doesn't reference an invalid path.
+			c.profile_picture.clear();
+		}
+	}
+
 	int maxOrder = -1;
 	for (const auto &it : g_items)
 		maxOrder = std::max(maxOrder, it.order);
@@ -1674,6 +2395,15 @@ bool remove_lower_third(const std::string &id)
 	const std::string sid = sanitize_id(id);
 	const auto before = g_items.size();
 
+	// Capture owned media before erasing so we can clean it up.
+	std::string profileToDelete;
+	for (const auto &c : g_items) {
+		if (c.id == sid) {
+			profileToDelete = c.profile_picture;
+			break;
+		}
+	}
+
 	const bool wasVisible = is_visible(sid);
 
 	g_items.erase(std::remove_if(g_items.begin(), g_items.end(),
@@ -1684,7 +2414,20 @@ bool remove_lower_third(const std::string &id)
 	if (!removed)
 		return false;
 
+	// Best-effort cleanup: remove the associated profile picture from disk.
+	// (These are generated/copied into output_dir with unique names.)
+	if (!profileToDelete.empty()) {
+		const std::string fullPath = output_dir() + "/" + profileToDelete;
+		std::error_code ec;
+		(void)std::filesystem::remove(std::filesystem::path(fullPath), ec);
+	}
+
 	set_visible_nosave(sid, false);
+
+	// Remove from any carousels
+	for (auto &car : g_carousels) {
+		car.members.erase(std::remove(car.members.begin(), car.members.end(), sid), car.members.end());
+	}
 
 	save_state_json();
 	save_visible_json();

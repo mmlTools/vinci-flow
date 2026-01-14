@@ -3,6 +3,8 @@
 
 #include <QDialog>
 #include <QString>
+#include <QMultiHash>
+#include <QPointer>
 #include <vector>
 
 class QLineEdit;
@@ -16,6 +18,9 @@ class QLabel;
 class QTabWidget;
 class QSpinBox;
 class QSlider;
+class QColor;
+class QListWidget;
+class QPixmap;
 
 namespace smart_lt::ui {
 
@@ -94,7 +99,7 @@ inline const std::vector<CbxOption> AnimInOptions = {
 	{"Jello", "animate__jello"},
 	{"Heart Beat", "animate__heartBeat"},
 
-	{"Custom (CSS class)", "custom"},
+	{"Custom Handled In", "custom_handled_in"},
 };
 
 inline const std::vector<CbxOption> AnimOutOptions = {
@@ -154,7 +159,7 @@ inline const std::vector<CbxOption> AnimOutOptions = {
 	{"Hinge", "animate__hinge"},
 	{"Roll Out", "animate__rollOut"},
 
-	{"Custom (CSS class)", "custom"},
+	{"Custom Handled Out", "custom_handled_out"},
 };
 
 inline const std::vector<CbxOption> LtPositionOptions = {
@@ -180,6 +185,7 @@ private slots:
 	void onPickTextColor();
 
 	void onImportTemplateClicked();
+	void onInfoClicked();
 	void onExportTemplateClicked();
 
 	void onOpenHtmlEditorDialog();
@@ -189,13 +195,18 @@ private slots:
 	void onAnimInChanged(int);
 	void onAnimOutChanged(int);
 
+	void onMarketplaceUpdated();
+	void onMarketplaceFailed(const QString &err);
+	void onMarketplaceImageReady(const QString &url, const QPixmap &pm);
+	void onMarketplaceImageFailed(const QString &url, const QString &err);
+
 private:
 	void loadFromState();
 	void saveToState();
 
 	void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
-	void updateCustomAnimFieldsVisibility();
 	void updateColorButton(QPushButton *btn, const QColor &c);
+	void rebuildMarketplaceList();
 
 private:
 	QString currentId;
@@ -211,12 +222,11 @@ private:
 
 	QComboBox *animInCombo = nullptr;
 	QComboBox *animOutCombo = nullptr;
-	QLabel *customAnimInLabel = nullptr;
-	QLabel *customAnimOutLabel = nullptr;
-	QLineEdit *customAnimInEdit = nullptr;
-	QLineEdit *customAnimOutEdit = nullptr;
-
 	QFontComboBox *fontCombo = nullptr;
+	QSpinBox *titleSizeSpin = nullptr;
+	QSpinBox *subtitleSizeSpin = nullptr;
+	QSpinBox *avatarWidthSpin = nullptr;
+	QSpinBox *avatarHeightSpin = nullptr;
 	QComboBox *posCombo = nullptr;
 
 	QPushButton *bgColorBtn = nullptr;
@@ -232,6 +242,7 @@ private:
 
 	QPushButton *importBtn = nullptr;
 	QPushButton *exportBtn = nullptr;
+	QPushButton *infoBtn = nullptr;
 
 	QDialogButtonBox *buttonBox = nullptr;
 
@@ -246,6 +257,11 @@ private:
 
 	QSpinBox *repeatEverySpin = nullptr;
 	QSpinBox *repeatVisibleSpin = nullptr;
+
+	QListWidget *marketList = nullptr;
+	QLabel *marketStatus = nullptr;
+	QPushButton *seeAllLowerThirdsBtn = nullptr;
+	QMultiHash<QString, QPointer<QLabel>> marketIconByUrl;
 };
 
 } // namespace smart_lt::ui

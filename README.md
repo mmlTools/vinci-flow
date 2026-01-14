@@ -2,11 +2,6 @@
 
 ![Plugin Badge](https://img.shields.io/badge/Plugin-Smart%20Lower%20Thirds-blue)
 
-<p align="center">
-  <img src="docs/presentation-1.gif" alt="Smart Lower Thirds Presentation 1" /><br/>
-  <img src="docs/presentation-2.gif" alt="Smart Lower Thirds Presentation 2" />
-</p>
-
 **Create, manage, and display unlimited lower thirds directly inside OBS Studio.**  
 No local webserver. No scene binding. Uses a **local file Browser Source** workflow.
 

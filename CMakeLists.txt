@@ -182,6 +182,8 @@ list(APPEND SLT_SRC
   ${SLT_HDR_DIR}/dock.hpp
   ${SLT_SRC_DIR}/settings.cpp
   ${SLT_HDR_DIR}/settings.hpp
+  ${SLT_SRC_DIR}/api.cpp
+  ${SLT_HDR_DIR}/api.hpp
 )
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${SLT_SRC})
