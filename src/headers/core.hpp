@@ -45,6 +45,10 @@ struct lower_third_cfg {
 	std::string subtitle;
 	std::string profile_picture;
 
+	// Optional audio cues (copied into output_dir; stored as filename)
+	std::string anim_in_sound;
+	std::string anim_out_sound;
+
 	// Optional font sizes (px). Used by {{TITLE_SIZE}} / {{SUBTITLE_SIZE}} placeholders.
 	int title_size = 46;
 	int subtitle_size = 24;
@@ -201,7 +205,6 @@ bool save_visible_json();
 // Artifacts files
 // -------------------------
 bool ensure_output_artifacts_exist();
-bool regenerate_merged_css_js();
 bool rebuild_and_swap();
 
 // Notify UI listeners (dock, websocket bridge, etc.) that the lower-third list
@@ -235,8 +238,8 @@ bool set_dock_exclusive_mode(bool enabled);
 // -------------------------
 std::string path_state_json();   // lt-state.json
 std::string path_visible_json(); // lt-visible.json
-std::string path_styles_css();   // lt-styles.css
-std::string path_scripts_js();   // lt-scripts.js
+std::string path_styles_css();   // lt.css
+std::string path_scripts_js();   // lt.js
 std::string path_animate_css();  // animate.min.css
 
 // -------------------------

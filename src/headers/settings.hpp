@@ -181,6 +181,10 @@ private slots:
 	void onSaveAndApply();
 	void onBrowseProfilePicture();
 	void onDeleteProfilePicture();
+	void onBrowseAnimInSound();
+	void onDeleteAnimInSound();
+	void onBrowseAnimOutSound();
+	void onDeleteAnimOutSound();
 	void onPickBgColor();
 	void onPickTextColor();
 
@@ -211,6 +215,8 @@ private:
 private:
 	QString currentId;
 	QString pendingProfilePicturePath;
+	QString pendingAnimInSoundPath;
+	QString pendingAnimOutSoundPath;
 
 	QLineEdit *titleEdit = nullptr;
 	QLineEdit *labelEdit = nullptr;
@@ -219,6 +225,14 @@ private:
 	QLineEdit *profilePictureEdit = nullptr;
 	QPushButton *browseProfilePictureBtn = nullptr;
 	QPushButton *deleteProfilePictureBtn = nullptr;
+
+	QLineEdit *animInSoundEdit = nullptr;
+	QPushButton *browseAnimInSoundBtn = nullptr;
+	QPushButton *deleteAnimInSoundBtn = nullptr;
+
+	QLineEdit *animOutSoundEdit = nullptr;
+	QPushButton *browseAnimOutSoundBtn = nullptr;
+	QPushButton *deleteAnimOutSoundBtn = nullptr;
 
 	QComboBox *animInCombo = nullptr;
 	QComboBox *animOutCombo = nullptr;
