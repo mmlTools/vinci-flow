@@ -45,6 +45,10 @@ struct lower_third_cfg {
 	std::string subtitle;
 	std::string profile_picture;
 
+	// Optional audio cues (copied into output_dir; stored as filename)
+	std::string anim_in_sound;
+	std::string anim_out_sound;
+
 	// Optional font sizes (px). Used by {{TITLE_SIZE}} / {{SUBTITLE_SIZE}} placeholders.
 	int title_size = 46;
 	int subtitle_size = 24;

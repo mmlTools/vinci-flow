@@ -439,6 +439,8 @@ static lower_third_cfg default_cfg()
 	c.title = "New Lower Third";
 	c.subtitle = "Subtitle";
 	c.profile_picture.clear();
+	c.anim_in_sound.clear();
+	c.anim_out_sound.clear();
 
 	c.title_size = 46;
 	c.subtitle_size = 24;
@@ -586,6 +588,21 @@ static lower_third_cfg default_cfg()
   const animInClass  = "{{ANIM_IN}}";
   const animOutClass = "{{ANIM_OUT}}";
 
+  const soundInUrl  = "{{SOUND_IN_URL}}";
+  const soundOutUrl = "{{SOUND_OUT_URL}}";
+
+  function playCue(url) {
+    if (!url || !url.trim()) return;
+    try {
+      const a = new Audio(url);
+      a.volume = 1.0;
+      // play() may be blocked in some environments; ignore errors
+      const p = a.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch(e) {}
+  }
+
+
   function applyAnimateCss(el, effectClass) {
     if (!el) return;
     el.classList.remove("animate__animated", animInClass, animOutClass);
@@ -596,11 +613,13 @@ static lower_third_cfg default_cfg()
   }
 
   root.__slt_show = function () {
+    playCue(soundInUrl);
     // Apply animate.css to the whole card by default
     applyAnimateCss(root, animInClass);
   };
 
   root.__slt_hide = function () {
+    playCue(soundOutUrl);
     // Apply animate.css out; if no animOut provided, resolve immediately
     if (!animOutClass || !animOutClass.trim()) return Promise.resolve();
 
@@ -729,6 +748,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 		const std::string inCls  = inCustom ? std::string() : c.anim_in;
 		const std::string outCls = outCustom ? std::string() : c.anim_out;
 
+		// Optional audio cues (relative URLs inside the generated output dir)
+		const std::string inSound  = c.anim_in_sound.empty() ? std::string() : ("./" + c.anim_in_sound);
+		const std::string outSound = c.anim_out_sound.empty() ? std::string() : ("./" + c.anim_out_sound);
+
 		int delay = 0;
 
 		map += "  \"" + c.id + "\": { "
@@ -736,6 +759,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 		       "outCustom: " + std::string(outCustom ? "true" : "false") + ", "
 		       "inCls: " + (inCls.empty() ? "null" : ("\"" + inCls + "\"")) + ", "
 		       "outCls: " + (outCls.empty() ? "null" : ("\"" + outCls + "\"")) + ", "
+		       "inSound: " + (inSound.empty() ? "null" : ("\"" + inSound + "\"")) + ", "
+		       "outSound: " + (outSound.empty() ? "null" : ("\"" + outSound + "\"")) + ", "
 		       "delay: " + std::to_string(delay) + " },\n";
 	}
 	map += "};\n";
@@ -747,10 +772,20 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   const animMap = )JS") +
 	       map +
 	       std::string(R"JS(
-
   // Safety bounds (avoid deadlocks if a template forgets to resolve)
   const MAX_CUSTOM_WAIT_MS = 8000;
   const MAX_ANIM_WAIT_MS   = 2000;
+
+  function playCue(url) {
+    if (!url || !String(url).trim()) return;
+    try {
+      const a = new Audio(url);
+      a.volume = 1.0;
+      // play() may be blocked in some environments; ignore errors
+      const p = a.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) {}
+  }
 
   function hasAnim(v) { return v && String(v).trim().length > 0; }
 
@@ -840,6 +875,9 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     setMounted(el, true);
     stripAnimate(el);
 
+    // Audio cue (handled here so it works even if the LT template does not implement playback)
+    if (cfg && cfg.inSound) playCue(cfg.inSound);
+
     if (cfg && cfg.inCustom) {
       await runHookWithTimeout(el, "__slt_show", MAX_CUSTOM_WAIT_MS);
       return;
@@ -856,6 +894,9 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
   async function doHide(el, cfg) {
     stripAnimate(el);
+
+    // Audio cue (handled here so it works even if the LT template does not implement playback)
+    if (cfg && cfg.outSound) playCue(cfg.outSound);
 
     if (cfg && cfg.outCustom) {
       // Wait for the template-driven exit animation before unmounting the <li>
@@ -935,6 +976,12 @@ static std::string build_item_script(const lower_third_cfg &c)
 {
 	std::string js = c.js_template;
 	js = replace_all(js, "{{ID}}", c.id);
+	js = replace_all(js, "{{ANIM_IN}}", c.anim_in);
+	js = replace_all(js, "{{ANIM_OUT}}", c.anim_out);
+	const std::string sIn = c.anim_in_sound.empty() ? "" : ("./" + c.anim_in_sound);
+	const std::string sOut = c.anim_out_sound.empty() ? "" : ("./" + c.anim_out_sound);
+	js = replace_all(js, "{{SOUND_IN_URL}}", sIn);
+	js = replace_all(js, "{{SOUND_OUT_URL}}", sOut);
 
 	std::string out;
 	out += "\n/* ---- " + c.id + " ---- */\n";
@@ -979,6 +1026,12 @@ static std::string build_full_html()
 
 		const std::string pic = c.profile_picture.empty() ? "./" : ("./" + c.profile_picture);
 		inner = replace_all(inner, "{{PROFILE_PICTURE_URL}}", pic);
+
+		const std::string sIn = c.anim_in_sound.empty() ? "" : ("./" + c.anim_in_sound);
+		const std::string sOut = c.anim_out_sound.empty() ? "" : ("./" + c.anim_out_sound);
+		inner = replace_all(inner, "{{SOUND_IN_URL}}", sIn);
+		inner = replace_all(inner, "{{SOUND_OUT_URL}}", sOut);
+
 
 		if (inner.find("onerror") == std::string::npos) {
 			inner = replace_all(inner, "<img ", "<img onerror=\"this.style.display='none'\" ");
@@ -1261,6 +1314,8 @@ bool load_state_json()
 		c.title = o.value("title").toString().toStdString();
 		c.subtitle = o.value("subtitle").toString().toStdString();
 		c.profile_picture = o.value("profile_picture").toString().toStdString();
+		c.anim_in_sound = o.value("anim_in_sound").toString().toStdString();
+		c.anim_out_sound = o.value("anim_out_sound").toString().toStdString();
 
 		c.title_size = o.value("title_size").toInt(46);
 		c.subtitle_size = o.value("subtitle_size").toInt(24);
@@ -1452,6 +1507,8 @@ bool save_state_json()
 		o["title"] = QString::fromStdString(c.title);
 		o["subtitle"] = QString::fromStdString(c.subtitle);
 		o["profile_picture"] = QString::fromStdString(c.profile_picture);
+		o["anim_in_sound"] = QString::fromStdString(c.anim_in_sound);
+		o["anim_out_sound"] = QString::fromStdString(c.anim_out_sound);
 
 		o["title_size"] = c.title_size;
 		o["subtitle_size"] = c.subtitle_size;
@@ -1906,6 +1963,13 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	obs_data_t *s = obs_source_get_settings(src);
 	obs_data_set_bool(s, "is_local_file", true);
 	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
+
+	// Ensure Browser Source audio is controllable via OBS ("Control audio via OBS").
+	// OBS has used different internal keys across versions; setting the common ones is safe.
+	obs_data_set_bool(s, "is_control_audio", true);
+	obs_data_set_bool(s, "control_audio", true);
+	obs_data_set_bool(s, "reroute_audio", true);
+
 	obs_data_set_bool(s, "smart_lt_managed", true);
 	obs_data_set_int(s, "width", (int64_t)g_target_browser_width);
 	obs_data_set_int(s, "height", (int64_t)g_target_browser_height);
@@ -2397,9 +2461,13 @@ bool remove_lower_third(const std::string &id)
 
 	// Capture owned media before erasing so we can clean it up.
 	std::string profileToDelete;
+	std::string animInSoundToDelete;
+	std::string animOutSoundToDelete;
 	for (const auto &c : g_items) {
 		if (c.id == sid) {
 			profileToDelete = c.profile_picture;
+			animInSoundToDelete = c.anim_in_sound;
+			animOutSoundToDelete = c.anim_out_sound;
 			break;
 		}
 	}
@@ -2418,6 +2486,17 @@ bool remove_lower_third(const std::string &id)
 	// (These are generated/copied into output_dir with unique names.)
 	if (!profileToDelete.empty()) {
 		const std::string fullPath = output_dir() + "/" + profileToDelete;
+		std::error_code ec;
+		(void)std::filesystem::remove(std::filesystem::path(fullPath), ec);
+	}
+
+	if (!animInSoundToDelete.empty()) {
+		const std::string fullPath = output_dir() + "/" + animInSoundToDelete;
+		std::error_code ec;
+		(void)std::filesystem::remove(std::filesystem::path(fullPath), ec);
+	}
+	if (!animOutSoundToDelete.empty()) {
+		const std::string fullPath = output_dir() + "/" + animOutSoundToDelete;
 		std::error_code ec;
 		(void)std::filesystem::remove(std::filesystem::path(fullPath), ec);
 	}

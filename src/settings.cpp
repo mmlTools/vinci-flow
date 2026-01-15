@@ -287,6 +287,66 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		g->addLayout(picRow, row, 1, 1, 3);
 
 		row++;
+		g->addWidget(new QLabel(tr("Sound (Animation In):"), this), row, 0);
+		auto *sndInRow = new QHBoxLayout();
+		sndInRow->setContentsMargins(0, 0, 0, 0);
+
+		animInSoundEdit = new QLineEdit(this);
+		animInSoundEdit->setReadOnly(true);
+
+		browseAnimInSoundBtn = new QPushButton(this);
+		browseAnimInSoundBtn->setCursor(Qt::PointingHandCursor);
+		browseAnimInSoundBtn->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
+		browseAnimInSoundBtn->setToolTip(tr("Browse sound for animation in..."));
+		browseAnimInSoundBtn->setFixedWidth(32);
+
+		deleteAnimInSoundBtn = new QPushButton(this);
+		deleteAnimInSoundBtn->setCursor(Qt::PointingHandCursor);
+		{
+			QIcon del = QIcon::fromTheme(QStringLiteral("edit-delete"));
+			if (del.isNull())
+				del = style()->standardIcon(QStyle::SP_DialogCloseButton);
+			deleteAnimInSoundBtn->setIcon(del);
+		}
+		deleteAnimInSoundBtn->setToolTip(tr("Remove sound for animation in"));
+		deleteAnimInSoundBtn->setFixedWidth(32);
+
+		sndInRow->addWidget(animInSoundEdit, 1);
+		sndInRow->addWidget(browseAnimInSoundBtn);
+		sndInRow->addWidget(deleteAnimInSoundBtn);
+		g->addLayout(sndInRow, row, 1, 1, 3);
+
+		row++;
+		g->addWidget(new QLabel(tr("Sound (Animation Out):"), this), row, 0);
+		auto *sndOutRow = new QHBoxLayout();
+		sndOutRow->setContentsMargins(0, 0, 0, 0);
+
+		animOutSoundEdit = new QLineEdit(this);
+		animOutSoundEdit->setReadOnly(true);
+
+		browseAnimOutSoundBtn = new QPushButton(this);
+		browseAnimOutSoundBtn->setCursor(Qt::PointingHandCursor);
+		browseAnimOutSoundBtn->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
+		browseAnimOutSoundBtn->setToolTip(tr("Browse sound for animation out..."));
+		browseAnimOutSoundBtn->setFixedWidth(32);
+
+		deleteAnimOutSoundBtn = new QPushButton(this);
+		deleteAnimOutSoundBtn->setCursor(Qt::PointingHandCursor);
+		{
+			QIcon del = QIcon::fromTheme(QStringLiteral("edit-delete"));
+			if (del.isNull())
+				del = style()->standardIcon(QStyle::SP_DialogCloseButton);
+			deleteAnimOutSoundBtn->setIcon(del);
+		}
+		deleteAnimOutSoundBtn->setToolTip(tr("Remove sound for animation out"));
+		deleteAnimOutSoundBtn->setFixedWidth(32);
+
+		sndOutRow->addWidget(animOutSoundEdit, 1);
+		sndOutRow->addWidget(browseAnimOutSoundBtn);
+		sndOutRow->addWidget(deleteAnimOutSoundBtn);
+		g->addLayout(sndOutRow, row, 1, 1, 3);
+
+		row++;
 		g->addWidget(new QLabel(tr("Hotkey:"), this), row, 0);
 
 		auto *hkRow = new QHBoxLayout();
@@ -328,6 +388,17 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 			&LowerThirdSettingsDialog::onBrowseProfilePicture);
 		connect(deleteProfilePictureBtn, &QPushButton::clicked, this,
 			&LowerThirdSettingsDialog::onDeleteProfilePicture);
+
+		connect(browseAnimInSoundBtn, &QPushButton::clicked, this,
+			&LowerThirdSettingsDialog::onBrowseAnimInSound);
+		connect(deleteAnimInSoundBtn, &QPushButton::clicked, this,
+			&LowerThirdSettingsDialog::onDeleteAnimInSound);
+
+		connect(browseAnimOutSoundBtn, &QPushButton::clicked, this,
+			&LowerThirdSettingsDialog::onBrowseAnimOutSound);
+		connect(deleteAnimOutSoundBtn, &QPushButton::clicked, this,
+			&LowerThirdSettingsDialog::onDeleteAnimOutSound);
+
 
 		auto *marketBox = new QGroupBox(tr("Lower Thirds Library"), this);
 		auto *mv = new QVBoxLayout(marketBox);
@@ -793,6 +864,16 @@ void LowerThirdSettingsDialog::loadFromState()
 	else
 		profilePictureEdit->setText(QString::fromStdString(cfg->profile_picture));
 
+	if (cfg->anim_in_sound.empty())
+		animInSoundEdit->clear();
+	else
+		animInSoundEdit->setText(QString::fromStdString(cfg->anim_in_sound));
+
+	if (cfg->anim_out_sound.empty())
+		animOutSoundEdit->clear();
+	else
+		animOutSoundEdit->setText(QString::fromStdString(cfg->anim_out_sound));
+
 	delete currentBgColor;
 	currentBgColor = nullptr;
 	delete currentTextColor;
@@ -924,6 +1005,70 @@ void LowerThirdSettingsDialog::saveToState()
 		pendingProfilePicturePath.clear();
 	}
 
+	if (!pendingAnimInSoundPath.isEmpty() && smart_lt::has_output_dir()) {
+		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+		QDir dir(outDir);
+
+		if (!cfg->anim_in_sound.empty()) {
+			const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_in_sound));
+			if (QFile::exists(oldPath))
+				QFile::remove(oldPath);
+		}
+
+		const QFileInfo fi(pendingAnimInSoundPath);
+		const QString ext = fi.suffix().toLower();
+		const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+
+		QString newFileName = QString("%1_in_%2").arg(QString::fromStdString(cfg->id)).arg(ts);
+		if (!ext.isEmpty())
+			newFileName += "." + ext;
+
+		const QString destPath = dir.filePath(newFileName);
+		QFile::remove(destPath);
+
+		if (QFile::copy(pendingAnimInSoundPath, destPath)) {
+			cfg->anim_in_sound = newFileName.toStdString();
+			animInSoundEdit->setText(newFileName);
+		} else {
+			LOGW("Failed to copy anim-in sound '%s' -> '%s'",
+			     pendingAnimInSoundPath.toUtf8().constData(), destPath.toUtf8().constData());
+		}
+
+		pendingAnimInSoundPath.clear();
+	}
+
+	if (!pendingAnimOutSoundPath.isEmpty() && smart_lt::has_output_dir()) {
+		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+		QDir dir(outDir);
+
+		if (!cfg->anim_out_sound.empty()) {
+			const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_out_sound));
+			if (QFile::exists(oldPath))
+				QFile::remove(oldPath);
+		}
+
+		const QFileInfo fi(pendingAnimOutSoundPath);
+		const QString ext = fi.suffix().toLower();
+		const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+
+		QString newFileName = QString("%1_out_%2").arg(QString::fromStdString(cfg->id)).arg(ts);
+		if (!ext.isEmpty())
+			newFileName += "." + ext;
+
+		const QString destPath = dir.filePath(newFileName);
+		QFile::remove(destPath);
+
+		if (QFile::copy(pendingAnimOutSoundPath, destPath)) {
+			cfg->anim_out_sound = newFileName.toStdString();
+			animOutSoundEdit->setText(newFileName);
+		} else {
+			LOGW("Failed to copy anim-out sound '%s' -> '%s'",
+			     pendingAnimOutSoundPath.toUtf8().constData(), destPath.toUtf8().constData());
+		}
+
+		pendingAnimOutSoundPath.clear();
+	}
+
 	smart_lt::save_state_json();
 }
 
@@ -983,6 +1128,77 @@ void LowerThirdSettingsDialog::onDeleteProfilePicture()
 
 	smart_lt::save_state_json();
 }
+
+void LowerThirdSettingsDialog::onBrowseAnimInSound()
+{
+	const QString filter = tr("Audio (*.mp3 *.wav);;All Files (*.*)");
+	const QString file = QFileDialog::getOpenFileName(this, tr("Select sound for animation in"), QString(), filter);
+	if (file.isEmpty())
+		return;
+
+	pendingAnimInSoundPath = file;
+	animInSoundEdit->setText(file);
+}
+
+void LowerThirdSettingsDialog::onDeleteAnimInSound()
+{
+	if (currentId.isEmpty())
+		return;
+
+	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	if (!cfg)
+		return;
+
+	if (!cfg->anim_in_sound.empty() && smart_lt::has_output_dir()) {
+		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+		QDir dir(outDir);
+		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_in_sound));
+		if (QFile::exists(oldPath))
+			QFile::remove(oldPath);
+	}
+
+	cfg->anim_in_sound.clear();
+	pendingAnimInSoundPath.clear();
+	animInSoundEdit->clear();
+
+	smart_lt::save_state_json();
+}
+
+void LowerThirdSettingsDialog::onBrowseAnimOutSound()
+{
+	const QString filter = tr("Audio (*.mp3 *.wav);;All Files (*.*)");
+	const QString file = QFileDialog::getOpenFileName(this, tr("Select sound for animation out"), QString(), filter);
+	if (file.isEmpty())
+		return;
+
+	pendingAnimOutSoundPath = file;
+	animOutSoundEdit->setText(file);
+}
+
+void LowerThirdSettingsDialog::onDeleteAnimOutSound()
+{
+	if (currentId.isEmpty())
+		return;
+
+	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	if (!cfg)
+		return;
+
+	if (!cfg->anim_out_sound.empty() && smart_lt::has_output_dir()) {
+		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+		QDir dir(outDir);
+		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_out_sound));
+		if (QFile::exists(oldPath))
+			QFile::remove(oldPath);
+	}
+
+	cfg->anim_out_sound.clear();
+	pendingAnimOutSoundPath.clear();
+	animOutSoundEdit->clear();
+
+	smart_lt::save_state_json();
+}
+
 
 void LowerThirdSettingsDialog::onPickBgColor()
 {
