@@ -101,9 +101,19 @@ static std::string join_path(const std::string &a, const std::string &b)
 static bool write_text_file(const std::string &path, const std::string &data)
 {
 	QFile f(QString::fromStdString(path));
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		LOGW("Failed opening '%s' for write (err=%d '%s')", path.c_str(), (int)f.error(),
+		     f.errorString().toUtf8().constData());
 		return false;
-	f.write(data.data(), (qint64)data.size());
+	}
+	const qint64 written = f.write(data.data(), (qint64)data.size());
+	if (written != (qint64)data.size()) {
+		LOGW("Short write for '%s' (%lld/%lld)", path.c_str(), (long long)written,
+		     (long long)data.size());
+		f.close();
+		return false;
+	}
+	f.flush();
 	f.close();
 	return true;
 }
@@ -390,41 +400,38 @@ static std::string find_latest_lt_html()
 	return d.filePath(list.first()).toStdString();
 }
 
-static std::string fixed_lt_html_path()
+// CSS/JS use stable filenames so external references remain constant, but we
+// cache-bust them via querystring (?v=<timestamp>) inside each new HTML bundle.
+static std::string bundle_styles_name(const std::string &) { return "lt.css"; }
+static std::string bundle_scripts_name(const std::string &) { return "lt.js"; }
+static std::string bundle_html_name(const std::string &ts) { return "lt-" + ts + ".html"; }
+
+static std::string bundle_styles_path(const std::string &ts)
 {
-	return has_output_dir() ? join_path(output_dir(), "lt.html") : std::string();
+	return has_output_dir() ? join_path(output_dir(), bundle_styles_name(ts)) : std::string();
 }
 
-static std::string migrate_timestamp_html_to_fixed()
+static std::string bundle_scripts_path(const std::string &ts)
 {
-	if (!has_output_dir())
-		return {};
+	return has_output_dir() ? join_path(output_dir(), bundle_scripts_name(ts)) : std::string();
+}
 
-	const std::string fixed = fixed_lt_html_path();
-	if (file_exists(fixed))
-		return fixed;
+static std::string bundle_html_path(const std::string &ts)
+{
+	return has_output_dir() ? join_path(output_dir(), bundle_html_name(ts)) : std::string();
+}
 
-	const std::string latest = find_latest_lt_html();
-	if (latest.empty())
-		return {};
-
-	QFile f(QString::fromStdString(latest));
-	if (!f.exists())
-		return {};
-
-	QFile::remove(QString::fromStdString(fixed));
-	if (!f.rename(QString::fromStdString(fixed))) {
-		LOGW("Failed migrating '%s' -> 'lt.html'", latest.c_str());
-		return latest; 
-	}
+static void cleanup_old_bundles(int keep)
+{
+	if (!has_output_dir() || keep < 1)
+		return;
 
 	QDir d(QString::fromStdString(output_dir()));
-	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	for (const QString &fn : list)
+	const QStringList htmls = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
+	for (int i = keep; i < htmls.size(); ++i) {
+		const QString fn = htmls.at(i);
 		d.remove(fn);
-
-	LOGI("Migrated timestamped html to '%s'", fixed.c_str());
-	return fixed;
+	}
 }
 
 // -------------------------
@@ -537,18 +544,6 @@ static lower_third_cfg default_cfg()
 
 	c.js_template =
 		R"JS(
-/* Base template script (Smart Lower Thirds)
-   - Provides required hooks:
-     root.__slt_show()  : called by plugin when showing this LT
-     root.__slt_hide()  : called by plugin when hiding this LT (may return Promise)
-   - Place your custom animation things in the marked area.
-*/
-(() => {
-  'use strict';
-
-  const root = document.querySelector('[data-slt-root]') || document.querySelector('.slt-card');
-  if (!root) return;
-
   console.log("LT template running for", root.id || "(no-id)");
 
   function waitForAnimationEnd(target, name, fallbackMs = 2500) {
@@ -578,58 +573,14 @@ static lower_third_cfg default_cfg()
     });
   }
 
-  // ---- Place your custom animation things here ----
-  // Tip: If you use CSS keyframes on an element, return waitForAnimationEnd(el, "YourKeyframeName", 3000)
-  // from __slt_hide to let the plugin wait before removing/hiding the <li>.
-  // ------------------------------------------------
-
-  // Default hooks: if no animation, fall back to animate.css classes using plugin-provided animations.
-  // Note: animate.css expects "animate__animated" + the effect class.
-  const animInClass  = "{{ANIM_IN}}";
-  const animOutClass = "{{ANIM_OUT}}";
-
-  const soundInUrl  = "{{SOUND_IN_URL}}";
-  const soundOutUrl = "{{SOUND_OUT_URL}}";
-
-  function playCue(url) {
-    if (!url || !url.trim()) return;
-    try {
-      const a = new Audio(url);
-      a.volume = 1.0;
-      // play() may be blocked in some environments; ignore errors
-      const p = a.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } catch(e) {}
-  }
-
-
-  function applyAnimateCss(el, effectClass) {
-    if (!el) return;
-    el.classList.remove("animate__animated", animInClass, animOutClass);
-    // reflow to restart animation reliably
-    void el.offsetWidth;
-    el.classList.add("animate__animated");
-    if (effectClass && effectClass.trim()) el.classList.add(effectClass.trim());
-  }
-
   root.__slt_show = function () {
-    playCue(soundInUrl);
-    // Apply animate.css to the whole card by default
-    applyAnimateCss(root, animInClass);
+    // so your custom animation in stuff here
   };
 
   root.__slt_hide = function () {
-    playCue(soundOutUrl);
-    // Apply animate.css out; if no animOut provided, resolve immediately
-    if (!animOutClass || !animOutClass.trim()) return Promise.resolve();
-
-    applyAnimateCss(root, animOutClass);
-
-    // If animate.css is used, animationName is not stable across effects/browsers,
-    // so we wait for ANY animationend on the root (by passing empty name).
+	// Do your custom animation out stuff here
     return waitForAnimationEnd(root, "", 3000);
   };
-})();
 )JS";
 
 	c.repeat_every_sec = 0;
@@ -978,6 +929,8 @@ static std::string build_item_script(const lower_third_cfg &c)
 	js = replace_all(js, "{{ID}}", c.id);
 	js = replace_all(js, "{{ANIM_IN}}", c.anim_in);
 	js = replace_all(js, "{{ANIM_OUT}}", c.anim_out);
+	js = replace_all(js, "{{TITLE}}", c.title);
+	js = replace_all(js, "{{SUBTITLE}}", c.subtitle);
 	const std::string sIn = c.anim_in_sound.empty() ? "" : ("./" + c.anim_in_sound);
 	const std::string sOut = c.anim_out_sound.empty() ? "" : ("./" + c.anim_out_sound);
 	js = replace_all(js, "{{SOUND_IN_URL}}", sIn);
@@ -995,12 +948,15 @@ static std::string build_item_script(const lower_third_cfg &c)
 	return out;
 }
 
-static std::string build_full_html()
+static std::string build_full_html(const std::string &ts, const std::string &cssFile, const std::string &jsFile)
 {
 	std::string html;
 	html += "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\"/>\n";
 	html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n";
-	html += "<link rel=\"stylesheet\" href=\"./lt-styles.css\"/>\n";
+	// Use per-apply, versioned artifacts to avoid Windows file locks from CEF.
+	// The Browser Source is pointed at a new HTML file each time, so the renderer
+	// re-creates the context without requiring an OBS restart.
+	html += "<link rel=\"stylesheet\" href=\"./" + cssFile + "?v=" + ts + "\"/>\n";
 
 	const std::string animateLocalAbs = path_animate_css();
 	if (!animateLocalAbs.empty() && file_exists(animateLocalAbs)) {
@@ -1045,9 +1001,10 @@ static std::string build_full_html()
 		html += "</li>\n";
 	}
 
-	html += "</ul>\n<script src=\"./lt-scripts.js\"></script>\n</body>\n</html>\n";
+	html += "</ul>\n<script defer src=\"./" + jsFile + "?v=" + ts + "\"></script>\n</body>\n</html>\n";
 	return html;
 }
+
 // -------------------------
 // Public
 // -------------------------
@@ -1073,12 +1030,12 @@ std::string path_visible_json()
 
 std::string path_styles_css()
 {
-	return has_output_dir() ? join_path(g_output_dir, "lt-styles.css") : "";
+	return has_output_dir() ? join_path(g_output_dir, "lt.css") : "";
 }
 
 std::string path_scripts_js()
 {
-	return has_output_dir() ? join_path(g_output_dir, "lt-scripts.js") : "";
+	return has_output_dir() ? join_path(g_output_dir, "lt.js") : "";
 }
 
 std::string path_animate_css()
@@ -1627,10 +1584,13 @@ bool save_visible_json()
 	return write_text_file(path_visible_json(), doc.toJson(QJsonDocument::Indented).toStdString());
 }
 
-bool regenerate_merged_css_js()
+static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssFile, std::string &outJsFile)
 {
 	if (!has_output_dir())
 		return false;
+
+	outCssFile = bundle_styles_name(ts);
+	outJsFile  = bundle_scripts_name(ts);
 
 	std::string css;
 	css += build_shared_css();
@@ -1778,8 +1738,9 @@ bool regenerate_merged_css_js()
 		}
 	}
 
-	if (!write_text_file(path_styles_css(), css)) {
-		LOGW("Failed writing lt-styles.css");
+	const std::string cssPath = bundle_styles_path(ts);
+	if (cssPath.empty() || !write_text_file(cssPath, css)) {
+		LOGW("Failed writing %s", cssPath.empty() ? "<empty css path>" : cssPath.c_str());
 		return false;
 	}
 
@@ -1789,24 +1750,25 @@ bool regenerate_merged_css_js()
 	for (const auto &c : g_items)
 		js += build_item_script(c);
 
-	if (!write_text_file(path_scripts_js(), js)) {
-		LOGW("Failed writing lt-scripts.js");
+	const std::string jsPath = bundle_scripts_path(ts);
+	if (jsPath.empty() || !write_text_file(jsPath, js)) {
+		LOGW("Failed writing %s", jsPath.empty() ? "<empty js path>" : jsPath.c_str());
 		return false;
 	}
 
 	return true;
 }
 
-static std::string generate_fixed_html()
+static std::string generate_bundle_html(const std::string &ts, const std::string &cssFile, const std::string &jsFile)
 {
 	if (!has_output_dir())
 		return {};
 
-	const std::string abs = fixed_lt_html_path();
+	const std::string abs = bundle_html_path(ts);
 	if (abs.empty())
 		return {};
 
-	if (!write_text_file(abs, build_full_html()))
+	if (!write_text_file(abs, build_full_html(ts, cssFile, jsFile)))
 		return {};
 	return abs;
 }
@@ -1961,6 +1923,15 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	}
 
 	obs_data_t *s = obs_source_get_settings(src);
+	const char *prevPathC = obs_data_get_string(s, "local_file");
+	const std::string prevPath = prevPathC ? std::string(prevPathC) : std::string();
+
+	// If OBS thinks the path did not change, some builds won't fully reload the
+	// Browser Source even after triggering the refresh button. Force a path flip.
+	if (!prevPath.empty() && prevPath == absoluteHtmlPath) {
+		obs_data_set_string(s, "local_file", "");
+		obs_source_update(src, s);
+	}
 	obs_data_set_bool(s, "is_local_file", true);
 	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
 
@@ -1992,14 +1963,19 @@ bool rebuild_and_swap()
 
 	ensure_output_artifacts_exist();
 
-	if (!regenerate_merged_css_js())
+	// Generate versioned artifacts on each apply. This avoids a common Windows/CEF
+	// failure mode where the currently loaded local files are kept open and can't
+	// be truncated/overwritten until OBS is restarted.
+	const std::string ts = now_timestamp_string();
+	std::string cssFile, jsFile;
+	if (!regenerate_merged_css_js(ts, cssFile, jsFile))
 		return false;
 
-	migrate_timestamp_html_to_fixed();
-
-	const std::string newHtml = generate_fixed_html();
+	const std::string newHtml = generate_bundle_html(ts, cssFile, jsFile);
 	if (newHtml.empty())
 		return false;
+
+	cleanup_old_bundles(10);
 
 	if (target_browser_source_exists()) {
 		swap_target_browser_source_to_file(newHtml);
@@ -2093,9 +2069,8 @@ void init_from_disk()
 	load_state_json();
 	load_visible_json();
 
-	g_last_html_path = migrate_timestamp_html_to_fixed();
-	if (g_last_html_path.empty())
-		g_last_html_path = fixed_lt_html_path();
+	// On startup, try to reuse the most recent generated HTML bundle.
+	g_last_html_path = find_latest_lt_html();
 
 	if (!g_last_html_path.empty() && file_exists(g_last_html_path)) {
 		if (target_browser_source_exists()) {

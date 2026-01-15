@@ -7,7 +7,6 @@
 #include <QVector>
 #include <QHash>
 #include <QSet>
-
 #include <QPixmap>
 
 namespace smart_lt::api {
@@ -27,16 +26,28 @@ struct ResourceItem {
 class ApiClient final : public QObject {
     Q_OBJECT
 public:
-	static ApiClient &instance();
-	void init();
-	void fetchLowerThirds(bool force = false);
-	void requestImage(const QString &imageUrl, int targetPx = 48);
+    static ApiClient &instance();
 
-	QVector<ResourceItem> lowerThirds() const;
-	QString lastError() const;
+    // Call once after plugin startup (safe to call multiple times).
+    void init();
+
+    // Fetch Marketplace lower thirds list.
+    // - force=false respects TTL and skips network when cache is fresh.
+    // - force=true always attempts a network refresh.
+    void fetchLowerThirds(bool force = false);
+
+    // Fetch and decode an image with in-memory + disk caching.
+    void requestImage(const QString &imageUrl, int targetPx = 48);
+
+    QVector<ResourceItem> lowerThirds() const;
+    QString lastError() const;
 
 signals:
+    // Emitted when m_lowerThirds has been populated/updated (from disk cache or network).
     void lowerThirdsUpdated();
+
+    // Emitted on network/parse failures.
+    // Important: callers should NOT clear existing UI items on this signal.
     void lowerThirdsFailed(const QString &err);
 
     void imageReady(const QString &imageUrl, const QPixmap &pixmap);
@@ -56,13 +67,24 @@ private:
     QString imageCacheDir() const;
     QString imageCachePathForUrl(const QString &imageUrl) const;
 
+    // Retry/backoff for failed API calls.
+    void scheduleRetry();
+    void resetRetry();
+
 private:
     QVector<ResourceItem> m_lowerThirds;
     QString m_lastError;
     QByteArray m_lastRaw;
     qint64 m_cacheFetchedAt = 0;
+
     bool m_inited = false;
     bool m_fetchInFlight = false;
+
+    // Retry state
+    int m_retryCount = 0;
+    bool m_retryScheduled = false;
+
+    // Image caches
     QHash<QString, QPixmap> m_pixCache;
     QSet<QString> m_imgInFlight;
 };
