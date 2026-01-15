@@ -134,8 +134,14 @@ static void req_ListLowerThirds(obs_data_t *request, obs_data_t *response, void 
 		obs_data_set_int(it, "repeatVisibleSec", c.repeat_visible_sec);
 		obs_data_set_string(it, "hotkey", c.hotkey.c_str());
 
-		obs_data_set_string(it, "bgColor", c.bg_color.c_str());
-		obs_data_set_string(it, "textColor", c.text_color.c_str());
+		obs_data_set_string(it, "primaryColor", c.primary_color.c_str());
+		obs_data_set_string(it, "secondaryColor", c.secondary_color.c_str());
+		obs_data_set_string(it, "titleColor", c.title_color.c_str());
+		obs_data_set_string(it, "subtitleColor", c.subtitle_color.c_str());
+
+		// Legacy fields for older docks
+		obs_data_set_string(it, "bgColor", c.primary_color.c_str());
+		obs_data_set_string(it, "textColor", c.title_color.c_str());
 		obs_data_set_int(it, "opacity", c.opacity);
 		obs_data_set_int(it, "radius", c.radius);
 

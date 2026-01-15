@@ -185,8 +185,10 @@ private slots:
 	void onDeleteAnimInSound();
 	void onBrowseAnimOutSound();
 	void onDeleteAnimOutSound();
-	void onPickBgColor();
-	void onPickTextColor();
+	void onPickPrimaryColor();
+	void onPickSecondaryColor();
+	void onPickTitleColor();
+	void onPickSubtitleColor();
 
 	void onImportTemplateClicked();
 	void onInfoClicked();
@@ -243,8 +245,10 @@ private:
 	QSpinBox *avatarHeightSpin = nullptr;
 	QComboBox *posCombo = nullptr;
 
-	QPushButton *bgColorBtn = nullptr;
-	QPushButton *textColorBtn = nullptr;
+	QPushButton *primaryColorBtn = nullptr;
+	QPushButton *secondaryColorBtn = nullptr;
+	QPushButton *titleColorBtn = nullptr;
+	QPushButton *subtitleColorBtn = nullptr;
 
 	QKeySequenceEdit *hotkeyEdit = nullptr;
 	QPushButton *clearHotkeyBtn = nullptr;
@@ -260,8 +264,10 @@ private:
 
 	QDialogButtonBox *buttonBox = nullptr;
 
-	QColor *currentBgColor = nullptr;
-	QColor *currentTextColor = nullptr;
+	QColor *currentPrimaryColor = nullptr;
+	QColor *currentSecondaryColor = nullptr;
+	QColor *currentTitleColor = nullptr;
+	QColor *currentSubtitleColor = nullptr;
 
 	QSlider *opacitySlider = nullptr;
 	QLabel *opacityValue = nullptr;

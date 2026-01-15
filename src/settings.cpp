@@ -199,6 +199,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 	addNavItem(tr("Content & Media"));
 	addNavItem(tr("Style & Anim"));
+	addNavItem(tr("Color"));
 	addNavItem(tr("Layout"));
 	addNavItem(tr("Templates Gallery"));
 
@@ -221,16 +222,19 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 	QVBoxLayout *contentPageLayout = nullptr;
 	QVBoxLayout *stylePageLayout = nullptr;
+	QVBoxLayout *colorsPageLayout = nullptr;
 	QVBoxLayout *templatesPageLayout = nullptr;
 	QVBoxLayout *templatesGalleryLayout = nullptr;
 
 	auto *contentPageSa = makeScrollPage(contentPageLayout);
 	auto *stylePageSa = makeScrollPage(stylePageLayout);
+	auto *colorsPageSa = makeScrollPage(colorsPageLayout);
 	auto *templatesPageSa = makeScrollPage(templatesPageLayout);
 	auto *templatesGallerySa = makeScrollPage(templatesGalleryLayout);
 
 	stack->addWidget(contentPageSa);
 	stack->addWidget(stylePageSa);
+	stack->addWidget(colorsPageSa);
 	stack->addWidget(templatesPageSa);
 	stack->addWidget(templatesGallerySa);
 
@@ -505,15 +509,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		avatarWidthSpin->setToolTip(tr("Avatar width in pixels for {{AVATAR_WIDTH}} placeholder"));
 		g->addWidget(avatarWidthSpin, row, 1);
 
-		row++;
-		g->addWidget(new QLabel(tr("Background:"), this), row, 0);
-		bgColorBtn = new QPushButton(tr("Pick"), this);
-		g->addWidget(bgColorBtn, row, 1);
-
-		row++;
-		g->addWidget(new QLabel(tr("Text color:"), this), row, 0);
-		textColorBtn = new QPushButton(tr("Pick"), this);
-		g->addWidget(textColorBtn, row, 1);
 
 		row++;
 		g->addWidget(new QLabel(tr("Opacity:"), this), row, 0);
@@ -570,15 +565,64 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		updateOpacityLabel();
 		updateRadiusLabel();
 
-		connect(bgColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickBgColor);
-		connect(textColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickTextColor);
-
 		connect(animInCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 			&LowerThirdSettingsDialog::onAnimInChanged);
 		connect(animOutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 			&LowerThirdSettingsDialog::onAnimOutChanged);
 	}
 
+
+	{
+		auto *colorsBox = new QGroupBox(tr("Colors"), this);
+		colorsBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+
+		auto *v = new QVBoxLayout(colorsBox);
+		v->setContentsMargins(8, 8, 8, 8);
+		v->setSpacing(0);
+
+		auto *g = new QGridLayout();
+		g->setContentsMargins(0, 0, 0, 0);
+		g->setHorizontalSpacing(10);
+		g->setVerticalSpacing(10);
+
+		int row = 0;
+
+		g->addWidget(new QLabel(tr("Primary color:"), this), row, 0);
+		primaryColorBtn = new QPushButton(tr("Pick"), this);
+		primaryColorBtn->setToolTip(tr("Used for {{PRIMARY_COLOR}} (and legacy {{BG_COLOR}} fallback)"));
+		g->addWidget(primaryColorBtn, row, 1);
+
+		row++;
+		g->addWidget(new QLabel(tr("Secondary color:"), this), row, 0);
+		secondaryColorBtn = new QPushButton(tr("Pick"), this);
+		secondaryColorBtn->setToolTip(tr("Used for {{SECONDARY_COLOR}}"));
+		g->addWidget(secondaryColorBtn, row, 1);
+
+		row++;
+		g->addWidget(new QLabel(tr("Title color:"), this), row, 0);
+		titleColorBtn = new QPushButton(tr("Pick"), this);
+		titleColorBtn->setToolTip(tr("Used for {{TITLE_COLOR}} (and legacy {{TEXT_COLOR}} fallback)"));
+		g->addWidget(titleColorBtn, row, 1);
+
+		row++;
+		g->addWidget(new QLabel(tr("Subtitle color:"), this), row, 0);
+		subtitleColorBtn = new QPushButton(tr("Pick"), this);
+		subtitleColorBtn->setToolTip(tr("Used for {{SUBTITLE_COLOR}}"));
+		g->addWidget(subtitleColorBtn, row, 1);
+
+		g->setColumnStretch(0, 0);
+		g->setColumnStretch(1, 1);
+
+		v->addLayout(g);
+		v->addStretch(1);
+
+		colorsPageLayout->addWidget(colorsBox);
+
+		connect(primaryColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickPrimaryColor);
+		connect(secondaryColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickSecondaryColor);
+		connect(titleColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickTitleColor);
+		connect(subtitleColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickSubtitleColor);
+	}
 	{
 		auto *editorsBox = new QGroupBox(tr("Template Editors"), this);
 		editorsBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -661,9 +705,14 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 				     "  {{AVATAR_WIDTH}}     Avatar width (px)\n"
 				     "  {{AVATAR_HEIGHT}}    Avatar height (px)\n"
 				     "\n"
-				     "Styling\n"
-				     "  {{BG_COLOR}}         Background color\n"
-				     "  {{TEXT_COLOR}}       Text color\n"
+				     				     "Colors\n"
+				     "  {{PRIMARY_COLOR}}    Primary color\n"
+				     "  {{SECONDARY_COLOR}}  Secondary color\n"
+				     "  {{TITLE_COLOR}}      Title color\n"
+				     "  {{SUBTITLE_COLOR}}   Subtitle color\n"
+				     "  {{BG_COLOR}}         (Legacy) maps to PRIMARY_COLOR\n"
+				     "  {{TEXT_COLOR}}       (Legacy) maps to TITLE_COLOR\n"
+				     "\n"
 				     "  {{OPACITY}}          Opacity (0-100 or normalized based on your templater)\n"
 				     "  {{RADIUS}}           Radius (0-100)\n"
 				     "\n"
@@ -865,8 +914,10 @@ QListWidget#ltSettingsNav::item:selected {
 
 LowerThirdSettingsDialog::~LowerThirdSettingsDialog()
 {
-	delete currentBgColor;
-	delete currentTextColor;
+	delete currentPrimaryColor;
+	delete currentSecondaryColor;
+	delete currentTitleColor;
+	delete currentSubtitleColor;
 }
 
 void LowerThirdSettingsDialog::setLowerThirdId(const QString &id)
@@ -934,23 +985,38 @@ void LowerThirdSettingsDialog::loadFromState()
 	else
 		animOutSoundEdit->setText(QString::fromStdString(cfg->anim_out_sound));
 
-	delete currentBgColor;
-	currentBgColor = nullptr;
-	delete currentTextColor;
-	currentTextColor = nullptr;
+	delete currentPrimaryColor;
+	currentPrimaryColor = nullptr;
+	delete currentSecondaryColor;
+	currentSecondaryColor = nullptr;
+	delete currentTitleColor;
+	currentTitleColor = nullptr;
+	delete currentSubtitleColor;
+	currentSubtitleColor = nullptr;
 
-	QColor bg(QString::fromStdString(cfg->bg_color));
-	QColor fg(QString::fromStdString(cfg->text_color));
-	if (!bg.isValid())
-		bg = QColor(17, 24, 39);
-	if (!fg.isValid())
-		fg = QColor(249, 250, 251);
+	QColor primary(QString::fromStdString(cfg->primary_color));
+	QColor secondary(QString::fromStdString(cfg->secondary_color));
+	QColor title(QString::fromStdString(cfg->title_color));
+	QColor subtitle(QString::fromStdString(cfg->subtitle_color));
 
-	currentBgColor = new QColor(bg);
-	currentTextColor = new QColor(fg);
+	if (!primary.isValid())
+		primary = QColor(17, 24, 39);
+	if (!secondary.isValid())
+		secondary = QColor(31, 41, 55);
+	if (!title.isValid())
+		title = QColor(249, 250, 251);
+	if (!subtitle.isValid())
+		subtitle = QColor(209, 213, 219);
 
-	updateColorButton(bgColorBtn, bg);
-	updateColorButton(textColorBtn, fg);
+	currentPrimaryColor = new QColor(primary);
+	currentSecondaryColor = new QColor(secondary);
+	currentTitleColor = new QColor(title);
+	currentSubtitleColor = new QColor(subtitle);
+
+	updateColorButton(primaryColorBtn, primary);
+	updateColorButton(secondaryColorBtn, secondary);
+	updateColorButton(titleColorBtn, title);
+	updateColorButton(subtitleColorBtn, subtitle);
 
 	int op = 85;
 	int rad = 18;
@@ -998,10 +1064,14 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->font_family = fontCombo->currentFont().family().toStdString();
 	cfg->lt_position = posCombo->currentData().toString().toStdString();
 
-	if (currentBgColor)
-		cfg->bg_color = currentBgColor->name(QColor::HexRgb).toStdString();
-	if (currentTextColor)
-		cfg->text_color = currentTextColor->name(QColor::HexRgb).toStdString();
+	if (currentPrimaryColor)
+		cfg->primary_color = currentPrimaryColor->name(QColor::HexRgb).toStdString();
+	if (currentSecondaryColor)
+		cfg->secondary_color = currentSecondaryColor->name(QColor::HexRgb).toStdString();
+	if (currentTitleColor)
+		cfg->title_color = currentTitleColor->name(QColor::HexRgb).toStdString();
+	if (currentSubtitleColor)
+		cfg->subtitle_color = currentSubtitleColor->name(QColor::HexRgb).toStdString();
 
 	if (opacitySlider) {
 		int op = opacitySlider->value();
@@ -1260,35 +1330,68 @@ void LowerThirdSettingsDialog::onDeleteAnimOutSound()
 	smart_lt::save_state_json();
 }
 
-void LowerThirdSettingsDialog::onPickBgColor()
+
+void LowerThirdSettingsDialog::onPickPrimaryColor()
 {
-	QColor start = currentBgColor ? *currentBgColor : QColor(17, 24, 39);
-	QColor c = QColorDialog::getColor(start, this, tr("Pick background color"));
+	QColor start = currentPrimaryColor ? *currentPrimaryColor : QColor(17, 24, 39);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick primary color"));
 	if (!c.isValid())
 		return;
 
-	if (!currentBgColor)
-		currentBgColor = new QColor(c);
+	if (!currentPrimaryColor)
+		currentPrimaryColor = new QColor(c);
 	else
-		*currentBgColor = c;
+		*currentPrimaryColor = c;
 
-	updateColorButton(bgColorBtn, c);
+	updateColorButton(primaryColorBtn, c);
 }
 
-void LowerThirdSettingsDialog::onPickTextColor()
+void LowerThirdSettingsDialog::onPickSecondaryColor()
 {
-	QColor start = currentTextColor ? *currentTextColor : QColor(249, 250, 251);
-	QColor c = QColorDialog::getColor(start, this, tr("Pick text color"));
+	QColor start = currentSecondaryColor ? *currentSecondaryColor : QColor(31, 41, 55);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick secondary color"));
 	if (!c.isValid())
 		return;
 
-	if (!currentTextColor)
-		currentTextColor = new QColor(c);
+	if (!currentSecondaryColor)
+		currentSecondaryColor = new QColor(c);
 	else
-		*currentTextColor = c;
+		*currentSecondaryColor = c;
 
-	updateColorButton(textColorBtn, c);
+	updateColorButton(secondaryColorBtn, c);
 }
+
+void LowerThirdSettingsDialog::onPickTitleColor()
+{
+	QColor start = currentTitleColor ? *currentTitleColor : QColor(249, 250, 251);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick title color"));
+	if (!c.isValid())
+		return;
+
+	if (!currentTitleColor)
+		currentTitleColor = new QColor(c);
+	else
+		*currentTitleColor = c;
+
+	updateColorButton(titleColorBtn, c);
+}
+
+void LowerThirdSettingsDialog::onPickSubtitleColor()
+{
+	QColor start = currentSubtitleColor ? *currentSubtitleColor : QColor(209, 213, 219);
+	QColor c = QColorDialog::getColor(start, this, tr("Pick subtitle color"));
+	if (!c.isValid())
+		return;
+
+	if (!currentSubtitleColor)
+		currentSubtitleColor = new QColor(c);
+	else
+		*currentSubtitleColor = c;
+
+	updateColorButton(subtitleColorBtn, c);
+}
+
+
 
 void LowerThirdSettingsDialog::onAnimInChanged(int) {}
 void LowerThirdSettingsDialog::onAnimOutChanged(int) {}
@@ -1738,8 +1841,14 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	}
 	o["font_family"] = QString::fromStdString(cfg->font_family);
 	o["lt_position"] = QString::fromStdString(cfg->lt_position);
-	o["bg_color"] = QString::fromStdString(cfg->bg_color);
-	o["text_color"] = QString::fromStdString(cfg->text_color);
+	o["primary_color"] = QString::fromStdString(cfg->primary_color);
+	o["secondary_color"] = QString::fromStdString(cfg->secondary_color);
+	o["title_color"] = QString::fromStdString(cfg->title_color);
+	o["subtitle_color"] = QString::fromStdString(cfg->subtitle_color);
+
+	// Legacy keys for backward compatibility
+	o["bg_color"] = QString::fromStdString(cfg->primary_color);
+	o["text_color"] = QString::fromStdString(cfg->title_color);
 	o["opacity"] = cfg->opacity;
 	o["radius"] = cfg->radius;
 	o["hotkey"] = QString::fromStdString(cfg->hotkey);
@@ -1816,8 +1925,12 @@ void LowerThirdSettingsDialog::onInfoClicked()
 	text += "  {{PROFILE_PICTURE_URL}}\n    " +
 		tr("Resolved file URL for the selected profile picture (empty when none).") + "\n\n";
 
-	text += "  {{BG_COLOR}}\n    " + tr("Background color (hex).") + "\n\n";
-	text += "  {{TEXT_COLOR}}\n    " + tr("Primary text color (hex).") + "\n\n";
+	text += "  {{PRIMARY_COLOR}}\n    " + tr("Primary color (hex).") + "\n\n";
+	text += "  {{SECONDARY_COLOR}}\n    " + tr("Secondary color (hex).") + "\n\n";
+	text += "  {{TITLE_COLOR}}\n    " + tr("Title text color (hex).") + "\n\n";
+	text += "  {{SUBTITLE_COLOR}}\n    " + tr("Subtitle text color (hex).") + "\n\n";
+	text += "  {{BG_COLOR}}\n    " + tr("(Legacy) Maps to {{PRIMARY_COLOR}} for older templates.") + "\n\n";
+	text += "  {{TEXT_COLOR}}\n    " + tr("(Legacy) Maps to {{TITLE_COLOR}} for older templates.") + "\n\n";
 	text += "  {{OPACITY}}\n    " + tr("Opacity value (0..100). Typically used with rgba/alpha in CSS.") + "\n\n";
 	text += "  {{RADIUS}}\n    " + tr("Border radius value (0..100).") + "\n\n";
 
@@ -1970,8 +2083,17 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 
 	cfg->font_family = obj.value("font_family").toString().toStdString();
 	cfg->lt_position = obj.value("lt_position").toString().toStdString();
-	cfg->bg_color = obj.value("bg_color").toString().toStdString();
-	cfg->text_color = obj.value("text_color").toString().toStdString();
+
+	cfg->primary_color = obj.value("primary_color").toString().toStdString();
+	cfg->secondary_color = obj.value("secondary_color").toString().toStdString();
+	cfg->title_color = obj.value("title_color").toString().toStdString();
+	cfg->subtitle_color = obj.value("subtitle_color").toString().toStdString();
+
+	// Backward compatibility
+	if (cfg->primary_color.empty()) cfg->primary_color = obj.value("bg_color").toString().toStdString();
+	if (cfg->title_color.empty()) cfg->title_color = obj.value("text_color").toString().toStdString();
+	if (cfg->secondary_color.empty()) cfg->secondary_color = cfg->primary_color;
+	if (cfg->subtitle_color.empty()) cfg->subtitle_color = cfg->title_color;
 	cfg->opacity = obj.value("opacity").toInt(cfg->opacity);
 	cfg->radius = obj.value("radius").toInt(cfg->radius);
 

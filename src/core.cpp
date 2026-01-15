@@ -461,8 +461,10 @@ static lower_third_cfg default_cfg()
 	c.font_family = "Inter";
 	c.lt_position = "lt-pos-bottom-left";
 
-	c.bg_color = "#111827";
-	c.text_color = "#F9FAFB";
+	c.primary_color = "#111827";
+	c.secondary_color = "#1F2937";
+	c.title_color = "#F9FAFB";
+	c.subtitle_color = "#D1D5DB";
 	c.opacity = 85;
 	c.radius = 5;
 
@@ -499,7 +501,7 @@ static lower_third_cfg default_cfg()
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: {{BG_COLOR}};
+  background: linear-gradient(135deg, {{PRIMARY_COLOR}}, {{SECONDARY_COLOR}});
   opacity: calc({{OPACITY}} / 100);
   pointer-events: none;
 }
@@ -511,7 +513,7 @@ static lower_third_cfg default_cfg()
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  color: {{TEXT_COLOR}};
+  color: {{TITLE_COLOR}};
 }
 
 .slt-avatar {
@@ -634,10 +636,15 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 	std::string css = c.css_template;
 
 	css = replace_all(css, "{{ID}}", c.id);
-	css = replace_all(css, "{{BG_COLOR}}", c.bg_color);
+	css = replace_all(css, "{{PRIMARY_COLOR}}", c.primary_color);
+	css = replace_all(css, "{{SECONDARY_COLOR}}", c.secondary_color);
+	css = replace_all(css, "{{TITLE_COLOR}}", c.title_color);
+	css = replace_all(css, "{{SUBTITLE_COLOR}}", c.subtitle_color);
+	// Backward compatibility
+	css = replace_all(css, "{{BG_COLOR}}", c.primary_color);
+	css = replace_all(css, "{{TEXT_COLOR}}", c.title_color);
 	css = replace_all(css, "{{OPACITY}}", std::to_string(c.opacity));
 	css = replace_all(css, "{{RADIUS}}", std::to_string(c.radius));
-	css = replace_all(css, "{{TEXT_COLOR}}", c.text_color);
 	css = replace_all(css, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
 	css = replace_all(css, "{{TITLE_SIZE}}", std::to_string(c.title_size));
 	css = replace_all(css, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
@@ -953,9 +960,6 @@ static std::string build_full_html(const std::string &ts, const std::string &css
 	std::string html;
 	html += "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\"/>\n";
 	html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n";
-	// Use per-apply, versioned artifacts to avoid Windows file locks from CEF.
-	// The Browser Source is pointed at a new HTML file each time, so the renderer
-	// re-creates the context without requiring an OBS restart.
 	html += "<link rel=\"stylesheet\" href=\"./" + cssFile + "?v=" + ts + "\"/>\n";
 
 	const std::string animateLocalAbs = path_animate_css();
@@ -974,10 +978,15 @@ static std::string build_full_html(const std::string &ts, const std::string &css
 		inner = replace_all(inner, "{{ID}}", c.id);
 		inner = replace_all(inner, "{{TITLE}}", c.title);
 		inner = replace_all(inner, "{{SUBTITLE}}", c.subtitle);
-		inner = replace_all(inner, "{{BG_COLOR}}", c.bg_color);
+		inner = replace_all(inner, "{{PRIMARY_COLOR}}", c.primary_color);
+		inner = replace_all(inner, "{{SECONDARY_COLOR}}", c.secondary_color);
+		inner = replace_all(inner, "{{TITLE_COLOR}}", c.title_color);
+		inner = replace_all(inner, "{{SUBTITLE_COLOR}}", c.subtitle_color);
+
+		inner = replace_all(inner, "{{BG_COLOR}}", c.primary_color);
+		inner = replace_all(inner, "{{TEXT_COLOR}}", c.title_color);
 		inner = replace_all(inner, "{{OPACITY}}", std::to_string(c.opacity));
 		inner = replace_all(inner, "{{RADIUS}}", std::to_string(c.radius));
-		inner = replace_all(inner, "{{TEXT_COLOR}}", c.text_color);
 		inner = replace_all(inner, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
 
 		const std::string pic = c.profile_picture.empty() ? "./" : ("./" + c.profile_picture);
@@ -1290,8 +1299,20 @@ bool load_state_json()
 		c.font_family = o.value("font_family").toString().toStdString();
 		c.lt_position = o.value("lt_position").toString().toStdString();
 
-		c.bg_color = o.value("bg_color").toString().toStdString();
-		c.text_color = o.value("text_color").toString().toStdString();
+		c.primary_color = o.value("primary_color").toString().toStdString();
+		c.secondary_color = o.value("secondary_color").toString().toStdString();
+		c.title_color = o.value("title_color").toString().toStdString();
+		c.subtitle_color = o.value("subtitle_color").toString().toStdString();
+
+		// Backward compatibility
+		if (c.primary_color.empty())
+			c.primary_color = o.value("bg_color").toString().toStdString();
+		if (c.title_color.empty())
+			c.title_color = o.value("text_color").toString().toStdString();
+		if (c.secondary_color.empty())
+			c.secondary_color = c.primary_color;
+		if (c.subtitle_color.empty())
+			c.subtitle_color = c.title_color;
 		c.opacity = o.value("opacity").toInt(0);
 		c.radius = o.value("radius").toInt(0);
 
@@ -1329,10 +1350,14 @@ bool load_state_json()
 			c.anim_in = "animate__fadeInUp";
 		if (c.anim_out.empty())
 			c.anim_out = "animate__fadeOutDown";
-		if (c.bg_color.empty())
-			c.bg_color = "#111827";
-		if (c.text_color.empty())
-			c.text_color = "#F9FAFB";
+		if (c.primary_color.empty())
+			c.primary_color = "#111827";
+		if (c.secondary_color.empty())
+			c.secondary_color = "#1F2937";
+		if (c.title_color.empty())
+			c.title_color = "#F9FAFB";
+		if (c.subtitle_color.empty())
+			c.subtitle_color = "#D1D5DB";
 
 		if (c.label.empty())
 			c.label = c.title.empty() ? c.id : c.title;
@@ -1478,8 +1503,14 @@ bool save_state_json()
 		o["font_family"] = QString::fromStdString(c.font_family);
 		o["lt_position"] = QString::fromStdString(c.lt_position);
 
-		o["bg_color"] = QString::fromStdString(c.bg_color);
-		o["text_color"] = QString::fromStdString(c.text_color);
+		o["primary_color"] = QString::fromStdString(c.primary_color);
+		o["secondary_color"] = QString::fromStdString(c.secondary_color);
+		o["title_color"] = QString::fromStdString(c.title_color);
+		o["subtitle_color"] = QString::fromStdString(c.subtitle_color);
+
+		// Backward compatibility keys (older versions)
+		o["bg_color"] = QString::fromStdString(c.primary_color);
+		o["text_color"] = QString::fromStdString(c.title_color);
 		o["opacity"] = c.opacity;
 		o["radius"] = c.radius;
 
@@ -1651,10 +1682,15 @@ static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssF
 		// Expand placeholders up-front (so extracted keyframes are final).
 		std::string per = c.css_template;
 		per = replace_all(per, "{{ID}}", c.id);
-		per = replace_all(per, "{{BG_COLOR}}", c.bg_color);
+		per = replace_all(per, "{{PRIMARY_COLOR}}", c.primary_color);
+		per = replace_all(per, "{{SECONDARY_COLOR}}", c.secondary_color);
+		per = replace_all(per, "{{TITLE_COLOR}}", c.title_color);
+		per = replace_all(per, "{{SUBTITLE_COLOR}}", c.subtitle_color);
+		// Backward compatibility
+		per = replace_all(per, "{{BG_COLOR}}", c.primary_color);
+		per = replace_all(per, "{{TEXT_COLOR}}", c.title_color);
 		per = replace_all(per, "{{OPACITY}}", std::to_string(c.opacity));
 		per = replace_all(per, "{{RADIUS}}", std::to_string(c.radius));
-		per = replace_all(per, "{{TEXT_COLOR}}", c.text_color);
 		per = replace_all(per, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
 		per = replace_all(per, "{{TITLE_SIZE}}", std::to_string(c.title_size));
 		per = replace_all(per, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
@@ -1975,7 +2011,7 @@ bool rebuild_and_swap()
 	if (newHtml.empty())
 		return false;
 
-	cleanup_old_bundles(10);
+	cleanup_old_bundles(1);
 
 	if (target_browser_source_exists()) {
 		swap_target_browser_source_to_file(newHtml);

@@ -63,8 +63,10 @@ struct lower_third_cfg {
 	std::string font_family;
 	std::string lt_position; // class name: e.g. "lt-pos-bottom-left"
 
-	std::string bg_color;
-	std::string text_color;
+	std::string primary_color;
+	std::string secondary_color;
+	std::string title_color;
+	std::string subtitle_color;
 	int opacity = 85; // 0..100
 	int radius  = 5;  // 0..100
 
