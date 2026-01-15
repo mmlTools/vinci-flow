@@ -21,6 +21,7 @@ struct ResourceItem {
     QString downloadUrl;
     QString iconPublicUrl;
     QString coverPublicUrl;
+    QString badgeValue;
 };
 
 class ApiClient final : public QObject {
@@ -40,6 +41,9 @@ public:
     void requestImage(const QString &imageUrl, int targetPx = 48);
 
     QVector<ResourceItem> lowerThirds() const;
+    // Optional value returned by the API root: "plugin_version"
+    // Empty when not provided / not fetched.
+    QString remotePluginVersion() const;
     QString lastError() const;
 
 signals:
@@ -76,6 +80,8 @@ private:
     QString m_lastError;
     QByteArray m_lastRaw;
     qint64 m_cacheFetchedAt = 0;
+
+    QString m_remotePluginVersion;
 
     bool m_inited = false;
     bool m_fetchInFlight = false;

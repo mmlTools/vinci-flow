@@ -21,6 +21,7 @@ class QSlider;
 class QColor;
 class QListWidget;
 class QPixmap;
+class QFrame;
 
 namespace smart_lt::ui {
 
@@ -280,6 +281,7 @@ private:
 
 	QListWidget *marketList = nullptr;
 	QLabel *marketStatus = nullptr;
+	// (Update banner moved to Dock UI)
 	QPushButton *seeAllLowerThirdsBtn = nullptr;
 	QMultiHash<QString, QPointer<QLabel>> marketIconByUrl;
 };

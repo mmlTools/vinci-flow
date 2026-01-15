@@ -287,6 +287,20 @@ LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 
 	setStyleSheet(R"(
 #LowerThirdDock { background: rgba(39, 42, 51, 1.0); }
+QFrame#sltUpdateBanner {
+  border: 1px solid rgba(90,140,255,0.45);
+  border-radius: 10px;
+  background: rgba(90,140,255,0.14);
+  padding: 8px;
+}
+QLabel#sltUpdateBannerLabel { color: rgba(240,246,252,0.95); font-weight: 600; }
+QPushButton#sltUpdateBannerBtn {
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.06);
+}
+QPushButton#sltUpdateBannerBtn:hover { background: rgba(255,255,255,0.10); }
 QFrame#sltRowFrame {
   border: 1px solid rgba(255,255,255,40);
   border-radius: 4px;
@@ -314,6 +328,46 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	rootLayout->setSpacing(6);
 
 	auto *st = style();
+
+	// -------------------------
+	// Update banner (hidden unless API reports a newer plugin version)
+	// Placed above the Resources selector row.
+	// -------------------------
+	{
+		updateFrame_ = new QFrame(this);
+		updateFrame_->setObjectName(QStringLiteral("sltUpdateBanner"));
+		updateFrame_->setFrameShape(QFrame::NoFrame);
+		updateFrame_->setVisible(false);
+
+		auto *row = new QHBoxLayout(updateFrame_);
+		row->setContentsMargins(8, 6, 8, 6);
+		row->setSpacing(10);
+
+		auto *ico = new QLabel(updateFrame_);
+		ico->setFixedSize(18, 18);
+		ico->setAlignment(Qt::AlignCenter);
+		ico->setPixmap(st->standardIcon(QStyle::SP_ArrowUp).pixmap(16, 16));
+		row->addWidget(ico);
+
+		updateLabel_ = new QLabel(tr("New Smart Lower Thirds update available."), updateFrame_);
+		updateLabel_->setObjectName(QStringLiteral("sltUpdateBannerLabel"));
+		updateLabel_->setWordWrap(true);
+		row->addWidget(updateLabel_, 1);
+
+		updateBtn_ = new QPushButton(tr("Download update"), updateFrame_);
+		updateBtn_->setObjectName(QStringLiteral("sltUpdateBannerBtn"));
+		updateBtn_->setCursor(Qt::PointingHandCursor);
+		updateBtn_->setIcon(st->standardIcon(QStyle::SP_DialogSaveButton));
+		updateBtn_->setToolTip(tr("Open the Smart Lower Thirds download page"));
+		row->addWidget(updateBtn_);
+
+		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
+			QDesktopServices::openUrl(
+				QUrl(QStringLiteral("https://obscountdown.com/r/smart-lower-thirds")));
+		});
+
+		rootLayout->addWidget(updateFrame_);
+	}
 
 	// -------------------------
 	// Top row: Resources (output dir)
@@ -1407,8 +1461,6 @@ void LowerThirdDock::handleRemove(const QString &id)
 	if (!smart_lt::has_output_dir())
 		return;
 
-
-// Confirmation (and warn about carousel membership)
 const std::string sid = id.toStdString();
 const auto cars = smart_lt::carousels_containing(sid);
 
@@ -1580,6 +1632,21 @@ void LowerThirdDock::onObsSourceEvent(void *data, calldata_t *cd)
 void LowerThirdDock::refreshBrowserSources()
 {
 	populateBrowserSources(true);
+}
+
+void LowerThirdDock::setUpdateAvailable(const QString &remoteVersion, const QString &localVersion)
+{
+	updateRemote_ = remoteVersion.trimmed();
+	updateLocal_ = localVersion.trimmed();
+
+	const bool show = (!updateRemote_.isEmpty() && !updateLocal_.isEmpty() && updateRemote_ != updateLocal_);
+	if (!updateFrame_ || !updateLabel_)
+		return;
+
+	updateFrame_->setVisible(show);
+	if (show) {
+		updateLabel_->setText(tr("New version available: %1 (you have %2)").arg(updateRemote_, updateLocal_));
+	}
 }
 
 } // namespace smart_lt::ui

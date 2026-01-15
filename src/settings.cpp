@@ -38,6 +38,7 @@
 #include <QTabWidget>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QFrame>
 #include <QClipboard>
 #include <QApplication>
 #include <QFrame>
@@ -935,6 +936,16 @@ void LowerThirdSettingsDialog::loadFromState()
 	if (!cfg)
 		return;
 
+	// More contextual window title (guarded for empty label/title)
+	{
+		QString lbl = QString::fromStdString(cfg->label).trimmed();
+		if (lbl.isEmpty())
+			lbl = QString::fromStdString(cfg->title).trimmed();
+		if (lbl.isEmpty())
+			lbl = currentId;
+		setWindowTitle(tr("You are editing lt: %1").arg(lbl));
+	}
+
 	titleEdit->setText(QString::fromStdString(cfg->title));
 	if (labelEdit)
 		labelEdit->setText(QString::fromStdString(cfg->label));
@@ -1456,121 +1467,148 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
         }
     }
 
-    const int iconPx = 44;
+    const int iconPx = 60;
 
     auto trunc = [](const QString &s, int maxChars) -> QString {
-        QString t = s.trimmed();
-        if (maxChars <= 0)
-            return QString();
-        if (t.size() <= maxChars)
-            return t;
-        return t.left(maxChars - 1).trimmed() + QStringLiteral("…");
+	    QString t = s.trimmed();
+	    if (maxChars <= 0)
+		    return QString();
+	    if (t.size() <= maxChars)
+		    return t;
+	    return t.left(maxChars - 1).trimmed() + QStringLiteral("…");
     };
 
     const int rowW = marketList->viewport()->width();
 
     for (const auto &r : items) {
-        const QString title = r.title.trimmed().isEmpty() ? r.slug : r.title.trimmed();
-        const QString desc  = r.shortDescription.trimmed();
-        const QString url   = r.url.trimmed();
-        const QString ico   = r.iconPublicUrl.trimmed();
-        const QString dl    = r.downloadUrl.trimmed();
+	    const QString title = r.title.trimmed().isEmpty() ? r.slug : r.title.trimmed();
+	    const QString desc = r.shortDescription.trimmed();
+	    const QString url = r.url.trimmed();
+	    const QString ico = r.iconPublicUrl.trimmed();
+	    const QString dl = r.downloadUrl.trimmed();
+	    const QString badge = r.badgeValue.trimmed();
 
-        auto *rowItem = new QListWidgetItem(marketList);
-        rowItem->setData(Qt::UserRole, url);
-        rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+	    auto *rowItem = new QListWidgetItem(marketList);
+	    rowItem->setData(Qt::UserRole, url);
+	    rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
-        auto *card = new QFrame(marketList);               
-        card->setObjectName(QStringLiteral("oc_marketCard"));
-        card->setFrameShape(QFrame::NoFrame);
-        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        card->setMinimumWidth(rowW); 
+	    auto *card = new QFrame(marketList);
+	    card->setObjectName(QStringLiteral("oc_marketCard"));
+	    card->setFrameShape(QFrame::NoFrame);
+	    card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	    card->setMinimumWidth(rowW);
 
-        card->setStyleSheet(QStringLiteral(
-            "#oc_marketCard {"
-            "  border: none;" 
-            "  border-radius: 10px;"
-            "  background: rgba(255,255,255,0.04);"
-            "}"
-            "#oc_marketCard QLabel { background: transparent; }"
-        ));
+	    card->setStyleSheet(QStringLiteral("#oc_marketCard {"
+					       "  border: none;"
+					       "  border-radius: 10px;"
+					       "  background: rgba(255,255,255,0.04);"
+					       "}"
+					       "#oc_marketCard QLabel { background: transparent; }"));
 
-        auto *h = new QHBoxLayout(card);
-        h->setContentsMargins(8, 8, 8, 8);
-        h->setSpacing(10);
+	    auto *h = new QHBoxLayout(card);
+	    h->setContentsMargins(8, 8, 8, 8);
+	    h->setSpacing(10);
 
-        auto *icon = new QLabel(card);
-        icon->setFixedSize(iconPx, iconPx);
-        icon->setAlignment(Qt::AlignCenter);
-        icon->setStyleSheet(QStringLiteral(
-            "border: 1px solid rgba(255,255,255,0.10);"
-            "border-radius: 20px;"
-            "background: rgba(0,0,0,0.10);"
-        ));
-        icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
-        h->addWidget(icon);
+	    auto *icon = new QLabel(card);
+	    icon->setFixedSize(iconPx, iconPx);
+	    icon->setAlignment(Qt::AlignCenter);
+	    icon->setStyleSheet(QStringLiteral("border: 1px solid rgba(255,255,255,0.10);"
+					       "border-radius: 20px;"
+					       "background: rgba(0,0,0,0.10);"));
+	    icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
+	    h->addWidget(icon);
 
-        if (!ico.isEmpty()) {
-            marketIconByUrl.insert(ico, icon);
-            api.requestImage(ico, iconPx);
-        }
+	    if (!ico.isEmpty()) {
+		    marketIconByUrl.insert(ico, icon);
+		    api.requestImage(ico, iconPx);
+	    }
 
-        auto *textCol = new QVBoxLayout();
-        textCol->setContentsMargins(0, 0, 0, 0);
-        textCol->setSpacing(2);
+	    auto *textCol = new QVBoxLayout();
+	    textCol->setContentsMargins(0, 0, 0, 0);
+	    textCol->setSpacing(2);
 
-        auto *t = new QLabel(trunc(title, 62), card);
-        t->setTextFormat(Qt::PlainText);
-        t->setStyleSheet(QStringLiteral("font-weight: 700;"));
-        t->setWordWrap(false);
-        t->setToolTip(title);
-        textCol->addWidget(t);
+	    auto *t = new QLabel(trunc(title, 62), card);
+	    t->setTextFormat(Qt::PlainText);
+	    t->setStyleSheet(QStringLiteral("font-weight: 700;"));
+	    t->setWordWrap(false);
+	    t->setToolTip(title);
+	    textCol->addWidget(t);
 
-        if (!desc.isEmpty()) {
-            auto *d = new QLabel(trunc(desc, 110), card);
-            d->setTextFormat(Qt::PlainText);
-            d->setWordWrap(false);
-            d->setToolTip(desc);
-            d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-            textCol->addWidget(d);
-        }
+	    if (!desc.isEmpty()) {
+		    auto *d = new QLabel(trunc(desc, 110), card);
+		    d->setTextFormat(Qt::PlainText);
+		    d->setWordWrap(false);
+		    d->setToolTip(desc);
+		    d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+		    textCol->addWidget(d);
+	    }
 
-        h->addLayout(textCol, 1);
+	    h->addLayout(textCol, 1);
 
-        auto *ctaCol = new QVBoxLayout();
-        ctaCol->setContentsMargins(0, 0, 0, 0);
-        ctaCol->setSpacing(6);
+	    auto *ctaCol = new QVBoxLayout();
+	    ctaCol->setContentsMargins(0, 0, 0, 0);
+	    ctaCol->setSpacing(6);
 
-        ctaCol->addStretch(1);
+	    ctaCol->addStretch(1);
 
-        auto *previewBtn = new QPushButton(tr("Get Template"), card);
-        previewBtn->setCursor(Qt::PointingHandCursor);
-        previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
-        previewBtn->setToolTip(tr("Open the template page"));
-        previewBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+	    const int ctaWidth = 160;
+	    auto *previewBtn = new QPushButton(tr("Get Template"), card);
+	    previewBtn->setCursor(Qt::PointingHandCursor);
+	    previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
+	    previewBtn->setToolTip(tr("Open the template page"));
+	    previewBtn->setFixedWidth(ctaWidth);
+	    previewBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-        ctaCol->addWidget(previewBtn, 0, Qt::AlignHCenter);
+	    ctaCol->addWidget(previewBtn, 0, Qt::AlignHCenter);
 
-        ctaCol->addStretch(1);
+	    if (!badge.isEmpty()) {
+		    auto *badgeLab = new QLabel(badge, card);
+		    badgeLab->setAlignment(Qt::AlignCenter);
+		    badgeLab->setFixedWidth(ctaWidth);
+		    badgeLab->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+		    badgeLab->setTextFormat(Qt::PlainText);
 
-        h->addLayout(ctaCol);
+		    const bool isFree = (badge.compare(QStringLiteral("FREE"), Qt::CaseInsensitive) == 0);
+		    badgeLab->setStyleSheet(isFree ? QStringLiteral("padding: 3px;"
+								    "border-radius: 3px;"
+								    "border: 1px solid rgba(34,197,94,0.55);"
+								    "background: rgba(34,197,94,0.16);"
+								    "color: rgba(255,255,255,0.96);"
+								    "font-weight: 800;"
+								    "letter-spacing: 0.4px;"
+								    "min-height: 14px;")
+						   : QStringLiteral("padding: 3px;"
+								    "border-radius: 3px;"
+								    "border: 1px solid rgba(11, 66, 245, 0.55);"
+								    "background: rgba(11, 15, 245, 0.14);"
+								    "color: rgba(255,255,255,0.96);"
+								    "font-weight: 800;"
+								    "letter-spacing: 0.4px;"
+								    "min-height: 14px;"));
 
-        connect(previewBtn, &QPushButton::clicked, this, [url]() {
-            if (!url.isEmpty())
-                QDesktopServices::openUrl(QUrl(url));
-        });
+		    ctaCol->addWidget(badgeLab, 0, Qt::AlignHCenter);
+	    }
 
-        QString tip = title;
-        if (!desc.isEmpty())
-            tip += QStringLiteral("\n\n") + desc;
-        if (!dl.isEmpty())
-            tip += QStringLiteral("\n\n") + tr("Download: %1").arg(dl);
-        rowItem->setToolTip(tip);
+	    ctaCol->addStretch(1);
 
-        rowItem->setSizeHint(QSize(rowW, 96));
+	    h->addLayout(ctaCol);
 
-        marketList->addItem(rowItem);
-        marketList->setItemWidget(rowItem, card);
+	    connect(previewBtn, &QPushButton::clicked, this, [url]() {
+		    if (!url.isEmpty())
+			    QDesktopServices::openUrl(QUrl(url));
+	    });
+
+	    QString tip = title;
+	    if (!desc.isEmpty())
+		    tip += QStringLiteral("\n\n") + desc;
+	    if (!dl.isEmpty())
+		    tip += QStringLiteral("\n\n") + tr("Download: %1").arg(dl);
+	    rowItem->setToolTip(tip);
+
+	    rowItem->setSizeHint(QSize(rowW, badge.isEmpty() ? 96 : 112));
+
+	    marketList->addItem(rowItem);
+	    marketList->setItemWidget(rowItem, card);
     }
 }
 
@@ -1820,8 +1858,7 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	o["avatar_height"] = cfg->avatar_height;
 	o["anim_in"] = QString::fromStdString(cfg->anim_in);
 	o["anim_out"] = QString::fromStdString(cfg->anim_out);
-	// Optional sound cues (exported into ZIP as soundIn.<ext> / soundOut.<ext>)
-	// Store ZIP-internal cue names for template portability
+
 	{
 		QString sin, sout;
 		if (smart_lt::has_output_dir() && !cfg->anim_in_sound.empty()) {
@@ -1899,7 +1936,6 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 			ok = ok && zip_write_file(zf, internal.toUtf8().constData(), data);
 		};
 
-		// Export as: soundIn.<ext> / soundOut.<ext>
 		writeSound(cfg->anim_in_sound, "soundIn");
 		writeSound(cfg->anim_out_sound, "soundOut");
 	}
@@ -1945,7 +1981,6 @@ void LowerThirdSettingsDialog::onInfoClicked()
 	text += tr("- CSS templates are auto-scoped to the lower third id when possible.") + "\n";
 	text += tr("- JS templates run with a 'root' variable pointing to the <li> element.") + "\n";
 
-	// Show a richer, copy-friendly dialog instead of a plain message box.
 	auto *dlg = new QDialog(this);
 	dlg->setAttribute(Qt::WA_DeleteOnClose, true);
 	dlg->setWindowTitle(tr("Template Placeholders"));
@@ -2005,7 +2040,6 @@ void LowerThirdSettingsDialog::onInfoClicked()
 
 	root->addLayout(btnRow);
 
-	// Keep styling self-contained.
 	dlg->setStyleSheet(QStringLiteral("QDialog { background: #141416; color: white; }"));
 
 	dlg->show();
@@ -2068,13 +2102,11 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->avatar_height = std::max(16, std::min(512, cfg->avatar_height));
 	cfg->anim_in = obj.value("anim_in").toString().toStdString();
 	cfg->anim_out = obj.value("anim_out").toString().toStdString();
-	// Sound cue metadata (files are imported from ZIP entries)
 	{
 		const QString sin = obj.value("sound_in").toString();
 		const QString sout = obj.value("sound_out").toString();
 		const QString legacyIn = obj.value("anim_in_sound").toString();
 		const QString legacyOut = obj.value("anim_out_sound").toString();
-		// If JSON indicates sounds but ZIP didn't include them, we still rely on extracted files.
 		Q_UNUSED(sin);
 		Q_UNUSED(sout);
 		Q_UNUSED(legacyIn);
@@ -2089,7 +2121,6 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->title_color = obj.value("title_color").toString().toStdString();
 	cfg->subtitle_color = obj.value("subtitle_color").toString().toStdString();
 
-	// Backward compatibility
 	if (cfg->primary_color.empty()) cfg->primary_color = obj.value("bg_color").toString().toStdString();
 	if (cfg->title_color.empty()) cfg->title_color = obj.value("text_color").toString().toStdString();
 	if (cfg->secondary_color.empty()) cfg->secondary_color = cfg->primary_color;
@@ -2150,7 +2181,6 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 				cfg->profile_picture = newName.toStdString();
 			}
 
-			// Import Animation IN/OUT sound cues (optional)
 			if (smart_lt::has_output_dir()) {
 				const QString outDir = QString::fromStdString(smart_lt::output_dir());
 				if (!outDir.isEmpty()) {
@@ -2160,7 +2190,6 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 						if (srcPath.isEmpty())
 							return;
 
-						// Remove existing bound sound file, if any
 						std::string &field = isIn ? cfg->anim_in_sound : cfg->anim_out_sound;
 						if (!field.empty()) {
 							const QString oldPath =

@@ -293,6 +293,12 @@ void ApiClient::init()
     if (!isCacheFresh(now)) {
         // Stale-while-revalidate: show cached list (even if stale) but refresh in background.
         QTimer::singleShot(250, this, [this]() { fetchLowerThirds(false); });
+	} else {
+		// Even with a fresh cache, perform a background refresh on startup.
+		// This ensures we can pick up new fields (like plugin_version) without forcing users
+		// to wait for the cache TTL. If networking is blocked/offline, fetchLowerThirds() will
+		// fail gracefully and we simply keep the cached data.
+		QTimer::singleShot(1500, this, [this]() { fetchLowerThirds(true); });
     }
 }
 
@@ -398,6 +404,11 @@ void ApiClient::requestImage(const QString &imageUrl, int targetPx)
 QVector<ResourceItem> ApiClient::lowerThirds() const
 {
     return m_lowerThirds;
+}
+
+QString ApiClient::remotePluginVersion() const
+{
+    return m_remotePluginVersion;
 }
 
 QString ApiClient::lastError() const
@@ -564,8 +575,10 @@ void ApiClient::loadCacheFromDisk()
     m_lastRaw = payload;
     parseAndSet(payload);
 
-    if (!m_lowerThirds.isEmpty()) {
-        // Immediately show cached list (even if stale).
+    // Immediately inform UI (even if stale). We emit when either:
+    // - we have cached items to display, OR
+    // - we have a cached plugin_version for update checks.
+    if (!m_lowerThirds.isEmpty() || !m_remotePluginVersion.trimmed().isEmpty()) {
         emit lowerThirdsUpdated();
     }
 }
@@ -615,6 +628,8 @@ void ApiClient::parseAndSet(const QByteArray &rawJson)
         return;
 
     const QJsonObject root = doc.object();
+    // Optional: plugin version for update checks (may be missing on older cached payloads)
+    m_remotePluginVersion = root.value(QStringLiteral("plugin_version")).toString().trimmed();
     const QJsonArray arr = root.value(QStringLiteral("data")).toArray();
 
     QVector<ResourceItem> out;
@@ -637,6 +652,7 @@ void ApiClient::parseAndSet(const QByteArray &rawJson)
         it.downloadUrl = o.value(QStringLiteral("download_url")).toString();
         it.iconPublicUrl = o.value(QStringLiteral("icon_public_url")).toString();
         it.coverPublicUrl = o.value(QStringLiteral("cover_public_url")).toString();
+        it.badgeValue = o.value(QStringLiteral("badge_value")).toString();
 
         if (it.title.trimmed().isEmpty())
             continue;

@@ -56,6 +56,8 @@ public:
 
 	bool init();
 	void refreshBrowserSources();
+	// Shows/hides the update banner (safe to call with empty/unknown versions).
+	void setUpdateAvailable(const QString &remoteVersion, const QString &localVersion);
 
 signals:
 	void requestSave();
@@ -66,6 +68,13 @@ private slots:
 	void onManageCarousels();
 
 private:
+	// Update banner (top of dock)
+	QFrame *updateFrame_ = nullptr;
+	QLabel *updateLabel_ = nullptr;
+	QPushButton *updateBtn_ = nullptr;
+	QString updateRemote_;
+	QString updateLocal_;
+
 	QPushButton *manageCarouselsBtn_ = nullptr;
 
 	static QString formatCountdownMs(qint64 ms);
