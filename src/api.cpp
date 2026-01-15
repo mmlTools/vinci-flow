@@ -620,7 +620,7 @@ void ApiClient::parseAndSet(const QByteArray &rawJson)
     QVector<ResourceItem> out;
     out.reserve(arr.size());
 
-    for (const QJsonValue &v : arr) {
+    for (QJsonValue v : arr) {
         if (!v.isObject())
             continue;
         const QJsonObject o = v.toObject();
