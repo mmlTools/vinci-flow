@@ -45,29 +45,32 @@
 #include <QDesktopServices>
 #include <QMessageBox>
 #include <QRandomGenerator>
+#include <QKeySequenceEdit>
 
 static QWidget *g_dockWidget = nullptr;
 
 
 
-struct CarouselRuntime {
+struct GroupRuntime {
 	bool running = false;
 	int index = 0; // position in seq
 	bool phaseShow = true;
 	QString currentId;
+	qint64 hideAtMs = 0;
 	QVector<int> seq;
 };
 
-static QHash<QString, CarouselRuntime> g_carouselRuns;
+static QHash<QString, GroupRuntime> g_groupRuns;
+static QHash<QString, qint64> g_groupHideAtMs; // ltId -> hideAtMs (only while a group-run is showing it)
 
-static void applyCarouselRowStyle(QFrame *rowFrame)
+static void applyGroupRowStyle(QFrame *rowFrame)
 {
 	if (!rowFrame)
 		return;
 
 	const bool active = rowFrame->property("sltActive").toBool();
-	const bool inCar = rowFrame->property("sltInCarousel").toBool();
-	const QString col = rowFrame->property("sltCarouselColor").toString();
+	const bool inCar = rowFrame->property("sltInGroup").toBool();
+	const QString col = rowFrame->property("sltGroupColor").toString();
 
 	// Only apply custom background when inactive; active styling is handled by QSS.
 	// We still keep the dynamic properties so the global stylesheet can provide a default green tint.
@@ -87,56 +90,60 @@ static void applyCarouselRowStyle(QFrame *rowFrame)
 	rowFrame->setStyleSheet(QString());
 }
 
-static void stopCarouselRun(const QString &carouselId)
+static void stopGroupRun(const QString &groupId)
 {
-	auto it = g_carouselRuns.find(carouselId);
-	if (it == g_carouselRuns.end())
+	auto it = g_groupRuns.find(groupId);
+	if (it == g_groupRuns.end())
 		return;
 
 	// Best-effort hide currently shown item
-	if (!it->currentId.isEmpty())
+	if (!it->currentId.isEmpty()) {
+		g_groupHideAtMs.remove(it->currentId);
 		smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+	}
 
 	it->running = false;
 	it->index = 0;
 	it->phaseShow = true;
 	it->currentId.clear();
+	it->hideAtMs = 0;
 	it->seq.clear();
 }
 
-static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId);
+static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString &groupId);
 
-static void startCarouselRun(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId)
+static void startGroupRun(smart_lt::ui::LowerThirdDock *dock, const QString &groupId)
 {
 	if (!dock)
 		return;
 
-	auto *car = smart_lt::get_carousel_by_id(carouselId.toStdString());
+	auto *car = smart_lt::get_group_by_id(groupId.toStdString());
 	if (!car || car->members.empty())
 		return;
 
-	auto &rt = g_carouselRuns[carouselId];
+	auto &rt = g_groupRuns[groupId];
 	rt.running = true;
 	rt.index = 0;
 	rt.phaseShow = true;
 	rt.currentId.clear();
+	rt.hideAtMs = 0;
 	rt.seq.clear();
 
-	scheduleCarouselStep(dock, carouselId);
+	scheduleGroupStep(dock, groupId);
 }
 
-static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QString &carouselId)
+static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString &groupId)
 {
 	if (!dock)
 		return;
 
-	auto it = g_carouselRuns.find(carouselId);
-	if (it == g_carouselRuns.end() || !it->running)
+	auto it = g_groupRuns.find(groupId);
+	if (it == g_groupRuns.end() || !it->running)
 		return;
 
-	auto *car = smart_lt::get_carousel_by_id(carouselId.toStdString());
+	auto *car = smart_lt::get_group_by_id(groupId.toStdString());
 	if (!car || car->members.empty()) {
-		stopCarouselRun(carouselId);
+		stopGroupRun(groupId);
 		return;
 	}
 
@@ -163,12 +170,14 @@ static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QStri
 
 	if (it->phaseShow) {
 		// hide previous
-		if (!it->currentId.isEmpty())
+		if (!it->currentId.isEmpty()) {
+			g_groupHideAtMs.remove(it->currentId);
 			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+		}
 
 		// End condition (non-loop): stop before showing beyond last
 		if (!car->loop && it->index >= count) {
-			stopCarouselRun(carouselId);
+			stopGroupRun(groupId);
 			return;
 		}
 
@@ -187,27 +196,32 @@ static void scheduleCarouselStep(smart_lt::ui::LowerThirdDock *dock, const QStri
 		const int memberIdx = it->seq.value(it->index, 0);
 		const QString nextId = QString::fromStdString(car->members[(size_t)memberIdx]);
 		it->currentId = nextId;
+		it->hideAtMs = QDateTime::currentMSecsSinceEpoch() + (qint64)visibleMs;
+		g_groupHideAtMs[nextId] = it->hideAtMs;
 
 		smart_lt::set_visible_persist(nextId.toStdString(), true);
 
 		it->phaseShow = false;
-		QTimer::singleShot(visibleMs, dock, [dock, carouselId]() { scheduleCarouselStep(dock, carouselId); });
+		QTimer::singleShot(visibleMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
 	} else {
 		// hide current and advance index
-		if (!it->currentId.isEmpty())
+		if (!it->currentId.isEmpty()) {
+			g_groupHideAtMs.remove(it->currentId);
 			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+		}
 
 		it->currentId.clear();
+		it->hideAtMs = 0;
 		it->index++;
 
 		// If we just finished the last item and loop is disabled, stop now.
 		if (!car->loop && it->index >= count) {
-			stopCarouselRun(carouselId);
+			stopGroupRun(groupId);
 			return;
 		}
 
 		it->phaseShow = true;
-		QTimer::singleShot(intervalMs, dock, [dock, carouselId]() { scheduleCarouselStep(dock, carouselId); });
+		QTimer::singleShot(intervalMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
 	}
 }
 
@@ -250,7 +264,7 @@ void LowerThirdDock::onCoreEvent(const smart_lt::core_event &ev)
 
 			if (row.row) {
 				row.row->setProperty("sltActive", QVariant(active));
-				applyCarouselRowStyle(row.row);
+				applyGroupRowStyle(row.row);
 				row.row->style()->unpolish(row.row);
 				row.row->style()->polish(row.row);
 				row.row->update();
@@ -308,7 +322,7 @@ QFrame#sltRowFrame {
   background: transparent;
 }
 QFrame#sltRowFrame:hover { background: rgba(255,255,255,0.04); }
-QFrame#sltRowFrame[sltInCarousel="true"] {
+QFrame#sltRowFrame[sltInGroup="true"] {
   background: rgba(46,160,67,0.14);
   border: 1px solid rgba(46,160,67,0.55);
 }
@@ -373,25 +387,41 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	// Top row: Resources (output dir)
 	// -------------------------
 	{
-		auto *row = new QHBoxLayout();
-		row->setSpacing(6);
+		auto *grid = new QGridLayout();
+		grid->setContentsMargins(0, 0, 0, 0);
+		grid->setHorizontalSpacing(6);
+		grid->setVerticalSpacing(0);
+		// Keep the label column tight; let the controls column consume the remaining width.
+		grid->setColumnStretch(0, 0);
+		grid->setColumnStretch(1, 1);
 
 		auto *lbl = new QLabel(tr("Resources:"), this);
+		lbl->setObjectName(QStringLiteral("sltRowLabel"));
+		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
-		outputPathEdit = new QLineEdit(this);
+		auto *right = new QWidget(this);
+		auto *rightRow = new QHBoxLayout(right);
+		rightRow->setContentsMargins(0, 0, 0, 0);
+		rightRow->setSpacing(6);
+
+		outputPathEdit = new QLineEdit(right);
 		outputPathEdit->setReadOnly(true);
+		outputPathEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-		outputBrowseBtn = new QPushButton(this);
+		outputBrowseBtn = new QPushButton(right);
 		outputBrowseBtn->setCursor(Qt::PointingHandCursor);
 		outputBrowseBtn->setToolTip(tr("Select output folder"));
 		outputBrowseBtn->setFlat(true);
 		outputBrowseBtn->setIcon(st->standardIcon(QStyle::SP_DirOpenIcon));
 
-		row->addWidget(lbl);
-		row->addWidget(outputPathEdit, 1);
-		row->addWidget(outputBrowseBtn);
+		rightRow->addWidget(outputPathEdit, 1);
+		rightRow->addWidget(outputBrowseBtn);
 
-		rootLayout->addLayout(row);
+		grid->addWidget(lbl, 0, 0);
+		grid->addWidget(right, 0, 1);
+
+		rootLayout->addLayout(grid);
 
 		connect(outputBrowseBtn, &QPushButton::clicked, this, &LowerThirdDock::onBrowseOutputFolder);
 	}
@@ -400,17 +430,30 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	// Browser Source selector row (combo-only workflow)
 	// -------------------------
 	{
-		auto *row = new QHBoxLayout();
-		row->setSpacing(6);
+		auto *grid = new QGridLayout();
+		grid->setContentsMargins(0, 0, 0, 0);
+		grid->setHorizontalSpacing(6);
+		grid->setVerticalSpacing(0);
+		// Keep the label column tight; let the controls column consume the remaining width.
+		grid->setColumnStretch(0, 0);
+		grid->setColumnStretch(1, 1);
 
 		auto *lbl = new QLabel(tr("Browser Source:"), this);
+		lbl->setObjectName(QStringLiteral("sltRowLabel"));
+		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
-		browserSourceCombo = new QComboBox(this);
+		auto *right = new QWidget(this);
+		auto *rightRow = new QHBoxLayout(right);
+		rightRow->setContentsMargins(0, 0, 0, 0);
+		rightRow->setSpacing(6);
+
+		browserSourceCombo = new QComboBox(right);
 		browserSourceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		browserSourceCombo->setToolTip(
 			tr("Select an existing OBS Browser Source that will display and control Smart Lower Thirds"));
 
-		refreshSourcesBtn = new QPushButton(this);
+		refreshSourcesBtn = new QPushButton(right);
 		refreshSourcesBtn->setCursor(Qt::PointingHandCursor);
 		refreshSourcesBtn->setToolTip(tr("Refresh list"));
 		refreshSourcesBtn->setFlat(true);
@@ -420,11 +463,13 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 			refresh = st->standardIcon(QStyle::SP_BrowserReload);
 		refreshSourcesBtn->setIcon(refresh);
 
-		row->addWidget(lbl);
-		row->addWidget(browserSourceCombo, 1);
-		row->addWidget(refreshSourcesBtn);
+		rightRow->addWidget(browserSourceCombo, 1);
+		rightRow->addWidget(refreshSourcesBtn);
 
-		rootLayout->addLayout(row);
+		grid->addWidget(lbl, 0, 0);
+		grid->addWidget(right, 0, 1);
+
+		rootLayout->addLayout(grid);
 
 		connect(refreshSourcesBtn, &QPushButton::clicked, this, [this]() { populateBrowserSources(true); });
 		connect(browserSourceCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
@@ -435,40 +480,52 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	// Browser Source size row + exclusive mode
 	// -------------------------
 	{
-		auto *row = new QHBoxLayout();
-		row->setSpacing(6);
+		auto *grid = new QGridLayout();
+		grid->setContentsMargins(0, 0, 0, 0);
+		grid->setHorizontalSpacing(6);
+		grid->setVerticalSpacing(0);
+		// Keep the label column tight; let the controls column consume the remaining width.
+		grid->setColumnStretch(0, 0);
+		grid->setColumnStretch(1, 1);
 
 		auto *lbl = new QLabel(tr("Browser Size:"), this);
+		lbl->setObjectName(QStringLiteral("sltRowLabel"));
+		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
-		browserWidthSpin = new QSpinBox(this);
+		auto *right = new QWidget(this);
+		auto *rightRow = new QHBoxLayout(right);
+		rightRow->setContentsMargins(0, 0, 0, 0);
+		rightRow->setSpacing(6);
+
+		browserWidthSpin = new QSpinBox(right);
 		browserWidthSpin->setRange(1, 16384);
 		browserWidthSpin->setToolTip(tr("Width of the selected Browser Source"));
-		browserWidthSpin->setFixedWidth(110);
+		browserWidthSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		browserWidthSpin->setMinimumWidth(90);
 
-		browserHeightSpin = new QSpinBox(this);
+		browserHeightSpin = new QSpinBox(right);
 		browserHeightSpin->setRange(1, 16384);
 		browserHeightSpin->setToolTip(tr("Height of the selected Browser Source"));
-		browserHeightSpin->setFixedWidth(110);
+		browserHeightSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		browserHeightSpin->setMinimumWidth(90);
 
-		exclusiveModeCheck = new QCheckBox(tr("Exclusive"), this);
-		exclusiveModeCheck->setToolTip(
-			tr("When enabled, activating one lower third automatically hides the others"));
+		auto *xLbl = new QLabel(tr("x"), right);
+		xLbl->setAlignment(Qt::AlignCenter);
 
-		row->addWidget(lbl);
-		row->addWidget(browserWidthSpin);
-		row->addWidget(new QLabel(tr("x"), this));
-		row->addWidget(browserHeightSpin);
-		row->addStretch(1);
-		row->addWidget(exclusiveModeCheck);
+		rightRow->addWidget(browserWidthSpin, 1);
+		rightRow->addWidget(xLbl);
+		rightRow->addWidget(browserHeightSpin, 1);
 
-		rootLayout->addLayout(row);
+		grid->addWidget(lbl, 0, 0);
+		grid->addWidget(right, 0, 1);
+
+		rootLayout->addLayout(grid);
 
 		connect(browserWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
 			&LowerThirdDock::onBrowserSizeChanged);
 		connect(browserHeightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
 			&LowerThirdDock::onBrowserSizeChanged);
-		connect(exclusiveModeCheck, &QCheckBox::toggled, this,
-			[this](bool on) { onExclusiveModeChanged(on ? 1 : 0); });
 	}
 
 	// -------------------------
@@ -510,17 +567,17 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		addBtn->setToolTip(tr("Add new lower third"));
 		addBtn->setFlat(true);
 
-manageCarouselsBtn_ = new QPushButton(this);
-manageCarouselsBtn_->setCursor(Qt::PointingHandCursor);
-manageCarouselsBtn_->setToolTip(tr("Manage carousels"));
-manageCarouselsBtn_->setFlat(true);
+manageGroupsBtn_ = new QPushButton(this);
+manageGroupsBtn_->setCursor(Qt::PointingHandCursor);
+manageGroupsBtn_->setToolTip(tr("Manage groups"));
+manageGroupsBtn_->setFlat(true);
 
 QIcon carIco = QIcon::fromTheme(QStringLiteral("view-media-playlist"));
 if (carIco.isNull())
 	carIco = QIcon::fromTheme(QStringLiteral("media-playlist-shuffle"));
 if (carIco.isNull())
 	carIco = st->standardIcon(QStyle::SP_FileDialogDetailedView);
-manageCarouselsBtn_->setIcon(carIco);
+manageGroupsBtn_->setIcon(carIco);
 
 
 		QIcon plus = QIcon::fromTheme(QStringLiteral("list-add"));
@@ -530,11 +587,11 @@ manageCarouselsBtn_->setIcon(carIco);
 
 		row->addWidget(infoBtn);
 		row->addWidget(addBtn);
-		row->addWidget(manageCarouselsBtn_);
+		row->addWidget(manageGroupsBtn_);
 		rootLayout->addLayout(row);
 
 		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
-		connect(manageCarouselsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageCarousels);
+		connect(manageGroupsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageGroups);
 
 		connect(infoBtn, &QPushButton::clicked, this, [this]() {
 			show_troubleshooting_dialog(this);
@@ -578,11 +635,6 @@ bool LowerThirdDock::init()
 		browserHeightSpin->blockSignals(true);
 		browserHeightSpin->setValue(smart_lt::target_browser_height());
 		browserHeightSpin->blockSignals(false);
-	}
-	if (exclusiveModeCheck) {
-		exclusiveModeCheck->blockSignals(true);
-		exclusiveModeCheck->setChecked(smart_lt::dock_exclusive_mode());
-		exclusiveModeCheck->blockSignals(false);
 	}
 
 	rebuildList();
@@ -682,14 +734,6 @@ void LowerThirdDock::onBrowserSizeChanged()
 	emit requestSave();
 }
 
-void LowerThirdDock::onExclusiveModeChanged(int)
-{
-	if (!exclusiveModeCheck)
-		return;
-
-	smart_lt::set_dock_exclusive_mode(exclusiveModeCheck->isChecked());
-	emit requestSave();
-}
 
 // -------------------------
 // Repeat timer
@@ -737,6 +781,27 @@ void LowerThirdDock::repeatTick()
 
 	for (const auto &c : items) {
 		const QString qid = QString::fromStdString(c.id);
+
+		// If this lower third belongs to any currently-running group, do not let the per-item
+		// repeat/auto-hide scheduler interfere. Group run timing (visible_ms / interval_ms)
+		// must be authoritative, otherwise items may be hidden early (e.g. 3s default).
+		{
+			const auto owners = smart_lt::groups_containing(c.id);
+			bool inRunningGroup = false;
+			for (const auto &gid : owners) {
+				const QString qgid = QString::fromStdString(gid);
+				auto grt = g_groupRuns.find(qgid);
+				if (grt != g_groupRuns.end() && grt->running) {
+					inRunningGroup = true;
+					break;
+				}
+			}
+			if (inRunningGroup) {
+				nextOnMs_.remove(qid);
+				offAtMs_.remove(qid);
+				continue;
+			}
+		}
 
 		const int every = c.repeat_every_sec;
 		int visibleSec = c.repeat_visible_sec;
@@ -818,6 +883,7 @@ void LowerThirdDock::onBrowseOutputFolder()
 
 	rebuildList();
 	updateRowCountdowns();
+	updateRowActiveStyles();
 	emit requestSave();
 }
 
@@ -832,7 +898,7 @@ void LowerThirdDock::onAddLowerThird()
 	emit requestSave();
 }
 
-void LowerThirdDock::onManageCarousels()
+void LowerThirdDock::onManageGroups()
 {
 	if (!smart_lt::has_output_dir()) {
 		QMessageBox::information(this, tr("Output folder not set"),
@@ -841,13 +907,13 @@ void LowerThirdDock::onManageCarousels()
 	}
 
 	QDialog dlg(this);
-	dlg.setWindowTitle(tr("Lower Third Carousels"));
+	dlg.setWindowTitle(tr("Lower Third Groups"));
 	dlg.setModal(true);
 	dlg.resize(860, 520);
 
 	auto *root = new QHBoxLayout(&dlg);
 
-	// Left: carousel list
+	// Left: group list
 	auto *left = new QVBoxLayout();
 	auto *carList = new QListWidget(&dlg);
 	carList->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -873,18 +939,35 @@ void LowerThirdDock::onManageCarousels()
 
 	auto *titleEd = new QLineEdit(&dlg);
 	auto *visibleSpin = new QSpinBox(&dlg);
-	visibleSpin->setRange(250, 600000);
-	visibleSpin->setSuffix(tr(" ms"));
+		visibleSpin->setRange(1, 600);
+		visibleSpin->setSuffix(tr(" s"));
 
 	auto *intervalSpin = new QSpinBox(&dlg);
-	intervalSpin->setRange(0, 600000);
-	intervalSpin->setSuffix(tr(" ms"));
+		intervalSpin->setRange(0, 600);
+		intervalSpin->setSuffix(tr(" s"));
 
 	auto *orderCmb = new QComboBox(&dlg);
 	orderCmb->addItem(tr("Linear"), 0);
 	orderCmb->addItem(tr("Randomized"), 1);
 
-	auto *loopChk = new QCheckBox(tr("Loop carousel"), &dlg);
+		auto *loopChk = new QCheckBox(tr("Loop group"), &dlg);
+		auto *exclusiveChk = new QCheckBox(tr("Exclusive"), &dlg);
+
+	auto *toggleHkEdit = new QKeySequenceEdit(&dlg);
+	auto *toggleHkClear = new QPushButton(&dlg);
+	toggleHkClear->setToolTip(tr("Clear hotkey"));
+	toggleHkClear->setCursor(Qt::PointingHandCursor);
+	toggleHkClear->setIcon(dlg.style()->standardIcon(QStyle::SP_DialogResetButton));
+	toggleHkClear->setFixedWidth(32);
+	toggleHkClear->setFocusPolicy(Qt::NoFocus);
+	{
+		auto *r = new QHBoxLayout();
+		r->setContentsMargins(0, 0, 0, 0);
+		r->setSpacing(4);
+		r->addWidget(toggleHkEdit, 1);
+		r->addWidget(toggleHkClear);
+		form->addRow(tr("Toggle Hotkey"), r);
+	}
 
 	auto *colorEd = new QLineEdit(&dlg);
 	colorEd->setPlaceholderText(tr("#2EA043"));
@@ -894,12 +977,20 @@ void LowerThirdDock::onManageCarousels()
 	colorRow->addWidget(colorEd, 1);
 	colorRow->addWidget(pickColor);
 
-	form->addRow(tr("Title"), titleEd);
-	form->addRow(tr("Order"), orderCmb);
-	form->addRow(QString(), loopChk);
-	form->addRow(tr("Visible duration"), visibleSpin);
-	form->addRow(tr("Time between items"), intervalSpin);
-	form->addRow(tr("Dock highlight color"), colorRow);
+		form->addRow(tr("Title"), titleEd);
+		form->addRow(tr("Order"), orderCmb);
+		form->addRow(tr("Visible duration"), visibleSpin);
+		form->addRow(tr("Time between items"), intervalSpin);
+		form->addRow(tr("Dock highlight color"), colorRow);
+		{
+			auto *checks = new QHBoxLayout();
+			checks->setContentsMargins(0, 0, 0, 0);
+			checks->setSpacing(12);
+			checks->addWidget(loopChk);
+			checks->addWidget(exclusiveChk);
+			checks->addStretch(1);
+			form->addRow(QString(), checks);
+		}
 
 	right->addLayout(form);
 
@@ -919,28 +1010,28 @@ void LowerThirdDock::onManageCarousels()
 	// Helpers
 	auto refreshList = [&]() {
 		carList->clear();
-		for (const auto &c : smart_lt::carousels_const()) {
+		for (const auto &c : smart_lt::groups_const()) {
 			auto *it = new QListWidgetItem(QString::fromStdString(c.title.empty() ? c.id : c.title));
 			it->setData(Qt::UserRole, QString::fromStdString(c.id));
 			carList->addItem(it);
 		}
 	};
 
-	auto refreshMembers = [&](const std::string &carouselId) {
+	auto refreshMembers = [&](const std::string &groupId) {
 		members->clear();
 		QSet<QString> inSet;
-		if (auto *car = smart_lt::get_carousel_by_id(carouselId)) {
+		if (auto *car = smart_lt::get_group_by_id(groupId)) {
 			for (const auto &m : car->members)
 				inSet.insert(QString::fromStdString(m));
 		}
 
-		// Enforce UX rule: a lower third can belong to only one carousel.
-		// Do not show lower thirds that are already assigned to a different carousel.
-		const QString qCurCarId = QString::fromStdString(carouselId);
+		// Enforce UX rule: a lower third can belong to only one group.
+		// Do not show lower thirds that are already assigned to a different group.
+		const QString qCurCarId = QString::fromStdString(groupId);
 
 		for (const auto &lt : smart_lt::all_const()) {
-			const auto owners = smart_lt::carousels_containing(lt.id);
-			if (!owners.empty() && owners.front() != carouselId)
+			const auto owners = smart_lt::groups_containing(lt.id);
+			if (!owners.empty() && owners.front() != groupId)
 				continue;
 
 			auto *it = new QListWidgetItem(QString::fromStdString(lt.label.empty() ? lt.id : lt.label));
@@ -961,12 +1052,12 @@ void LowerThirdDock::onManageCarousels()
 		}
 
 		bool running = false;
-		auto rt = g_carouselRuns.find(qid);
-		if (rt != g_carouselRuns.end())
+		auto rt = g_groupRuns.find(qid);
+		if (rt != g_groupRuns.end())
 			running = rt->running;
 
 		bool hasMembers = false;
-		if (auto *car = smart_lt::get_carousel_by_id(qid.toStdString()))
+		if (auto *car = smart_lt::get_group_by_id(qid.toStdString()))
 			hasMembers = !car->members.empty();
 
 		btnStart->setEnabled(!running && hasMembers);
@@ -980,25 +1071,35 @@ void LowerThirdDock::onManageCarousels()
 			titleEd->clear();
 			orderCmb->setCurrentIndex(0);
 			loopChk->setChecked(true);
-			visibleSpin->setValue(15000);
-			intervalSpin->setValue(5000);
+			exclusiveChk->setChecked(false);
+			visibleSpin->setValue(15);
+			intervalSpin->setValue(5);
 			colorEd->clear();
+			toggleHkEdit->setKeySequence(QKeySequence());
 			members->clear();
 			updateStartStopButtons();
 			return;
 		}
 
-		if (auto *car = smart_lt::get_carousel_by_id(qid.toStdString())) {
+		if (auto *car = smart_lt::get_group_by_id(qid.toStdString())) {
 			titleEd->setText(QString::fromStdString(car->title));
 			orderCmb->setCurrentIndex(car->order_mode == 1 ? 1 : 0);
-			loopChk->setChecked(car->loop);
-			visibleSpin->setValue(std::max(250, car->visible_ms));
-			intervalSpin->setValue(std::max(0, car->interval_ms));
+				loopChk->setChecked(car->loop);
+				exclusiveChk->setChecked(car->exclusive);
+				{
+					const int visSec = std::max(1, (car->visible_ms + 500) / 1000);
+					const int intSec = std::max(0, (car->interval_ms + 500) / 1000);
+					visibleSpin->setValue(visSec);
+					intervalSpin->setValue(intSec);
+				}
 			colorEd->setText(QString::fromStdString(car->dock_color));
+			toggleHkEdit->setKeySequence(QKeySequence(QString::fromStdString(car->toggle_hotkey).trimmed()));
 			refreshMembers(car->id);
 		}
 		updateStartStopButtons();
 	};
+
+	QObject::connect(toggleHkClear, &QPushButton::clicked, &dlg, [&]() { toggleHkEdit->setKeySequence(QKeySequence()); });
 
 	refreshList();
 	if (carList->count() > 0)
@@ -1017,7 +1118,7 @@ void LowerThirdDock::onManageCarousels()
 	});
 
 	QObject::connect(btnAdd, &QPushButton::clicked, &dlg, [&]() {
-		const std::string id = smart_lt::add_default_carousel();
+		const std::string id = smart_lt::add_default_group();
 		refreshList();
 		for (int i = 0; i < carList->count(); ++i) {
 			auto *it = carList->item(i);
@@ -1036,14 +1137,14 @@ void LowerThirdDock::onManageCarousels()
 		if (qid.isEmpty())
 			return;
 
-		const auto res = QMessageBox::question(&dlg, tr("Delete carousel"),
-					      tr("Delete this carousel? This will not delete any lower thirds."),
+		const auto res = QMessageBox::question(&dlg, tr("Delete group"),
+					      tr("Delete this group? This will not delete any lower thirds."),
 					      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 		if (res != QMessageBox::Yes)
 			return;
 
-		stopCarouselRun(qid);
-		smart_lt::remove_carousel(qid.toStdString());
+		stopGroupRun(qid);
+		smart_lt::remove_group(qid.toStdString());
 		refreshList();
 		if (carList->count() > 0)
 			carList->setCurrentRow(0);
@@ -1057,7 +1158,7 @@ void LowerThirdDock::onManageCarousels()
 		const QString qid = it->data(Qt::UserRole).toString();
 		if (qid.isEmpty())
 			return;
-		startCarouselRun(this, qid);
+		startGroupRun(this, qid);
 		updateStartStopButtons();
 	});
 
@@ -1068,7 +1169,7 @@ void LowerThirdDock::onManageCarousels()
 		const QString qid = it->data(Qt::UserRole).toString();
 		if (qid.isEmpty())
 			return;
-		stopCarouselRun(qid);
+		stopGroupRun(qid);
 		updateStartStopButtons();
 	});
 
@@ -1080,19 +1181,52 @@ void LowerThirdDock::onManageCarousels()
 		if (qid.isEmpty())
 			return;
 
-		auto *car = smart_lt::get_carousel_by_id(qid.toStdString());
+		auto *car = smart_lt::get_group_by_id(qid.toStdString());
 		if (!car)
 			return;
 
-		carousel_cfg upd = *car;
+		group_cfg upd = *car;
 		upd.title = titleEd->text().trimmed().toStdString();
 		upd.order_mode = orderCmb->currentData().toInt();
-		upd.loop = loopChk->isChecked();
-		upd.visible_ms = visibleSpin->value();
-		upd.interval_ms = intervalSpin->value();
+			upd.loop = loopChk->isChecked();
+			upd.exclusive = exclusiveChk->isChecked();
+			upd.visible_ms = std::max(1, visibleSpin->value()) * 1000;
+			upd.interval_ms = std::max(0, intervalSpin->value()) * 1000;
 		upd.dock_color = colorEd->text().trimmed().toStdString();
 
-		smart_lt::update_carousel(upd);
+		auto normalize = [](const QString &s) -> QString {
+			return QKeySequence(s).toString(QKeySequence::PortableText).trimmed();
+		};
+
+		// Toggle hotkey (PortableText) + uniqueness enforcement
+		const QString seq = normalize(toggleHkEdit->keySequence().toString(QKeySequence::PortableText));
+		if (!seq.isEmpty()) {
+			// If this hotkey is already used by another lower third or group, clear the previous usage.
+			for (auto &it : smart_lt::all()) {
+				if (it.id == upd.id)
+					continue;
+				const QString other = normalize(QString::fromStdString(it.hotkey));
+				if (!other.isEmpty() && other == seq) {
+					it.hotkey.clear();
+					smart_lt::notify_list_updated(it.id);
+				}
+			}
+			bool clearedAnyGroup = false;
+			for (auto &g : smart_lt::groups()) {
+				if (g.id == upd.id)
+					continue;
+				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
+				if (!other.isEmpty() && other == seq) {
+					g.toggle_hotkey.clear();
+					clearedAnyGroup = true;
+				}
+			}
+			if (clearedAnyGroup)
+				smart_lt::notify_list_updated();
+		}
+		upd.toggle_hotkey = seq.toStdString();
+
+		smart_lt::update_group(upd);
 
 		std::vector<std::string> mem;
 		for (int i = 0; i < members->count(); ++i) {
@@ -1102,20 +1236,21 @@ void LowerThirdDock::onManageCarousels()
 			if (mit->checkState() == Qt::Checked)
 				mem.push_back(mit->data(Qt::UserRole).toString().toStdString());
 		}
-		smart_lt::set_carousel_members(qid.toStdString(), mem);
+		smart_lt::set_group_members(qid.toStdString(), mem);
 
-		// Refresh member list: items may become unavailable/available for other carousels after this change.
+		// Refresh member list: items may become unavailable/available for other groups after this change.
 		refreshMembers(qid.toStdString());
 		updateStartStopButtons();
 
 		// Update list label and refresh dock styles
 		it->setText(QString::fromStdString(upd.title.empty() ? upd.id : upd.title));
 		rebuildList();
+		rebuildShortcuts();
 	});
 
 	dlg.exec();
 
-	// Ensure dock reflects latest persisted carousel state
+	// Ensure dock reflects latest persisted group state
 	rebuildList();
 }
 
@@ -1142,24 +1277,24 @@ void LowerThirdDock::rebuildList()
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
 		rowFrame->setProperty("sltActive", QVariant(smart_lt::is_visible(cfg.id)));
 
-// Mark carousel membership (dock-only; does not affect overlay output)
-const auto carIds = smart_lt::carousels_containing(cfg.id);
+// Mark group membership (dock-only; does not affect overlay output)
+const auto carIds = smart_lt::groups_containing(cfg.id);
 if (!carIds.empty()) {
-	rowFrame->setProperty("sltInCarousel", QVariant(true));
+	rowFrame->setProperty("sltInGroup", QVariant(true));
 
 	std::string col = "#2EA043";
-	if (auto *car = smart_lt::get_carousel_by_id(carIds.front())) {
+	if (auto *car = smart_lt::get_group_by_id(carIds.front())) {
 		if (!car->dock_color.empty())
 			col = car->dock_color;
 	}
-	rowFrame->setProperty("sltCarouselColor", QString::fromStdString(col));
+	rowFrame->setProperty("sltGroupColor", QString::fromStdString(col));
 } else {
-	rowFrame->setProperty("sltInCarousel", QVariant(false));
-	rowFrame->setProperty("sltCarouselColor", QString());
+	rowFrame->setProperty("sltInGroup", QVariant(false));
+	rowFrame->setProperty("sltGroupColor", QString());
 }
 
 		rowFrame->setCursor(Qt::PointingHandCursor);
-		applyCarouselRowStyle(rowFrame);
+		applyGroupRowStyle(rowFrame);
 
 		auto *h = new QHBoxLayout(rowFrame);
 		h->setContentsMargins(8, 4, 8, 4);
@@ -1317,7 +1452,7 @@ void LowerThirdDock::updateRowActiveStyles()
 
 		if (row.row) {
 			row.row->setProperty("sltActive", QVariant(active));
-				applyCarouselRowStyle(row.row);
+				applyGroupRowStyle(row.row);
 			row.row->style()->unpolish(row.row);
 			row.row->style()->polish(row.row);
 			row.row->update();
@@ -1381,11 +1516,56 @@ void LowerThirdDock::rebuildShortcuts()
 		const QString id = QString::fromStdString(cfg.id);
 		connect(sc, &QShortcut::activated, this, [this, id]() { handleToggleVisible(id); });
 	}
+
+	// Group toggle hotkeys
+	for (const auto &g : smart_lt::groups_const()) {
+		const QString groupId = QString::fromStdString(g.id);
+		const QString seqStr = QString::fromStdString(g.toggle_hotkey).trimmed();
+		if (seqStr.isEmpty())
+			continue;
+
+		QKeySequence seq(seqStr);
+		if (seq.isEmpty())
+			continue;
+
+		auto *sc = new QShortcut(seq, this);
+		sc->setContext(Qt::ApplicationShortcut);
+		shortcuts_.push_back(sc);
+		connect(sc, &QShortcut::activated, this, [this, groupId]() {
+			auto it = g_groupRuns.find(groupId);
+			if (it != g_groupRuns.end() && it->running)
+				stopGroupRun(groupId);
+			else
+				startGroupRun(this, groupId);
+			updateRowCountdowns();
+			updateRowActiveStyles();
+		});
+	}
 }
 
 void LowerThirdDock::handleToggleVisible(const QString &id)
 {
 	const std::string sid = id.toStdString();
+
+	// Manual override: if this lower third is part of a running group, stop the group-run.
+	// This prevents the scheduler from fighting the user's manual toggle.
+	for (const auto &g : smart_lt::groups_const()) {
+		bool isMember = false;
+		for (const auto &m : g.members) {
+			if (m == sid) {
+				isMember = true;
+				break;
+			}
+		}
+		if (!isMember)
+			continue;
+
+		const QString groupId = QString::fromStdString(g.id);
+		auto it = g_groupRuns.find(groupId);
+		if (it != g_groupRuns.end() && it->running) {
+			stopGroupRun(groupId);
+		}
+	}
 	const bool wasVisible = smart_lt::is_visible(sid);
 	const bool ok = smart_lt::toggle_visible_persist(sid);
 
@@ -1394,15 +1574,6 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 
 	const bool nowVisible = smart_lt::is_visible(sid);
 
-	const bool exclusive = smart_lt::dock_exclusive_mode();
-	if (exclusive && !wasVisible && nowVisible) {
-		const auto visible = smart_lt::visible_ids();
-		for (const auto &vid : visible) {
-			if (vid == sid)
-				continue;
-			smart_lt::set_visible_persist(vid, false);
-		}
-	}
 
 	if (!wasVisible && nowVisible) {
 		if (auto *cfg = smart_lt::get_by_id(sid)) {
@@ -1462,11 +1633,11 @@ void LowerThirdDock::handleRemove(const QString &id)
 		return;
 
 const std::string sid = id.toStdString();
-const auto cars = smart_lt::carousels_containing(sid);
+const auto cars = smart_lt::groups_containing(sid);
 
 QString msg = tr("Remove this lower third?\n\nThis action cannot be undone.");
 if (!cars.empty()) {
-	msg += tr("\n\nNote: This lower third is part of %1 carousel(s) and will also be removed from those carousels.")
+	msg += tr("\n\nNote: This lower third is part of %1 group(s) and will also be removed from those groups.")
 		       .arg((int)cars.size());
 }
 
@@ -1505,6 +1676,18 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 		return;
 	}
 
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const QString qid = rowUi.id;
+
+	// Group-run countdown (takes precedence): if this lower third is currently being shown as part of
+	// an active group run, show time remaining until the group hides it.
+	if (g_groupHideAtMs.contains(qid) && smart_lt::is_visible(cfg->id)) {
+		rowUi.subLbl->setVisible(true);
+		const qint64 leftHide = g_groupHideAtMs.value(qid) - now;
+		rowUi.subLbl->setText(QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
+		return;
+	}
+
 	const int every = cfg->repeat_every_sec;
 	const int keepVisible = cfg->repeat_visible_sec;
 
@@ -1528,8 +1711,6 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 
 		rowUi.subLbl->setVisible(true);
 
-		const qint64 now = QDateTime::currentMSecsSinceEpoch();
-		const QString qid = rowUi.id;
 
 		if (!offAtMs_.contains(qid))
 			offAtMs_[qid] = now + (qint64)keepVisible * 1000;
@@ -1540,9 +1721,6 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 	}
 
 	rowUi.subLbl->setVisible(true);
-
-	const qint64 now = QDateTime::currentMSecsSinceEpoch();
-	const QString qid = rowUi.id;
 
 	if (!nextOnMs_.contains(qid)) {
 		nextOnMs_[qid] = now + (qint64)every * 1000;

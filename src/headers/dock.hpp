@@ -65,7 +65,7 @@ signals:
 private slots:
 	void onBrowseOutputFolder();
 	void onAddLowerThird();
-	void onManageCarousels();
+	void onManageGroups();
 
 private:
 	// Update banner (top of dock)
@@ -75,7 +75,7 @@ private:
 	QString updateRemote_;
 	QString updateLocal_;
 
-	QPushButton *manageCarouselsBtn_ = nullptr;
+	QPushButton *manageGroupsBtn_ = nullptr;
 
 	static QString formatCountdownMs(qint64 ms);
 	void updateRowCountdowns();
@@ -99,7 +99,6 @@ private:
 	void populateBrowserSources(bool keepSelection = true);
 	void onBrowserSourceChanged(int index);
 	void onBrowserSizeChanged();
-	void onExclusiveModeChanged(int state);
 
 	// NEW: core event bus sync (bidirectional with websocket)
 	void onCoreEvent(const smart_lt::core_event &ev);
@@ -126,8 +125,6 @@ private:
 	QSpinBox *browserHeightSpin = nullptr;
 	QPushButton *applyBrowserSizeBtn = nullptr;
 
-	// Dock behavior
-	QCheckBox *exclusiveModeCheck = nullptr;
 
 	// Footer tools
 	QPushButton *infoBtn = nullptr;

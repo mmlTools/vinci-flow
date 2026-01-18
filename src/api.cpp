@@ -285,21 +285,12 @@ void ApiClient::init()
     m_inited = true;
 
     qRegisterMetaType<QPixmap>("QPixmap");
+	// Load cache (if available) and immediately inform UI.
+	loadCacheFromDisk();
 
-    // Load cache (if available) and immediately inform UI.
-    loadCacheFromDisk();
-
-    const qint64 now = QDateTime::currentSecsSinceEpoch();
-    if (!isCacheFresh(now)) {
-        // Stale-while-revalidate: show cached list (even if stale) but refresh in background.
-        QTimer::singleShot(250, this, [this]() { fetchLowerThirds(false); });
-	} else {
-		// Even with a fresh cache, perform a background refresh on startup.
-		// This ensures we can pick up new fields (like plugin_version) without forcing users
-		// to wait for the cache TTL. If networking is blocked/offline, fetchLowerThirds() will
-		// fail gracefully and we simply keep the cached data.
-		QTimer::singleShot(1500, this, [this]() { fetchLowerThirds(true); });
-    }
+	// Always refresh on startup so version checks and marketplace data are up-to-date.
+	// The on-disk cache is only used as an offline fallback.
+	QTimer::singleShot(250, this, [this]() { fetchLowerThirds(true); });
 }
 
 void ApiClient::requestImage(const QString &imageUrl, int targetPx)

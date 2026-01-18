@@ -1097,7 +1097,37 @@ void LowerThirdSettingsDialog::saveToState()
 		cfg->radius = rad;
 	}
 
-	cfg->hotkey = hotkeyEdit->keySequence().toString(QKeySequence::PortableText).toStdString();
+	{
+		auto normalize = [](const QString &s) -> QString {
+			return QKeySequence(s).toString(QKeySequence::PortableText).trimmed();
+		};
+
+		const QString seq = normalize(hotkeyEdit->keySequence().toString(QKeySequence::PortableText));
+		// Enforce uniqueness across all lower thirds and groups.
+		if (!seq.isEmpty()) {
+			for (auto &it : smart_lt::all()) {
+				if (it.id == cfg->id)
+					continue;
+				const QString other = normalize(QString::fromStdString(it.hotkey));
+				if (!other.isEmpty() && other == seq) {
+					it.hotkey.clear();
+					smart_lt::notify_list_updated(it.id);
+				}
+			}
+			bool clearedAnyGroup = false;
+			for (auto &g : smart_lt::groups()) {
+				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
+				if (!other.isEmpty() && other == seq) {
+					g.toggle_hotkey.clear();
+					clearedAnyGroup = true;
+				}
+			}
+			// If we cleared any group hotkeys, notify so dock refreshes and shortcuts are rebuilt.
+			if (clearedAnyGroup)
+				smart_lt::notify_list_updated();
+		}
+		cfg->hotkey = seq.toStdString();
+	}
 	cfg->repeat_every_sec = repeatEverySpin->value();
 	cfg->repeat_visible_sec = repeatVisibleSpin->value();
 

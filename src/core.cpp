@@ -31,9 +31,8 @@ static std::string g_output_dir;
 static std::string g_target_browser_source;
 static int g_target_browser_width = sltBrowserWidth;
 static int g_target_browser_height = sltBrowserHeight;
-static bool g_dock_exclusive_mode = false;
 static std::vector<lower_third_cfg> g_items;
-static std::vector<carousel_cfg> g_carousels;
+static std::vector<group_cfg> g_groups;
 static std::vector<std::string> g_visible;
 static std::string g_last_html_path;
 
@@ -342,7 +341,6 @@ static void load_global_config()
 		g_target_browser_width = w;
 	if (h > 0)
 		g_target_browser_height = h;
-	g_dock_exclusive_mode = root.value("dock_exclusive_mode").toBool(false);
 }
 
 bool save_global_config()
@@ -359,7 +357,6 @@ bool save_global_config()
 	root["target_browser_source"] = QString::fromStdString(g_target_browser_source);
 	root["target_browser_width"] = g_target_browser_width;
 	root["target_browser_height"] = g_target_browser_height;
-	root["dock_exclusive_mode"] = g_dock_exclusive_mode;
 
 	const QJsonDocument doc(root);
 	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
@@ -1077,31 +1074,31 @@ lower_third_cfg *get_by_id(const std::string &id)
 	return nullptr;
 }
 
-std::vector<carousel_cfg> &carousels()
+std::vector<group_cfg> &groups()
 {
-	return g_carousels;
+	return g_groups;
 }
 
-const std::vector<carousel_cfg> &carousels_const()
+const std::vector<group_cfg> &groups_const()
 {
-	return g_carousels;
+	return g_groups;
 }
 
-carousel_cfg *get_carousel_by_id(const std::string &id)
+group_cfg *get_group_by_id(const std::string &id)
 {
 	const std::string sid = sanitize_id(id);
-	for (auto &c : g_carousels) {
+	for (auto &c : g_groups) {
 		if (c.id == sid)
 			return &c;
 	}
 	return nullptr;
 }
 
-std::vector<std::string> carousels_containing(const std::string &lower_third_id)
+std::vector<std::string> groups_containing(const std::string &lower_third_id)
 {
 	std::vector<std::string> out;
 	const std::string sid = sanitize_id(lower_third_id);
-	for (const auto &c : g_carousels) {
+	for (const auto &c : g_groups) {
 		for (const auto &mid : c.members) {
 			if (mid == sid) {
 				out.push_back(c.id);
@@ -1153,15 +1150,53 @@ bool set_visible_persist(const std::string &id, bool visible)
 		return true;
 	}
 
+	std::vector<std::string> hidden;
+
+	// Group-level exclusive mode: if this item belongs to a group with exclusive enabled,
+	// hide any other currently-visible members in the same group before showing it.
+	if (visible && !before) {
+		const auto owners = groups_containing(id);
+		if (!owners.empty()) {
+			group_cfg *g = get_group_by_id(owners.front());
+			if (g && g->exclusive) {
+				std::unordered_set<std::string> memberSet;
+				memberSet.reserve(g->members.size() * 2 + 1);
+				for (const auto &m : g->members)
+					memberSet.insert(m);
+
+				for (const auto &vid : g_visible) {
+					if (vid == id)
+						continue;
+					if (memberSet.find(vid) != memberSet.end())
+						hidden.push_back(vid);
+				}
+			}
+		}
+	}
+
+	for (const auto &hid : hidden)
+		set_visible_nosave(hid, false);
+
 	set_visible_nosave(id, visible);
 	if (!save_visible_json())
 		return false;
+
+	// Emit per-id events so the dock stays consistent.
+	const auto visNow = visible_ids();
+	for (const auto &hid : hidden) {
+		core_event ev;
+		ev.type = event_type::VisibilityChanged;
+		ev.id = hid;
+		ev.visible = false;
+		ev.visible_ids = visNow;
+		emit_event(ev);
+	}
 
 	core_event ev;
 	ev.type = event_type::VisibilityChanged;
 	ev.id = id;
 	ev.visible = visible;
-	ev.visible_ids = visible_ids();
+	ev.visible_ids = visNow;
 	emit_event(ev);
 
 	return true;
@@ -1212,14 +1247,14 @@ bool load_state_json()
 	const std::string p = path_state_json();
 	if (!QFile::exists(QString::fromStdString(p))) {
 		g_items.clear();
-		g_carousels.clear();
+		g_groups.clear();
 		return true;
 	}
 
 	const std::string txt = read_text_file(p);
 	if (txt.empty()) {
 		g_items.clear();
-		g_carousels.clear();
+		g_groups.clear();
 		return true;
 	}
 
@@ -1228,13 +1263,20 @@ bool load_state_json()
 	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
 		LOGW("Invalid lt-state.json; reset");
 		g_items.clear();
-		g_carousels.clear();
+		g_groups.clear();
 		return false;
 	}
 
 	const QJsonObject root = doc.object();
+	// Optional hotkey lookup map (forward compatible)
+	// Structure:
+	//   "hotkeys": { "items": {"<lt_id>": "Ctrl+..."}, "groups": {"<group_id>": "Ctrl+..."} }
+	const QJsonObject hkRoot = root.value("hotkeys").toObject();
+	const QJsonObject hkItems = hkRoot.value("items").toObject();
+	const QJsonObject hkGroups = hkRoot.value("groups").toObject();
+
 	const QJsonArray items = root.value("items").toArray();
-	const QJsonArray cars = root.value("carousels").toArray();
+	const QJsonArray cars = root.contains("groups") ? root.value("groups").toArray() : root.value("carousels").toArray();
 
 	std::vector<lower_third_cfg> out;
 	out.reserve((size_t)items.size());
@@ -1300,6 +1342,16 @@ bool load_state_json()
 		c.js_template = o.value("js_template").toString().toStdString();
 
 		c.hotkey = o.value("hotkey").toString().toStdString();
+		if (c.hotkey.empty()) {
+			const QString k = hkItems.value(QString::fromStdString(c.id)).toString().trimmed();
+			if (!k.isEmpty())
+				c.hotkey = k.toStdString();
+		}
+		if (c.hotkey.empty()) {
+			const QString fallback = hkItems.value(QString::fromStdString(c.id)).toString();
+			if (!fallback.isEmpty())
+				c.hotkey = fallback.toStdString();
+		}
 		c.repeat_every_sec = o.value("repeat_every_sec").toInt(0);
 		c.repeat_visible_sec = o.value("repeat_visible_sec").toInt(0);
 
@@ -1351,14 +1403,14 @@ bool load_state_json()
 		return a.id < b.id;
 	});
 
-	std::vector<carousel_cfg> outCars;
+	std::vector<group_cfg> outCars;
 	outCars.reserve((size_t)cars.size());
 	for (const QJsonValue v : cars) {
 		if (!v.isObject())
 			continue;
 		const QJsonObject o = v.toObject();
 
-		carousel_cfg c;
+		group_cfg c;
 		c.id = sanitize_id(o.value("id").toString().toStdString());
 		if (c.id.empty())
 			c.id = new_id();
@@ -1367,6 +1419,22 @@ bool load_state_json()
 		c.order = o.value("order").toInt(-1);
 		c.order_mode = o.value("order_mode").toInt(0);
 		c.loop = o.value("loop").toBool(true);
+		c.exclusive = o.value("exclusive").toBool(false);
+		c.toggle_hotkey = o.value("toggle_hotkey").toString().toStdString();
+		if (c.toggle_hotkey.empty()) {
+			// Backward compatibility: accept older start/stop hotkeys and prefer start_hotkey if present.
+			const QString start = o.value("start_hotkey").toString().trimmed();
+			const QString stop = o.value("stop_hotkey").toString().trimmed();
+			if (!start.isEmpty())
+				c.toggle_hotkey = start.toStdString();
+			else if (!stop.isEmpty())
+				c.toggle_hotkey = stop.toStdString();
+		}
+		if (c.toggle_hotkey.empty()) {
+			const QString fallback = hkGroups.value(QString::fromStdString(c.id)).toString();
+			if (!fallback.isEmpty())
+				c.toggle_hotkey = fallback.toStdString();
+		}
 
 		c.visible_ms = o.value("visible_ms").toInt(15000);
 		c.interval_ms = o.value("interval_ms").toInt(5000);
@@ -1389,7 +1457,7 @@ bool load_state_json()
 		}
 
 		if (c.title.empty())
-			c.title = "Carousel";
+			c.title = "Group";
 
 		outCars.push_back(std::move(c));
 	}
@@ -1400,17 +1468,17 @@ bool load_state_json()
 			c.order = nextCarOrder;
 		nextCarOrder = std::max(nextCarOrder, c.order + 1);
 	}
-	std::sort(outCars.begin(), outCars.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+	std::sort(outCars.begin(), outCars.end(), [](const group_cfg &a, const group_cfg &b) {
 		if (a.order != b.order)
 			return a.order < b.order;
 		return a.id < b.id;
 	});
 
-	g_carousels = std::move(outCars);
+	g_groups = std::move(outCars);
 
 	{
 		std::unordered_set<std::string> claimed;
-		for (auto &car : g_carousels) {
+		for (auto &car : g_groups) {
 			std::vector<std::string> uniq;
 			uniq.reserve(car.members.size());
 			for (const auto &midRaw : car.members) {
@@ -1428,7 +1496,7 @@ bool load_state_json()
 
 	g_items = std::move(out);
 
-	for (const auto &car : g_carousels) {
+	for (const auto &car : g_groups) {
 		for (const auto &mid : car.members) {
 			if (auto *lt = get_by_id(mid)) {
 				lt->repeat_every_sec = 0;
@@ -1492,13 +1560,15 @@ bool save_state_json()
 	}
 
 	QJsonArray cars;
-	for (const auto &c : g_carousels) {
+	for (const auto &c : g_groups) {
 		QJsonObject o;
 		o["id"] = QString::fromStdString(c.id);
 		o["title"] = QString::fromStdString(c.title);
 		o["order"] = c.order;
 		o["order_mode"] = c.order_mode;
 		o["loop"] = c.loop;
+		o["exclusive"] = c.exclusive;
+		o["toggle_hotkey"] = QString::fromStdString(c.toggle_hotkey);
 		o["visible_ms"] = c.visible_ms;
 		o["interval_ms"] = c.interval_ms;
 		o["dock_color"] = QString::fromStdString(c.dock_color);
@@ -1510,9 +1580,26 @@ bool save_state_json()
 
 		cars.append(o);
 	}
-	root["carousels"] = cars;
+	root["groups"] = cars;
 
 	root["items"] = items;
+
+	// Also persist hotkeys as a compact lookup map. This is used for
+	// forward compatibility and to make hotkeys resilient to future schema changes.
+	QJsonObject hkRoot;
+	QJsonObject hkItems;
+	for (const auto &c : g_items) {
+		if (!c.hotkey.empty())
+			hkItems[QString::fromStdString(c.id)] = QString::fromStdString(c.hotkey);
+	}
+	QJsonObject hkGroups;
+	for (const auto &g : g_groups) {
+		if (!g.toggle_hotkey.empty())
+			hkGroups[QString::fromStdString(g.id)] = QString::fromStdString(g.toggle_hotkey);
+	}
+	hkRoot["items"] = hkItems;
+	hkRoot["groups"] = hkGroups;
+	root["hotkeys"] = hkRoot;
 
 	const QJsonDocument doc(root);
 	return write_text_file(path_state_json(), doc.toJson(QJsonDocument::Indented).toStdString());
@@ -1846,17 +1933,6 @@ bool set_target_browser_dimensions(int width, int height)
 	return save_global_config();
 }
 
-bool dock_exclusive_mode()
-{
-	return g_dock_exclusive_mode;
-}
-
-bool set_dock_exclusive_mode(bool enabled)
-{
-	g_dock_exclusive_mode = enabled;
-	return save_global_config();
-}
-
 bool target_browser_source_exists()
 {
 	obs_source_t *src = get_target_browser_source();
@@ -2060,7 +2136,7 @@ void init_from_disk()
 	}
 }
 
-std::string add_default_carousel()
+std::string add_default_group()
 {
 	if (!has_output_dir())
 		return {};
@@ -2068,17 +2144,17 @@ std::string add_default_carousel()
 	ensure_output_artifacts_exist();
 	load_state_json();
 
-	carousel_cfg c;
+	group_cfg c;
 	c.id = new_id();
-	while (get_carousel_by_id(c.id))
+	while (get_group_by_id(c.id))
 		c.id = new_id();
 
 	int maxOrder = -1;
-	for (const auto &it : g_carousels)
+	for (const auto &it : g_groups)
 		maxOrder = std::max(maxOrder, it.order);
 	c.order = maxOrder + 1;
 
-	c.title = "Carousel";
+	c.title = "Group";
 	c.order_mode = 0;
 	c.loop = true;
 
@@ -2086,8 +2162,8 @@ std::string add_default_carousel()
 	c.interval_ms = 5000;
 	c.dock_color = "#2EA043";
 
-	g_carousels.push_back(c);
-	std::sort(g_carousels.begin(), g_carousels.end(), [](const carousel_cfg &a, const carousel_cfg &b) {
+	g_groups.push_back(c);
+	std::sort(g_groups.begin(), g_groups.end(), [](const group_cfg &a, const group_cfg &b) {
 		if (a.order != b.order)
 			return a.order < b.order;
 		return a.id < b.id;
@@ -2105,7 +2181,7 @@ std::string add_default_carousel()
 	return c.id;
 }
 
-bool update_carousel(const carousel_cfg &c)
+bool update_group(const group_cfg &c)
 {
 	if (!has_output_dir())
 		return false;
@@ -2113,7 +2189,7 @@ bool update_carousel(const carousel_cfg &c)
 	ensure_output_artifacts_exist();
 	load_state_json();
 
-	carousel_cfg *dst = get_carousel_by_id(c.id);
+	group_cfg *dst = get_group_by_id(c.id);
 	if (!dst)
 		return false;
 
@@ -2139,7 +2215,7 @@ bool update_carousel(const carousel_cfg &c)
 	return true;
 }
 
-bool remove_carousel(const std::string &carousel_id)
+bool remove_group(const std::string &group_id)
 {
 	if (!has_output_dir())
 		return false;
@@ -2147,14 +2223,14 @@ bool remove_carousel(const std::string &carousel_id)
 	ensure_output_artifacts_exist();
 	load_state_json();
 
-	const std::string sid = sanitize_id(carousel_id);
-	const auto before = g_carousels.size();
+	const std::string sid = sanitize_id(group_id);
+	const auto before = g_groups.size();
 
-	g_carousels.erase(std::remove_if(g_carousels.begin(), g_carousels.end(),
-					 [&](const carousel_cfg &c) { return c.id == sid; }),
-			  g_carousels.end());
+	g_groups.erase(std::remove_if(g_groups.begin(), g_groups.end(),
+					 [&](const group_cfg &c) { return c.id == sid; }),
+			  g_groups.end());
 
-	const bool removed = (g_carousels.size() != before);
+	const bool removed = (g_groups.size() != before);
 	if (!removed)
 		return false;
 
@@ -2170,7 +2246,7 @@ bool remove_carousel(const std::string &carousel_id)
 	return true;
 }
 
-bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members)
+bool set_group_members(const std::string &group_id, const std::vector<std::string> &members)
 {
 	if (!has_output_dir())
 		return false;
@@ -2178,7 +2254,7 @@ bool set_carousel_members(const std::string &carousel_id, const std::vector<std:
 	ensure_output_artifacts_exist();
 	load_state_json();
 
-	carousel_cfg *c = get_carousel_by_id(carousel_id);
+	group_cfg *c = get_group_by_id(group_id);
 	if (!c)
 		return false;
 
@@ -2190,7 +2266,7 @@ bool set_carousel_members(const std::string &carousel_id, const std::vector<std:
 			continue;
 
 		bool ownedByOther = false;
-		for (const auto &other : g_carousels) {
+		for (const auto &other : g_groups) {
 			if (other.id == c->id)
 				continue;
 			if (std::find(other.members.begin(), other.members.end(), mid) != other.members.end()) {
@@ -2435,7 +2511,7 @@ bool remove_lower_third(const std::string &id)
 
 	set_visible_nosave(sid, false);
 
-	for (auto &car : g_carousels) {
+	for (auto &car : g_groups) {
 		car.members.erase(std::remove(car.members.begin(), car.members.end(), sid), car.members.end());
 	}
 

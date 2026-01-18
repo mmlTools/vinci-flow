@@ -81,18 +81,26 @@ struct lower_third_cfg {
 };
 
 
-struct carousel_cfg {
+struct group_cfg {
 	std::string id;
 	std::string title;
 	int order = 0;
 
-	// Item ordering when running the carousel
+	// Item ordering when running the group
 	// 0 = Linear (in member list order)
 	// 1 = Randomized (shuffled per run / cycle)
 	int order_mode = 0;
 
-	// If true, carousel repeats indefinitely. If false, it stops after the last item is shown once.
+	// If true, group repeats indefinitely. If false, it stops after the last item is shown once.
 	bool loop = true;
+
+	// If enabled, showing one member will hide any other visible members in the same group.
+	bool exclusive = false;
+
+	// Optional group control hotkey (dock-only; stored for convenience)
+	// - toggle_hotkey: start/stop the group run
+	std::string toggle_hotkey;
+
 
 	// Timing controls (milliseconds)
 	// Defaults:
@@ -101,7 +109,7 @@ struct carousel_cfg {
 	int visible_ms  = 15000;
 	int interval_ms = 5000;
 
-	// Dock-only color for marking items in this carousel (e.g. "#2EA043")
+	// Dock-only color for marking items in this group (e.g. "#2EA043")
 	std::string dock_color;
 
 	// Member lower-third IDs (in display order)
@@ -167,18 +175,18 @@ const std::vector<lower_third_cfg> &all_const();
 lower_third_cfg *get_by_id(const std::string &id);
 
 // -------------------------
-// Carousel state access (persisted in lt-state.json; dock-only)
+// Group state access (persisted in lt-state.json; dock-only)
 // -------------------------
-std::vector<carousel_cfg> &carousels();
-const std::vector<carousel_cfg> &carousels_const();
-carousel_cfg *get_carousel_by_id(const std::string &id);
-std::vector<std::string> carousels_containing(const std::string &lower_third_id);
+std::vector<group_cfg> &groups();
+const std::vector<group_cfg> &groups_const();
+group_cfg *get_group_by_id(const std::string &id);
+std::vector<std::string> groups_containing(const std::string &lower_third_id);
 
 // CRUD helpers for dock actions (persist + notify)
-std::string add_default_carousel();
-bool update_carousel(const carousel_cfg &c);
-bool remove_carousel(const std::string &carousel_id);
-bool set_carousel_members(const std::string &carousel_id, const std::vector<std::string> &members);
+std::string add_default_group();
+bool update_group(const group_cfg &c);
+bool remove_group(const std::string &group_id);
+bool set_group_members(const std::string &group_id, const std::vector<std::string> &members);
 
 
 // -------------------------
@@ -230,10 +238,6 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath);
 int target_browser_width();
 int target_browser_height();
 bool set_target_browser_dimensions(int width, int height);
-
-// Dock behavior (persisted in module config)
-bool dock_exclusive_mode();
-bool set_dock_exclusive_mode(bool enabled);
 
 // -------------------------
 // Paths
