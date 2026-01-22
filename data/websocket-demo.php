@@ -1,12 +1,12 @@
 <?php
-// index.php — Smart Lower Thirds Vendor Test (PHP + AJAX + HTML, no external JS libs)
+// index.php — VinciFlow Vendor Test (PHP + AJAX + HTML, no external JS libs)
 // The browser connects to OBS via WebSocket (JS). PHP only serves the page.
 ?><!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Smart Lower Thirds WebSocket Vendor Test (PHP)</title>
+  <title>VinciFlow WebSocket Vendor Test (PHP)</title>
   <style>
   :root{
     --bg0:#0b0f17;
@@ -412,8 +412,8 @@
 <div class="wrap">
   <div class="hero">
     <div>
-      <h1>Smart Lower Thirds Vendor API Test</h1>
-      <div class="sub">Connect to OBS WebSocket v5 and test vendor calls for Smart Lower Thirds.</div>
+      <h1>VinciFlow Vendor API Test</h1>
+      <div class="sub">Connect to OBS WebSocket v5 and test vendor calls for VinciFlow.</div>
     </div>
     <div class="badge"><span id="badgeDot" class="dot"></span><span>OBS WebSocket • Vendor API</span></div>
   </div>

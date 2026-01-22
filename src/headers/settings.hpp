@@ -23,7 +23,7 @@ class QListWidget;
 class QPixmap;
 class QFrame;
 
-namespace smart_lt::ui {
+namespace vflow::ui {
 
 struct CbxOption {
 	const char *label;
@@ -286,4 +286,4 @@ private:
 	QMultiHash<QString, QPointer<QLabel>> marketIconByUrl;
 };
 
-} // namespace smart_lt::ui
+} // namespace vflow::ui

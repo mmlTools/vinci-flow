@@ -25,7 +25,7 @@
 #include <filesystem>
 #include <system_error>
 
-namespace smart_lt {
+namespace vflow {
 
 static std::string g_output_dir;
 static std::string g_target_browser_source;
@@ -631,7 +631,7 @@ static std::string replace_placeholders(std::string s, const slt_repl_map &m)
 static std::string build_shared_css()
 {
 	return R"CSS(
-/* Smart Lower Thirds - Base */
+/* VinciFlow - Base */
 :root{ --slt-safe-margin: 40px; --slt-z: 9999; }
 html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 #slt-root{
@@ -741,7 +741,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 	map += "};\n";
 
 	return std::string(R"JS(
-/* Smart Lower Thirds – Base Animation Script (simple polling + per-item transition lock) */
+/* VinciFlow – Base Animation Script (simple polling + per-item transition lock) */
 (() => {
   const VISIBLE_URL = "./lt-visible.json";
   const animMap = )JS") +
@@ -2000,7 +2000,7 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	obs_data_set_bool(s, "control_audio", true);
 	obs_data_set_bool(s, "reroute_audio", true);
 
-	obs_data_set_bool(s, "smart_lt_managed", true);
+	obs_data_set_bool(s, "vflow_managed", true);
 	obs_data_set_int(s, "width", (int64_t)g_target_browser_width);
 	obs_data_set_int(s, "height", (int64_t)g_target_browser_height);
 	obs_source_update(src, s);
@@ -2588,4 +2588,4 @@ bool move_lower_third(const std::string &id, int delta)
 	return true;
 }
 
-} // namespace smart_lt
+} // namespace vflow

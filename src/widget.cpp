@@ -300,7 +300,7 @@ void show_troubleshooting_dialog(QWidget *parent)
 {
     auto *dlg = new QDialog(parent);
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
-    dlg->setWindowTitle(QObject::tr("Smart Lower Thirds • Help & Links"));
+    dlg->setWindowTitle(QObject::tr("VinciFlow • Help & Links"));
     dlg->setModal(true);
     dlg->resize(720, 560);
 

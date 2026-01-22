@@ -62,7 +62,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace smart_lt::ui {
+namespace vflow::ui {
 
 static bool unzip_to_dir(const QString &zipPath, const QString &destDir, QString &htmlPath, QString &cssPath,
 			 QString &jsPath, QString &jsonPath, QString &profilePath, QString &soundInPath,
@@ -820,14 +820,14 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		marketList->viewport()->installEventFilter(this);
 
-		auto &api = smart_lt::api::ApiClient::instance();
-		connect(&api, &smart_lt::api::ApiClient::lowerThirdsUpdated, this,
+		auto &api = vflow::api::ApiClient::instance();
+		connect(&api, &vflow::api::ApiClient::lowerThirdsUpdated, this,
 			&LowerThirdSettingsDialog::onMarketplaceUpdated);
-		connect(&api, &smart_lt::api::ApiClient::lowerThirdsFailed, this,
+		connect(&api, &vflow::api::ApiClient::lowerThirdsFailed, this,
 			&LowerThirdSettingsDialog::onMarketplaceFailed);
-		connect(&api, &smart_lt::api::ApiClient::imageReady, this,
+		connect(&api, &vflow::api::ApiClient::imageReady, this,
 			&LowerThirdSettingsDialog::onMarketplaceImageReady);
-		connect(&api, &smart_lt::api::ApiClient::imageFailed, this,
+		connect(&api, &vflow::api::ApiClient::imageFailed, this,
 			&LowerThirdSettingsDialog::onMarketplaceImageFailed);
 
 		rebuildMarketplaceList();
@@ -932,7 +932,7 @@ void LowerThirdSettingsDialog::loadFromState()
 	if (currentId.isEmpty())
 		return;
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -1060,7 +1060,7 @@ void LowerThirdSettingsDialog::saveToState()
 	if (currentId.isEmpty())
 		return;
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -1105,17 +1105,17 @@ void LowerThirdSettingsDialog::saveToState()
 		const QString seq = normalize(hotkeyEdit->keySequence().toString(QKeySequence::PortableText));
 		// Enforce uniqueness across all lower thirds and groups.
 		if (!seq.isEmpty()) {
-			for (auto &it : smart_lt::all()) {
+			for (auto &it : vflow::all()) {
 				if (it.id == cfg->id)
 					continue;
 				const QString other = normalize(QString::fromStdString(it.hotkey));
 				if (!other.isEmpty() && other == seq) {
 					it.hotkey.clear();
-					smart_lt::notify_list_updated(it.id);
+					vflow::notify_list_updated(it.id);
 				}
 			}
 			bool clearedAnyGroup = false;
-			for (auto &g : smart_lt::groups()) {
+			for (auto &g : vflow::groups()) {
 				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
 				if (!other.isEmpty() && other == seq) {
 					g.toggle_hotkey.clear();
@@ -1124,7 +1124,7 @@ void LowerThirdSettingsDialog::saveToState()
 			}
 			// If we cleared any group hotkeys, notify so dock refreshes and shortcuts are rebuilt.
 			if (clearedAnyGroup)
-				smart_lt::notify_list_updated();
+				vflow::notify_list_updated();
 		}
 		cfg->hotkey = seq.toStdString();
 	}
@@ -1144,8 +1144,8 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->css_template = cssEdit->toPlainText().toStdString();
 	cfg->js_template = jsEdit->toPlainText().toStdString();
 
-	if (!pendingProfilePicturePath.isEmpty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!pendingProfilePicturePath.isEmpty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 
 		if (!cfg->profile_picture.empty()) {
@@ -1176,8 +1176,8 @@ void LowerThirdSettingsDialog::saveToState()
 		pendingProfilePicturePath.clear();
 	}
 
-	if (!pendingAnimInSoundPath.isEmpty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!pendingAnimInSoundPath.isEmpty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 
 		if (!cfg->anim_in_sound.empty()) {
@@ -1208,8 +1208,8 @@ void LowerThirdSettingsDialog::saveToState()
 		pendingAnimInSoundPath.clear();
 	}
 
-	if (!pendingAnimOutSoundPath.isEmpty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!pendingAnimOutSoundPath.isEmpty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 
 		if (!cfg->anim_out_sound.empty()) {
@@ -1240,7 +1240,7 @@ void LowerThirdSettingsDialog::saveToState()
 		pendingAnimOutSoundPath.clear();
 	}
 
-	smart_lt::save_state_json();
+	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onSaveAndApply()
@@ -1249,8 +1249,8 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 
 	// Rebuild/swap updates the Browser Source, but the dock UI still needs a
 	// model refresh. Emit a core list-change event so any listeners re-sync.
-	if (smart_lt::rebuild_and_swap()) {
-		smart_lt::notify_list_updated(currentId.toStdString());
+	if (vflow::rebuild_and_swap()) {
+		vflow::notify_list_updated(currentId.toStdString());
 	}
 	close();
 }
@@ -1270,7 +1270,7 @@ void LowerThirdSettingsDialog::onDeleteProfilePicture()
 	if (currentId.isEmpty())
 		return;
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -1286,8 +1286,8 @@ void LowerThirdSettingsDialog::onDeleteProfilePicture()
 	if (btn != QMessageBox::Yes)
 		return;
 
-	if (!cfg->profile_picture.empty() && smart_lt::has_output_dir()) {
-		QDir dir(QString::fromStdString(smart_lt::output_dir()));
+	if (!cfg->profile_picture.empty() && vflow::has_output_dir()) {
+		QDir dir(QString::fromStdString(vflow::output_dir()));
 		const QString oldPath = dir.filePath(QString::fromStdString(cfg->profile_picture));
 		if (QFile::exists(oldPath))
 			QFile::remove(oldPath);
@@ -1297,7 +1297,7 @@ void LowerThirdSettingsDialog::onDeleteProfilePicture()
 	pendingProfilePicturePath.clear();
 	profilePictureEdit->clear();
 
-	smart_lt::save_state_json();
+	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onBrowseAnimInSound()
@@ -1316,12 +1316,12 @@ void LowerThirdSettingsDialog::onDeleteAnimInSound()
 	if (currentId.isEmpty())
 		return;
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
-	if (!cfg->anim_in_sound.empty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!cfg->anim_in_sound.empty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_in_sound));
 		if (QFile::exists(oldPath))
@@ -1332,7 +1332,7 @@ void LowerThirdSettingsDialog::onDeleteAnimInSound()
 	pendingAnimInSoundPath.clear();
 	animInSoundEdit->clear();
 
-	smart_lt::save_state_json();
+	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onBrowseAnimOutSound()
@@ -1352,12 +1352,12 @@ void LowerThirdSettingsDialog::onDeleteAnimOutSound()
 	if (currentId.isEmpty())
 		return;
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
-	if (!cfg->anim_out_sound.empty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!cfg->anim_out_sound.empty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_out_sound));
 		if (QFile::exists(oldPath))
@@ -1368,7 +1368,7 @@ void LowerThirdSettingsDialog::onDeleteAnimOutSound()
 	pendingAnimOutSoundPath.clear();
 	animOutSoundEdit->clear();
 
-	smart_lt::save_state_json();
+	vflow::save_state_json();
 }
 
 
@@ -1483,7 +1483,7 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
     marketList->clear();
     marketIconByUrl.clear();
 
-    auto &api = smart_lt::api::ApiClient::instance();
+    auto &api = vflow::api::ApiClient::instance();
     const auto items = api.lowerThirds();
 
     if (marketStatus) {
@@ -1859,7 +1859,7 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 		return;
 	}
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -1891,14 +1891,14 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 
 	{
 		QString sin, sout;
-		if (smart_lt::has_output_dir() && !cfg->anim_in_sound.empty()) {
-			const QString p = QDir(QString::fromStdString(smart_lt::output_dir()))
+		if (vflow::has_output_dir() && !cfg->anim_in_sound.empty()) {
+			const QString p = QDir(QString::fromStdString(vflow::output_dir()))
 						  .filePath(QString::fromStdString(cfg->anim_in_sound));
 			const QString ext = QFileInfo(p).suffix().toLower();
 			sin = ext.isEmpty() ? "soundIn" : QString("soundIn.%1").arg(ext);
 		}
-		if (smart_lt::has_output_dir() && !cfg->anim_out_sound.empty()) {
-			const QString p = QDir(QString::fromStdString(smart_lt::output_dir()))
+		if (vflow::has_output_dir() && !cfg->anim_out_sound.empty()) {
+			const QString p = QDir(QString::fromStdString(vflow::output_dir()))
 						  .filePath(QString::fromStdString(cfg->anim_out_sound));
 			const QString ext = QFileInfo(p).suffix().toLower();
 			sout = ext.isEmpty() ? "soundOut" : QString("soundOut.%1").arg(ext);
@@ -1930,8 +1930,8 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	ok = ok && zip_write_file(zf, "template.js", js);
 	ok = ok && zip_write_file(zf, "template.json", json);
 
-	if (ok && smart_lt::has_output_dir() && !cfg->profile_picture.empty()) {
-		const QString picPath = QDir(QString::fromStdString(smart_lt::output_dir()))
+	if (ok && vflow::has_output_dir() && !cfg->profile_picture.empty()) {
+		const QString picPath = QDir(QString::fromStdString(vflow::output_dir()))
 						.filePath(QString::fromStdString(cfg->profile_picture));
 		QFile f(picPath);
 		if (f.open(QIODevice::ReadOnly)) {
@@ -1944,8 +1944,8 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 		}
 	}
 
-	if (ok && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (ok && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		QDir dir(outDir);
 
 		auto writeSound = [&](const std::string &fname, const char *zipBase) {
@@ -2114,7 +2114,7 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 		return;
 	}
 
-	auto *cfg = smart_lt::get_by_id(currentId.toStdString());
+	auto *cfg = vflow::get_by_id(currentId.toStdString());
 	if (!cfg)
 		return;
 
@@ -2188,8 +2188,8 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 		}
 	}
 
-	if (!profilePicPath.isEmpty() && smart_lt::has_output_dir()) {
-		const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	if (!profilePicPath.isEmpty() && vflow::has_output_dir()) {
+		const QString outDir = QString::fromStdString(vflow::output_dir());
 		if (!outDir.isEmpty()) {
 			QDir dir(outDir);
 
@@ -2211,8 +2211,8 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 				cfg->profile_picture = newName.toStdString();
 			}
 
-			if (smart_lt::has_output_dir()) {
-				const QString outDir = QString::fromStdString(smart_lt::output_dir());
+			if (vflow::has_output_dir()) {
+				const QString outDir = QString::fromStdString(vflow::output_dir());
 				if (!outDir.isEmpty()) {
 					QDir dir(outDir);
 
@@ -2254,7 +2254,7 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 		}
 	}
 
-	smart_lt::save_state_json();
+	vflow::save_state_json();
 
 	loadFromState();
 
@@ -2262,4 +2262,4 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 				 tr("Template imported successfully. Click 'Save & Apply' to rebuild files."));
 }
 
-} // namespace smart_lt::ui
+} // namespace vflow::ui

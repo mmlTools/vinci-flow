@@ -1,5 +1,5 @@
 ; ------------------------------------------------------------------------
-; Smart Lower Thirds – Windows Installer (NSIS)
+; VinciFlow – Windows Installer (NSIS)
 ; ------------------------------------------------------------------------
 ; Expects these defines from makensis:
 ;   /DPRODUCT_NAME
@@ -97,7 +97,7 @@ SectionEnd
 ; OBS folder selection page
 PageEx directory
   DirText "Select the folder where OBS Studio is installed." \
-          "The Smart Lower Thirds plugin DLL and locale files will be installed into this OBS Studio folder." \
+          "The VinciFlow plugin DLL and locale files will be installed into this OBS Studio folder." \
           "Browse..."
   DirVar $OBSDir
 PageExEnd
@@ -122,7 +122,7 @@ FunctionEnd
 
 VIProductVersion  "${PRODUCT_VERSION}.0"
 VIAddVersionKey   "ProductName"     "${PRODUCT_NAME}"
-VIAddVersionKey   "FileDescription" "Smart Lower Thirds plugin installer"
+VIAddVersionKey   "FileDescription" "VinciFlow plugin installer"
 VIAddVersionKey   "CompanyName"     "MML Tech"
 VIAddVersionKey   "FileVersion"     "${PRODUCT_VERSION}"
 VIAddVersionKey   "LegalCopyright"  "Copyright © MML Tech"
