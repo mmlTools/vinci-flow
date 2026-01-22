@@ -1,15 +1,18 @@
 name: Push
 run-name: ${{ github.ref_name }} push run 🚀
+
 on:
   push:
     branches:
       - master
       - main
-      - 'release/**'
+      - "release/**"
     tags:
-      - '*'
+      - "*"
+
 permissions:
   contents: write
+
 jobs:
   build-project:
     name: Build Project 🧱
@@ -26,6 +29,7 @@ jobs:
     defaults:
       run:
         shell: bash
+
     steps:
       - name: Check Release Tag ☑️
         id: check
@@ -80,6 +84,47 @@ jobs:
               mv "${candidate}" "${root_dir}"
             done
           done
+
+      - name: Create Full Bundle Zip 📦
+        if: fromJSON(steps.check.outputs.validTag)
+        run: |
+          : Create Full Bundle Zip 📦
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          set -euo pipefail
+          shopt -s extglob nullglob
+
+          version="${{ steps.check.outputs.version }}"
+          bundle_dir="plugin-${version}"
+          bundle_zip="plugin-${version}.zip"
+
+          rm -rf "${bundle_dir}" "${bundle_zip}"
+          mkdir -p "${bundle_dir}"
+
+          # Copy all release-ready files that were moved into the workspace root by "Rename Files"
+          files=( @(*.exe|*.zip|*.pkg|*.deb|*.ddeb|*.tar.xz) )
+
+          if (( ${#files[@]} == 0 )); then
+            echo "No release files found to bundle."
+            exit 1
+          fi
+
+          cp -f "${files[@]}" "${bundle_dir}/"
+
+          # Optional manifest
+          {
+            echo "Plugin: ${{ needs.build-project.outputs.pluginName }}"
+            echo "Version: ${version}"
+            echo "Commit: ${GITHUB_SHA}"
+            echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo
+            echo "Included files:"
+            for f in "${files[@]}"; do
+              echo " - ${f}"
+            done
+          } > "${bundle_dir}/BUNDLE_INFO.txt"
+
+          # Create the bundle zip
+          zip -r "${bundle_zip}" "${bundle_dir}"
 
       - name: Generate Checksums 🪪
         if: fromJSON(steps.check.outputs.validTag)
