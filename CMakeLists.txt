@@ -6,7 +6,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 # Project metadata
 # ---------------------------------------------------------------------------
 if(NOT DEFINED _name)
-  set(_name "smart-lower-thirds")
+  set(_name "vinci-flow")
 endif()
 
 if(NOT DEFINED _version)
@@ -23,11 +23,11 @@ option(ENABLE_QT           "Use Qt for dock UI and dialogs"                     
 
 # This plugin *requires* Qt and frontend API; don't allow disabling them.
 if(NOT ENABLE_QT)
-  message(FATAL_ERROR "ENABLE_QT=OFF is not supported for smart-lower-thirds; Qt is required.")
+  message(FATAL_ERROR "ENABLE_QT=OFF is not supported for vinci-flow; Qt is required.")
 endif()
 
 if(NOT ENABLE_FRONTEND_API)
-  message(FATAL_ERROR "ENABLE_FRONTEND_API=OFF is not supported for smart-lower-thirds; obs-frontend-api is required.")
+  message(FATAL_ERROR "ENABLE_FRONTEND_API=OFF is not supported for vinci-flow; obs-frontend-api is required.")
 endif()
 
 include(compilerconfig)

@@ -16,7 +16,7 @@
 namespace smart_lt::ws {
 
 static obs_websocket_vendor g_vendor = nullptr;
-static const char *kVendorName = "smart-lower-thirds";
+static const char *kVendorName = "vinci-flow";
 static uint64_t g_core_listener_token = 0;
 
 // -------------------------

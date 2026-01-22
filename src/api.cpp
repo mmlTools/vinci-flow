@@ -1,4 +1,4 @@
-#define LOG_TAG "[smart-lower-thirds][api]"
+#define LOG_TAG "[vinci-flow][api]"
 
 #include "headers/api.hpp"
 
@@ -85,7 +85,7 @@ static HttpResult winhttp_get(const QUrl &url, const wchar_t *extraHeaders, DWOR
     }
 
     HINTERNET hSession = WinHttpOpen(
-        L"obs-plugin/smart-lower-thirds",
+        L"obs-plugin/vinci-flow",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,

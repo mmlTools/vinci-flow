@@ -20,7 +20,7 @@ Unicode true
 ; ------------------------------------------------------------------------
 
 !ifndef PRODUCT_NAME
-  !define PRODUCT_NAME "smart-lower-thirds"
+  !define PRODUCT_NAME "vinci-flow"
 !endif
 
 !ifndef PRODUCT_VERSION
@@ -40,20 +40,20 @@ Unicode true
 !endif
 
 !ifndef OUTPUT_EXE
-  !define OUTPUT_EXE "smart-lower-thirds-setup.exe"
+  !define OUTPUT_EXE "vinci-flow-setup.exe"
 !endif
 
 ; Where CMake installed the plugin:
-;   ${PROJECT_ROOT}\release\<CONFIGURATION>\smart-lower-thirds\...
+;   ${PROJECT_ROOT}\release\<CONFIGURATION>\vinci-flow\...
 !define BUILD_ROOT "${PROJECT_ROOT}\release\${CONFIGURATION}\${PRODUCT_NAME}"
 
 ; Installer icon
 !ifndef INSTALLER_ICON
-  !define INSTALLER_ICON "${PROJECT_ROOT}\installer\resources\smart-lower-thirds.ico"
+  !define INSTALLER_ICON "${PROJECT_ROOT}\installer\resources\vinci-flow.ico"
 !endif
 
 ; Optional custom welcome/finish bitmap
-!define MUI_WELCOMEFINISHPAGE_BITMAP "${PROJECT_ROOT}\installer\resources\smart-lower-thirds-welcome.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${PROJECT_ROOT}\installer\resources\vinci-flow-welcome.bmp"
 
 ; ------------------------------------------------------------------------
 ; Basic installer metadata
@@ -75,10 +75,10 @@ Section "Core OBS Plugin" SEC_CORE
 
   ; --- Plugin DLL ---
   SetOutPath "$OBSDir\obs-plugins\64bit"
-  File "/oname=smart-lower-thirds.dll" "${BUILD_ROOT}\bin\64bit\smart-lower-thirds.dll"
+  File "/oname=vinci-flow.dll" "${BUILD_ROOT}\bin\64bit\vinci-flow.dll"
 
   ; --- Locale files (future-proof) ---
-  SetOutPath "$OBSDir\data\obs-plugins\smart-lower-thirds\locale"
+  SetOutPath "$OBSDir\data\obs-plugins\vinci-flow\locale"
   File /nonfatal /r "${BUILD_ROOT}\data\locale\*.*"
 SectionEnd
 

@@ -377,7 +377,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
 			QDesktopServices::openUrl(
-				QUrl(QStringLiteral("https://obscountdown.com/r/smart-lower-thirds")));
+				QUrl(QStringLiteral("https://obscountdown.com/r/vinci-flow")));
 		});
 
 		rootLayout->addWidget(updateFrame_);
