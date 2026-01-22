@@ -250,7 +250,7 @@ static int retry_delay_ms(int attempt)
 
 } // namespace
 
-namespace smart_lt::api {
+namespace vflow::api {
 
 namespace {
 
@@ -682,4 +682,4 @@ void ApiClient::resetRetry()
     m_retryScheduled = false;
 }
 
-} // namespace smart_lt::api
+} // namespace vflow::api

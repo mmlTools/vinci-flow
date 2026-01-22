@@ -1,4 +1,4 @@
-# VinciFlow – Smart Lower Thirds Orchestration for OBS Studio
+# VinciFlow – Lower Thirds Orchestration for OBS Studio
 
 ![Version](https://img.shields.io/github/v/release/mmltools/vinci-flow)
 ![OBS](https://img.shields.io/badge/OBS-Studio%2029%2B-informational)

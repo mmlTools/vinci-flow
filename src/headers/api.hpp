@@ -9,7 +9,7 @@
 #include <QSet>
 #include <QPixmap>
 
-namespace smart_lt::api {
+namespace vflow::api {
 
 struct ResourceItem {
     QString guid;
@@ -95,4 +95,4 @@ private:
     QSet<QString> m_imgInFlight;
 };
 
-} // namespace smart_lt::api
+} // namespace vflow::api

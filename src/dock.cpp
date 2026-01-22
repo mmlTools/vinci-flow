@@ -99,7 +99,7 @@ static void stopGroupRun(const QString &groupId)
 	// Best-effort hide currently shown item
 	if (!it->currentId.isEmpty()) {
 		g_groupHideAtMs.remove(it->currentId);
-		smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+		vflow::set_visible_persist(it->currentId.toStdString(), false);
 	}
 
 	it->running = false;
@@ -110,14 +110,14 @@ static void stopGroupRun(const QString &groupId)
 	it->seq.clear();
 }
 
-static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString &groupId);
+static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId);
 
-static void startGroupRun(smart_lt::ui::LowerThirdDock *dock, const QString &groupId)
+static void startGroupRun(vflow::ui::LowerThirdDock *dock, const QString &groupId)
 {
 	if (!dock)
 		return;
 
-	auto *car = smart_lt::get_group_by_id(groupId.toStdString());
+	auto *car = vflow::get_group_by_id(groupId.toStdString());
 	if (!car || car->members.empty())
 		return;
 
@@ -132,7 +132,7 @@ static void startGroupRun(smart_lt::ui::LowerThirdDock *dock, const QString &gro
 	scheduleGroupStep(dock, groupId);
 }
 
-static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString &groupId)
+static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId)
 {
 	if (!dock)
 		return;
@@ -141,7 +141,7 @@ static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString 
 	if (it == g_groupRuns.end() || !it->running)
 		return;
 
-	auto *car = smart_lt::get_group_by_id(groupId.toStdString());
+	auto *car = vflow::get_group_by_id(groupId.toStdString());
 	if (!car || car->members.empty()) {
 		stopGroupRun(groupId);
 		return;
@@ -172,7 +172,7 @@ static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString 
 		// hide previous
 		if (!it->currentId.isEmpty()) {
 			g_groupHideAtMs.remove(it->currentId);
-			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+			vflow::set_visible_persist(it->currentId.toStdString(), false);
 		}
 
 		// End condition (non-loop): stop before showing beyond last
@@ -199,7 +199,7 @@ static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString 
 		it->hideAtMs = QDateTime::currentMSecsSinceEpoch() + (qint64)visibleMs;
 		g_groupHideAtMs[nextId] = it->hideAtMs;
 
-		smart_lt::set_visible_persist(nextId.toStdString(), true);
+		vflow::set_visible_persist(nextId.toStdString(), true);
 
 		it->phaseShow = false;
 		QTimer::singleShot(visibleMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
@@ -207,7 +207,7 @@ static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString 
 		// hide current and advance index
 		if (!it->currentId.isEmpty()) {
 			g_groupHideAtMs.remove(it->currentId);
-			smart_lt::set_visible_persist(it->currentId.toStdString(), false);
+			vflow::set_visible_persist(it->currentId.toStdString(), false);
 		}
 
 		it->currentId.clear();
@@ -227,12 +227,12 @@ static void scheduleGroupStep(smart_lt::ui::LowerThirdDock *dock, const QString 
 
 
 
-namespace smart_lt::ui {
+namespace vflow::ui {
 
 // -------------------------
 // NEW: Core event bus hookup
 // -------------------------
-void LowerThirdDock::coreEventThunk(const smart_lt::core_event &ev, void *user)
+void LowerThirdDock::coreEventThunk(const vflow::core_event &ev, void *user)
 {
 	auto *self = static_cast<LowerThirdDock *>(user);
 	if (!self)
@@ -246,15 +246,15 @@ LowerThirdDock::~LowerThirdDock()
 {
 	disconnectObsSignals();
 	if (coreListenerToken_) {
-		smart_lt::remove_event_listener(coreListenerToken_);
+		vflow::remove_event_listener(coreListenerToken_);
 		coreListenerToken_ = 0;
 	}
 }
 
-void LowerThirdDock::onCoreEvent(const smart_lt::core_event &ev)
+void LowerThirdDock::onCoreEvent(const vflow::core_event &ev)
 {
 	switch (ev.type) {
-	case smart_lt::event_type::VisibilityChanged: {
+	case vflow::event_type::VisibilityChanged: {
 		const QString qid = QString::fromStdString(ev.id);
 		const bool active = ev.visible;
 
@@ -282,8 +282,8 @@ void LowerThirdDock::onCoreEvent(const smart_lt::core_event &ev)
 		break;
 	}
 
-	case smart_lt::event_type::ListChanged:
-	case smart_lt::event_type::Reloaded: {
+	case vflow::event_type::ListChanged:
+	case vflow::event_type::Reloaded: {
 		rebuildList();
 		updateRowCountdowns();
 		break;
@@ -363,7 +363,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		ico->setPixmap(st->standardIcon(QStyle::SP_ArrowUp).pixmap(16, 16));
 		row->addWidget(ico);
 
-		updateLabel_ = new QLabel(tr("New Smart Lower Thirds update available."), updateFrame_);
+		updateLabel_ = new QLabel(tr("New VinciFlow update available."), updateFrame_);
 		updateLabel_->setObjectName(QStringLiteral("sltUpdateBannerLabel"));
 		updateLabel_->setWordWrap(true);
 		row->addWidget(updateLabel_, 1);
@@ -372,7 +372,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		updateBtn_->setObjectName(QStringLiteral("sltUpdateBannerBtn"));
 		updateBtn_->setCursor(Qt::PointingHandCursor);
 		updateBtn_->setIcon(st->standardIcon(QStyle::SP_DialogSaveButton));
-		updateBtn_->setToolTip(tr("Open the Smart Lower Thirds download page"));
+		updateBtn_->setToolTip(tr("Open the VinciFlow download page"));
 		row->addWidget(updateBtn_);
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
@@ -451,7 +451,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		browserSourceCombo = new QComboBox(right);
 		browserSourceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		browserSourceCombo->setToolTip(
-			tr("Select an existing OBS Browser Source that will display and control Smart Lower Thirds"));
+			tr("Select an existing OBS Browser Source that will display and control VinciFlow"));
 
 		refreshSourcesBtn = new QPushButton(right);
 		refreshSourcesBtn->setCursor(Qt::PointingHandCursor);
@@ -601,7 +601,7 @@ manageGroupsBtn_->setIcon(carIco);
 	// Footer
 	rootLayout->addWidget(create_widget_carousel(this));
 
-	const bool hasDir = smart_lt::has_output_dir();
+	const bool hasDir = vflow::has_output_dir();
 	addBtn->setEnabled(hasDir);
 	if (browserSourceCombo)
 		browserSourceCombo->setEnabled(true);
@@ -611,16 +611,16 @@ manageGroupsBtn_->setIcon(carIco);
 
 bool LowerThirdDock::init()
 {
-	if (smart_lt::has_output_dir())
-		outputPathEdit->setText(QString::fromStdString(smart_lt::output_dir()));
+	if (vflow::has_output_dir())
+		outputPathEdit->setText(QString::fromStdString(vflow::output_dir()));
 	else
 		outputPathEdit->clear();
 
-	const bool hasDir = smart_lt::has_output_dir();
+	const bool hasDir = vflow::has_output_dir();
 	addBtn->setEnabled(hasDir);
 
 	if (hasDir)
-		smart_lt::ensure_output_artifacts_exist();
+		vflow::ensure_output_artifacts_exist();
 
 	// Populate browser sources from OBS + restore selection from core config
 	populateBrowserSources(true);
@@ -628,12 +628,12 @@ bool LowerThirdDock::init()
 	// Restore browser size + exclusive mode from persisted core config
 	if (browserWidthSpin) {
 		browserWidthSpin->blockSignals(true);
-		browserWidthSpin->setValue(smart_lt::target_browser_width());
+		browserWidthSpin->setValue(vflow::target_browser_width());
 		browserWidthSpin->blockSignals(false);
 	}
 	if (browserHeightSpin) {
 		browserHeightSpin->blockSignals(true);
-		browserHeightSpin->setValue(smart_lt::target_browser_height());
+		browserHeightSpin->setValue(vflow::target_browser_height());
 		browserHeightSpin->blockSignals(false);
 	}
 
@@ -641,7 +641,7 @@ bool LowerThirdDock::init()
 
 	// Subscribe to core events so dock stays in sync with WS + external edits
 	if (!coreListenerToken_) {
-		coreListenerToken_ = smart_lt::add_event_listener(&LowerThirdDock::coreEventThunk, this);
+		coreListenerToken_ = vflow::add_event_listener(&LowerThirdDock::coreEventThunk, this);
 	}
 
 	ensureRepeatTimerStarted();
@@ -661,14 +661,14 @@ void LowerThirdDock::populateBrowserSources(bool keepSelection)
 	browserSourceCombo->blockSignals(true);
 
 	const QString previous = keepSelection ? browserSourceCombo->currentData().toString() : QString();
-	const QString saved = QString::fromStdString(smart_lt::target_browser_source_name());
+	const QString saved = QString::fromStdString(vflow::target_browser_source_name());
 
 	browserSourceCombo->clear();
 
 	// Placeholder / None
 	browserSourceCombo->addItem(tr("— Select a Browser Source —"), QVariant(QString()));
 
-	const auto names = smart_lt::list_browser_source_names();
+	const auto names = vflow::list_browser_source_names();
 	for (const auto &n : names) {
 		const QString qn = QString::fromStdString(n);
 		browserSourceCombo->addItem(qn, QVariant(qn));
@@ -709,12 +709,12 @@ void LowerThirdDock::onBrowserSourceChanged(int index)
 	const QString name = browserSourceCombo->itemData(index).toString();
 
 	// Persist selection (empty = none)
-	smart_lt::set_target_browser_source_name(name.toStdString());
+	vflow::set_target_browser_source_name(name.toStdString());
 
 	// If user selected something real and we have an output dir,
 	// rebuild/swap once so it immediately points to the latest generated HTML.
-	if (!name.isEmpty() && smart_lt::has_output_dir()) {
-		smart_lt::rebuild_and_swap();
+	if (!name.isEmpty() && vflow::has_output_dir()) {
+		vflow::rebuild_and_swap();
 	}
 
 	emit requestSave();
@@ -729,7 +729,7 @@ void LowerThirdDock::onBrowserSizeChanged()
 	const int h = browserHeightSpin->value();
 
 	// Persist + apply to selected source if exists
-	smart_lt::set_target_browser_dimensions(w, h);
+	vflow::set_target_browser_dimensions(w, h);
 
 	emit requestSave();
 }
@@ -753,12 +753,12 @@ void LowerThirdDock::ensureRepeatTimerStarted()
 
 void LowerThirdDock::repeatTick()
 {
-	if (!smart_lt::has_output_dir())
+	if (!vflow::has_output_dir())
 		return;
 
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-	const auto &items = smart_lt::all();
+	const auto &items = vflow::all();
 	{
 		QSet<QString> alive;
 		alive.reserve((int)items.size());
@@ -786,7 +786,7 @@ void LowerThirdDock::repeatTick()
 		// repeat/auto-hide scheduler interfere. Group run timing (visible_ms / interval_ms)
 		// must be authoritative, otherwise items may be hidden early (e.g. 3s default).
 		{
-			const auto owners = smart_lt::groups_containing(c.id);
+			const auto owners = vflow::groups_containing(c.id);
 			bool inRunningGroup = false;
 			for (const auto &gid : owners) {
 				const QString qgid = QString::fromStdString(gid);
@@ -818,7 +818,7 @@ void LowerThirdDock::repeatTick()
 				continue;
 			}
 
-			if (smart_lt::is_visible(c.id)) {
+			if (vflow::is_visible(c.id)) {
 				if (!offAtMs_.contains(qid))
 					offAtMs_[qid] = now + (qint64)visibleSec * 1000;
 			} else {
@@ -835,8 +835,8 @@ void LowerThirdDock::repeatTick()
 
 		if (offAtMs_.contains(qid) && now >= offAtMs_[qid]) {
 			offAtMs_.remove(qid);
-			if (smart_lt::is_visible(c.id)) {
-				smart_lt::set_visible_persist(c.id, false);
+			if (vflow::is_visible(c.id)) {
+				vflow::set_visible_persist(c.id, false);
 				emit requestSave();
 			}
 		}
@@ -849,8 +849,8 @@ void LowerThirdDock::repeatTick()
 				next += step;
 			nextOnMs_[qid] = next;
 
-			if (!smart_lt::is_visible(c.id)) {
-				smart_lt::set_visible_persist(c.id, true);
+			if (!vflow::is_visible(c.id)) {
+				vflow::set_visible_persist(c.id, true);
 				offAtMs_[qid] = now + (qint64)visibleSec * 1000;
 				emit requestSave();
 			}
@@ -869,14 +869,14 @@ void LowerThirdDock::onBrowseOutputFolder()
 	if (dir.isEmpty())
 		return;
 
-	smart_lt::set_output_dir_and_load(dir.toStdString());
+	vflow::set_output_dir_and_load(dir.toStdString());
 
 	nextOnMs_.clear();
 	offAtMs_.clear();
 
 	outputPathEdit->setText(dir);
 
-	const bool hasDir = smart_lt::has_output_dir();
+	const bool hasDir = vflow::has_output_dir();
 	addBtn->setEnabled(hasDir);
 
 	populateBrowserSources(true);
@@ -889,10 +889,10 @@ void LowerThirdDock::onBrowseOutputFolder()
 
 void LowerThirdDock::onAddLowerThird()
 {
-	if (!smart_lt::has_output_dir())
+	if (!vflow::has_output_dir())
 		return;
 
-	smart_lt::add_default_lower_third();
+	vflow::add_default_lower_third();
 
 	updateRowCountdowns();
 	emit requestSave();
@@ -900,7 +900,7 @@ void LowerThirdDock::onAddLowerThird()
 
 void LowerThirdDock::onManageGroups()
 {
-	if (!smart_lt::has_output_dir()) {
+	if (!vflow::has_output_dir()) {
 		QMessageBox::information(this, tr("Output folder not set"),
 					 tr("Please choose an output folder first."));
 		return;
@@ -1010,7 +1010,7 @@ void LowerThirdDock::onManageGroups()
 	// Helpers
 	auto refreshList = [&]() {
 		carList->clear();
-		for (const auto &c : smart_lt::groups_const()) {
+		for (const auto &c : vflow::groups_const()) {
 			auto *it = new QListWidgetItem(QString::fromStdString(c.title.empty() ? c.id : c.title));
 			it->setData(Qt::UserRole, QString::fromStdString(c.id));
 			carList->addItem(it);
@@ -1020,7 +1020,7 @@ void LowerThirdDock::onManageGroups()
 	auto refreshMembers = [&](const std::string &groupId) {
 		members->clear();
 		QSet<QString> inSet;
-		if (auto *car = smart_lt::get_group_by_id(groupId)) {
+		if (auto *car = vflow::get_group_by_id(groupId)) {
 			for (const auto &m : car->members)
 				inSet.insert(QString::fromStdString(m));
 		}
@@ -1029,8 +1029,8 @@ void LowerThirdDock::onManageGroups()
 		// Do not show lower thirds that are already assigned to a different group.
 		const QString qCurCarId = QString::fromStdString(groupId);
 
-		for (const auto &lt : smart_lt::all_const()) {
-			const auto owners = smart_lt::groups_containing(lt.id);
+		for (const auto &lt : vflow::all_const()) {
+			const auto owners = vflow::groups_containing(lt.id);
 			if (!owners.empty() && owners.front() != groupId)
 				continue;
 
@@ -1057,7 +1057,7 @@ void LowerThirdDock::onManageGroups()
 			running = rt->running;
 
 		bool hasMembers = false;
-		if (auto *car = smart_lt::get_group_by_id(qid.toStdString()))
+		if (auto *car = vflow::get_group_by_id(qid.toStdString()))
 			hasMembers = !car->members.empty();
 
 		btnStart->setEnabled(!running && hasMembers);
@@ -1081,7 +1081,7 @@ void LowerThirdDock::onManageGroups()
 			return;
 		}
 
-		if (auto *car = smart_lt::get_group_by_id(qid.toStdString())) {
+		if (auto *car = vflow::get_group_by_id(qid.toStdString())) {
 			titleEd->setText(QString::fromStdString(car->title));
 			orderCmb->setCurrentIndex(car->order_mode == 1 ? 1 : 0);
 				loopChk->setChecked(car->loop);
@@ -1118,7 +1118,7 @@ void LowerThirdDock::onManageGroups()
 	});
 
 	QObject::connect(btnAdd, &QPushButton::clicked, &dlg, [&]() {
-		const std::string id = smart_lt::add_default_group();
+		const std::string id = vflow::add_default_group();
 		refreshList();
 		for (int i = 0; i < carList->count(); ++i) {
 			auto *it = carList->item(i);
@@ -1144,7 +1144,7 @@ void LowerThirdDock::onManageGroups()
 			return;
 
 		stopGroupRun(qid);
-		smart_lt::remove_group(qid.toStdString());
+		vflow::remove_group(qid.toStdString());
 		refreshList();
 		if (carList->count() > 0)
 			carList->setCurrentRow(0);
@@ -1181,7 +1181,7 @@ void LowerThirdDock::onManageGroups()
 		if (qid.isEmpty())
 			return;
 
-		auto *car = smart_lt::get_group_by_id(qid.toStdString());
+		auto *car = vflow::get_group_by_id(qid.toStdString());
 		if (!car)
 			return;
 
@@ -1202,17 +1202,17 @@ void LowerThirdDock::onManageGroups()
 		const QString seq = normalize(toggleHkEdit->keySequence().toString(QKeySequence::PortableText));
 		if (!seq.isEmpty()) {
 			// If this hotkey is already used by another lower third or group, clear the previous usage.
-			for (auto &it : smart_lt::all()) {
+			for (auto &it : vflow::all()) {
 				if (it.id == upd.id)
 					continue;
 				const QString other = normalize(QString::fromStdString(it.hotkey));
 				if (!other.isEmpty() && other == seq) {
 					it.hotkey.clear();
-					smart_lt::notify_list_updated(it.id);
+					vflow::notify_list_updated(it.id);
 				}
 			}
 			bool clearedAnyGroup = false;
-			for (auto &g : smart_lt::groups()) {
+			for (auto &g : vflow::groups()) {
 				if (g.id == upd.id)
 					continue;
 				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
@@ -1222,11 +1222,11 @@ void LowerThirdDock::onManageGroups()
 				}
 			}
 			if (clearedAnyGroup)
-				smart_lt::notify_list_updated();
+				vflow::notify_list_updated();
 		}
 		upd.toggle_hotkey = seq.toStdString();
 
-		smart_lt::update_group(upd);
+		vflow::update_group(upd);
 
 		std::vector<std::string> mem;
 		for (int i = 0; i < members->count(); ++i) {
@@ -1236,7 +1236,7 @@ void LowerThirdDock::onManageGroups()
 			if (mit->checkState() == Qt::Checked)
 				mem.push_back(mit->data(Qt::UserRole).toString().toStdString());
 		}
-		smart_lt::set_group_members(qid.toStdString(), mem);
+		vflow::set_group_members(qid.toStdString(), mem);
 
 		// Refresh member list: items may become unavailable/available for other groups after this change.
 		refreshMembers(qid.toStdString());
@@ -1266,8 +1266,8 @@ void LowerThirdDock::rebuildList()
 	}
 	rows.clear();
 
-	const auto &items = smart_lt::all();
-	const QString outDir = QString::fromStdString(smart_lt::output_dir());
+	const auto &items = vflow::all();
+	const QString outDir = QString::fromStdString(vflow::output_dir());
 
 	for (const auto &cfg : items) {
 		LowerThirdRowUi ui;
@@ -1275,15 +1275,15 @@ void LowerThirdDock::rebuildList()
 
 		auto *rowFrame = new QFrame(listContainer);
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
-		rowFrame->setProperty("sltActive", QVariant(smart_lt::is_visible(cfg.id)));
+		rowFrame->setProperty("sltActive", QVariant(vflow::is_visible(cfg.id)));
 
 // Mark group membership (dock-only; does not affect overlay output)
-const auto carIds = smart_lt::groups_containing(cfg.id);
+const auto carIds = vflow::groups_containing(cfg.id);
 if (!carIds.empty()) {
 	rowFrame->setProperty("sltInGroup", QVariant(true));
 
 	std::string col = "#2EA043";
-	if (auto *car = smart_lt::get_group_by_id(carIds.front())) {
+	if (auto *car = vflow::get_group_by_id(carIds.front())) {
 		if (!car->dock_color.empty())
 			col = car->dock_color;
 	}
@@ -1301,7 +1301,7 @@ if (!carIds.empty()) {
 		h->setSpacing(6);
 
 		auto *visible = new QCheckBox(rowFrame);
-		visible->setChecked(smart_lt::is_visible(cfg.id));
+		visible->setChecked(vflow::is_visible(cfg.id));
 		visible->setFocusPolicy(Qt::NoFocus);
 		visible->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 		visible->setStyleSheet("QCheckBox::indicator { width: 0px; height: 0px; margin: 0; padding: 0; }");
@@ -1427,11 +1427,11 @@ if (!carIds.empty()) {
 
 		connect(cloneBtn, &QPushButton::clicked, this, [this, id]() { handleClone(id); });
 		connect(upBtn, &QPushButton::clicked, this, [this, id]() {
-			smart_lt::move_lower_third(id.toStdString(), -1);
+			vflow::move_lower_third(id.toStdString(), -1);
 			emit requestSave();
 		});
 		connect(downBtn, &QPushButton::clicked, this, [this, id]() {
-			smart_lt::move_lower_third(id.toStdString(), +1);
+			vflow::move_lower_third(id.toStdString(), +1);
 			emit requestSave();
 		});
 		connect(settingsBtn, &QPushButton::clicked, this, [this, id]() { handleOpenSettings(id); });
@@ -1448,7 +1448,7 @@ if (!carIds.empty()) {
 void LowerThirdDock::updateRowActiveStyles()
 {
 	for (auto &row : rows) {
-		const bool active = smart_lt::is_visible(row.id.toStdString());
+		const bool active = vflow::is_visible(row.id.toStdString());
 
 		if (row.row) {
 			row.row->setProperty("sltActive", QVariant(active));
@@ -1496,7 +1496,7 @@ void LowerThirdDock::rebuildShortcuts()
 {
 	clearShortcuts();
 
-	const auto &items = smart_lt::all();
+	const auto &items = vflow::all();
 	for (const auto &cfg : items) {
 		if (cfg.hotkey.empty())
 			continue;
@@ -1518,7 +1518,7 @@ void LowerThirdDock::rebuildShortcuts()
 	}
 
 	// Group toggle hotkeys
-	for (const auto &g : smart_lt::groups_const()) {
+	for (const auto &g : vflow::groups_const()) {
 		const QString groupId = QString::fromStdString(g.id);
 		const QString seqStr = QString::fromStdString(g.toggle_hotkey).trimmed();
 		if (seqStr.isEmpty())
@@ -1549,7 +1549,7 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 
 	// Manual override: if this lower third is part of a running group, stop the group-run.
 	// This prevents the scheduler from fighting the user's manual toggle.
-	for (const auto &g : smart_lt::groups_const()) {
+	for (const auto &g : vflow::groups_const()) {
 		bool isMember = false;
 		for (const auto &m : g.members) {
 			if (m == sid) {
@@ -1566,17 +1566,17 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 			stopGroupRun(groupId);
 		}
 	}
-	const bool wasVisible = smart_lt::is_visible(sid);
-	const bool ok = smart_lt::toggle_visible_persist(sid);
+	const bool wasVisible = vflow::is_visible(sid);
+	const bool ok = vflow::toggle_visible_persist(sid);
 
 	if (!ok)
 		return;
 
-	const bool nowVisible = smart_lt::is_visible(sid);
+	const bool nowVisible = vflow::is_visible(sid);
 
 
 	if (!wasVisible && nowVisible) {
-		if (auto *cfg = smart_lt::get_by_id(sid)) {
+		if (auto *cfg = vflow::get_by_id(sid)) {
 			const int every = cfg->repeat_every_sec;
 			int visibleSec = cfg->repeat_visible_sec;
 
@@ -1607,16 +1607,16 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 
 void LowerThirdDock::handleClone(const QString &id)
 {
-	if (!smart_lt::has_output_dir())
+	if (!vflow::has_output_dir())
 		return;
 
-	smart_lt::clone_lower_third(id.toStdString());
+	vflow::clone_lower_third(id.toStdString());
 	emit requestSave();
 }
 
 void LowerThirdDock::handleOpenSettings(const QString &id)
 {
-	auto *dlg = new smart_lt::ui::LowerThirdSettingsDialog(this);
+	auto *dlg = new vflow::ui::LowerThirdSettingsDialog(this);
 	dlg->setAttribute(Qt::WA_DeleteOnClose, true);
 	dlg->setLowerThirdId(id);
 	dlg->setWindowModality(Qt::NonModal);
@@ -1629,11 +1629,11 @@ void LowerThirdDock::handleOpenSettings(const QString &id)
 
 void LowerThirdDock::handleRemove(const QString &id)
 {
-	if (!smart_lt::has_output_dir())
+	if (!vflow::has_output_dir())
 		return;
 
 const std::string sid = id.toStdString();
-const auto cars = smart_lt::groups_containing(sid);
+const auto cars = vflow::groups_containing(sid);
 
 QString msg = tr("Remove this lower third?\n\nThis action cannot be undone.");
 if (!cars.empty()) {
@@ -1646,7 +1646,7 @@ const auto res = QMessageBox::question(this, tr("Confirm Removal"), msg,
 if (res != QMessageBox::Yes)
 	return;
 
-	smart_lt::remove_lower_third(id.toStdString());
+	vflow::remove_lower_third(id.toStdString());
 
 	nextOnMs_.remove(id);
 	offAtMs_.remove(id);
@@ -1669,7 +1669,7 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 	if (!rowUi.subLbl)
 		return;
 
-	const auto *cfg = smart_lt::get_by_id(rowUi.id.toStdString());
+	const auto *cfg = vflow::get_by_id(rowUi.id.toStdString());
 	if (!cfg) {
 		rowUi.subLbl->clear();
 		rowUi.subLbl->setVisible(false);
@@ -1681,7 +1681,7 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 
 	// Group-run countdown (takes precedence): if this lower third is currently being shown as part of
 	// an active group run, show time remaining until the group hides it.
-	if (g_groupHideAtMs.contains(qid) && smart_lt::is_visible(cfg->id)) {
+	if (g_groupHideAtMs.contains(qid) && vflow::is_visible(cfg->id)) {
 		rowUi.subLbl->setVisible(true);
 		const qint64 leftHide = g_groupHideAtMs.value(qid) - now;
 		rowUi.subLbl->setText(QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
@@ -1702,7 +1702,7 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 			return;
 		}
 
-		const bool isVis = smart_lt::is_visible(cfg->id);
+		const bool isVis = vflow::is_visible(cfg->id);
 		if (!isVis) {
 			rowUi.subLbl->clear();
 			rowUi.subLbl->setVisible(false);
@@ -1726,7 +1726,7 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 		nextOnMs_[qid] = now + (qint64)every * 1000;
 	}
 
-	const bool isVis = smart_lt::is_visible(cfg->id);
+	const bool isVis = vflow::is_visible(cfg->id);
 
 	QStringList parts;
 
@@ -1827,14 +1827,14 @@ void LowerThirdDock::setUpdateAvailable(const QString &remoteVersion, const QStr
 	}
 }
 
-} // namespace smart_lt::ui
+} // namespace vflow::ui
 
 void LowerThird_create_dock()
 {
 	if (g_dockWidget)
 		return;
 
-	auto *panel = new smart_lt::ui::LowerThirdDock(nullptr);
+	auto *panel = new vflow::ui::LowerThirdDock(nullptr);
 	panel->init();
 
 #if defined(HAVE_OBS_DOCK_BY_ID)
@@ -1862,7 +1862,7 @@ void LowerThird_destroy_dock()
 	LOGI("Dock destroyed");
 }
 
-smart_lt::ui::LowerThirdDock *LowerThird_get_dock()
+vflow::ui::LowerThirdDock *LowerThird_get_dock()
 {
-	return qobject_cast<smart_lt::ui::LowerThirdDock *>(g_dockWidget);
+	return qobject_cast<vflow::ui::LowerThirdDock *>(g_dockWidget);
 }

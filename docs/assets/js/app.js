@@ -23,7 +23,7 @@
     });
 
     mainTitle.textContent = route.title;
-    mainSubtitle.textContent = "Documentation for vinci-flow (Smart Lower Thirds)";
+    mainSubtitle.textContent = "Documentation for vinci-flow (VinciFlow)";
 
     // Pills per page
     const pillMap = {

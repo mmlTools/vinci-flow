@@ -25,14 +25,14 @@
 #endif
 
 inline constexpr const char *sltBrowserSourceId = "browser_source";
-inline constexpr const char *sltBrowserSourceName = "Smart Lower Thirds";
+inline constexpr const char *sltBrowserSourceName = "VinciFlow Source";
 inline constexpr int sltBrowserWidth = 1920;
 inline constexpr int sltBrowserHeight = 1080;
 
-inline constexpr const char *sltDockId = "smart_lt_dock";
-inline constexpr const char *sltDockTitle = "Smart Lower Thirds";
+inline constexpr const char *sltDockId = "vflow_dock";
+inline constexpr const char *sltDockTitle = "VinciFlow Controller";
 
-namespace smart_lt {
+namespace vflow {
 
 struct lower_third_cfg {
 	std::string id;
@@ -264,4 +264,4 @@ bool remove_lower_third(const std::string &id);
 // Reorder helpers (persist + notify). delta: -1 (up), +1 (down)
 bool move_lower_third(const std::string &id, int delta);
 
-} // namespace smart_lt
+} // namespace vflow

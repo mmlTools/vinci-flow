@@ -28,11 +28,11 @@ class QTimer;
 class QComboBox;
 class QSpinBox;
 
-namespace smart_lt {
+namespace vflow {
 struct core_event; // provided by core (event bus)
 }
 
-namespace smart_lt::ui {
+namespace vflow::ui {
 
 struct LowerThirdRowUi {
 	QString id;
@@ -101,8 +101,8 @@ private:
 	void onBrowserSizeChanged();
 
 	// NEW: core event bus sync (bidirectional with websocket)
-	void onCoreEvent(const smart_lt::core_event &ev);
-	static void coreEventThunk(const smart_lt::core_event &ev, void *user);
+	void onCoreEvent(const vflow::core_event &ev);
+	static void coreEventThunk(const vflow::core_event &ev, void *user);
 
 	static void onObsSourceEvent(void *data, calldata_t *cd);
 	void connectObsSignals();
@@ -152,9 +152,9 @@ private:
 	uint64_t coreListenerToken_ = 0;
 };
 
-} // namespace smart_lt::ui
+} // namespace vflow::ui
 
 void LowerThird_create_dock();
 void LowerThird_destroy_dock();
 
-smart_lt::ui::LowerThirdDock *LowerThird_get_dock();
+vflow::ui::LowerThirdDock *LowerThird_get_dock();
