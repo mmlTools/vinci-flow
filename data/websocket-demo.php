@@ -1,5 +1,5 @@
 <?php
-// index.php — VinciFlow Vendor Test (PHP + AJAX + HTML, no external JS libs)
+// index.php VinciFlow Vendor Test (PHP + AJAX + HTML, no external JS libs)
 // The browser connects to OBS via WebSocket (JS). PHP only serves the page.
 ?><!doctype html>
 <html lang="en">

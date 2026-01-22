@@ -1,67 +1,153 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark" />
-  <title>vinci-flow docs</title>
-  <link rel="stylesheet" href="assets/css/style.css" />
-</head>
-<body>
-  <div class="layout">
-    <aside class="sidebar" aria-label="Documentation sidebar">
-      <div class="brand">
-        <div class="title">
-          <span aria-hidden="true">🧩</span>
-          <span>vinci-flow</span>
-          <span class="badge">OBS Studio Plugin</span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>
+      VinciFlow The Ultimate Graphics & Lower Thirds Engine for OBS Studio
+      Documentation
+    </title>
+    <link rel="stylesheet" href="assets/css/style.css" />
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8021810602774098"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar" aria-label="Documentation sidebar">
+        <div class="brand">
+          <div class="title">
+            <span aria-hidden="true">🧩</span>
+            <span>vinci-flow</span>
+            <span class="badge">OBS Studio Plugin</span>
+          </div>
+          <div class="subtitle">
+            VinciFlow plugin documentation: install, theme authoring, and
+            obs-websocket integration.
+          </div>
+          <a
+            class="brandDlBtn"
+            href="https://obscountdown.com/r/vinci-flow"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="brandDlBtn__ico" aria-hidden="true">⬇️</span>
+            <span class="brandDlBtn__txt">
+              <b>Download</b>
+              <span class="brandDlBtn__sub">VinciFlow resource page</span>
+            </span>
+            <span class="brandDlBtn__ext" aria-hidden="true">↗</span>
+          </a>
         </div>
-        <div class="subtitle">
-          VinciFlow plugin documentation: install, theme authoring, and obs-websocket integration.
-        </div>
-      </div>
 
-      <nav class="nav" aria-label="Pages">
-        <a data-nav href="#home"><span class="ico" aria-hidden="true">🏠</span><span class="lbl">Home</span><span class="hint">Overview</span></a>
-        <a data-nav href="#install"><span class="ico" aria-hidden="true">⚙️</span><span class="lbl">Install &amp; Setup</span><span class="hint">OBS</span></a>
-        <a data-nav href="#themes"><span class="ico" aria-hidden="true">🎨</span><span class="lbl">Building Your Own Themes</span><span class="hint">HTML/CSS/JS</span></a>
-        <a data-nav href="#websocket"><span class="ico" aria-hidden="true">🔌</span><span class="lbl">Setup WebSocket</span><span class="hint">Automation</span></a>
-      </nav>
+        <nav class="nav" aria-label="Pages">
+          <a data-nav href="#home"
+            ><span class="ico" aria-hidden="true">🏠</span
+            ><span class="lbl">Home</span><span class="hint">Overview</span></a
+          >
+          <a data-nav href="#install"
+            ><span class="ico" aria-hidden="true">⚙️</span
+            ><span class="lbl">Install &amp; Setup</span
+            ><span class="hint">OBS</span></a
+          >
+          <a data-nav href="#themes"
+            ><span class="ico" aria-hidden="true">🎨</span
+            ><span class="lbl">Building Your Own Themes</span
+            ><span class="hint">HTML/CSS/JS</span></a
+          >
+          <a data-nav href="#runtime-params"
+            ><span class="ico" aria-hidden="true">🧠</span
+            ><span class="lbl">Runtime Parameters</span
+            ><span class="hint">API Template</span></a
+          >
+          <a data-nav href="#websocket"
+            ><span class="ico" aria-hidden="true">🔌</span
+            ><span class="lbl">Setup WebSocket</span
+            ><span class="hint">Automation</span></a
+          >
+        </nav>
 
-      <div class="sidebarFooter">
-        <div class="small">Community &amp; support</div>
-        <div class="social" role="list">
-          <a role="listitem" href="https://discord.gg/2yD6B2PTuQ" target="_blank" rel="noopener"><span>Discord</span><span aria-hidden="true">↗</span></a>
-          <a role="listitem" href="https://www.facebook.com/groups/freestreamerspromotion" target="_blank" rel="noopener"><span>Facebook Group</span><span aria-hidden="true">↗</span></a>
-          <a role="listitem" href="https://mastodon.social/@obscountdown" target="_blank" rel="noopener"><span>Mastodon</span><span aria-hidden="true">↗</span></a>
-          <a role="listitem" href="https://x.com/streamcd_net" target="_blank" rel="noopener"><span>X (Twitter)</span><span aria-hidden="true">↗</span></a>
-          <a role="listitem" href="https://ko-fi.com/mmltech" target="_blank" rel="noopener"><span>Ko-fi Donation</span><span aria-hidden="true">♥</span></a>
+        <div class="sidebarFooter">
+          <div class="small">Community &amp; support</div>
+          <div class="social" role="list">
+            <a
+              role="listitem"
+              href="https://discord.gg/2yD6B2PTuQ"
+              target="_blank"
+              rel="noopener"
+              ><span>Discord</span><span aria-hidden="true">↗</span></a
+            >
+            <a
+              role="listitem"
+              href="https://www.facebook.com/groups/freestreamerspromotion"
+              target="_blank"
+              rel="noopener"
+              ><span>Facebook Group</span><span aria-hidden="true">↗</span></a
+            >
+            <a
+              role="listitem"
+              href="https://mastodon.social/@obscountdown"
+              target="_blank"
+              rel="noopener"
+              ><span>Mastodon</span><span aria-hidden="true">↗</span></a
+            >
+            <a
+              role="listitem"
+              href="https://x.com/streamcd_net"
+              target="_blank"
+              rel="noopener"
+              ><span>X (Twitter)</span><span aria-hidden="true">↗</span></a
+            >
+            <a
+              role="listitem"
+              href="https://ko-fi.com/mmltech"
+              target="_blank"
+              rel="noopener"
+              ><span>Ko-fi Donation</span><span aria-hidden="true">♥</span></a
+            >
+          </div>
+          <div
+            class="small"
+            style="margin-top: 10px; color: rgba(255, 255, 255, 0.5)"
+          >
+            Powered by obscountdown.com
+          </div>
         </div>
-        <div class="small" style="margin-top:10px; color: rgba(255,255,255,.50);">
-          Powered by obscountdown.com
-        </div>
-      </div>
-    </aside>
+      </aside>
 
-    <main class="main" aria-label="Documentation content">
-      <div class="shell">
-        <section class="contentCard">
-          <header>
-            <div class="meta">
-              <h1 data-page-title>Loading…</h1>
-              <p data-page-subtitle></p>
+      <main class="main" aria-label="Documentation content">
+        <div class="shell">
+          <section class="contentCard">
+            <header>
+              <div class="meta">
+                <h1 data-page-title>Loading…</h1>
+                <p data-page-subtitle></p>
+              </div>
+              <div class="pillRow" id="docPills" aria-label="Topic tags"></div>
+            </header>
+
+            <hr class="sep" />
+
+            <div class="ocAd ocAd--h" aria-label="Advertisement">
+              <ins
+                class="adsbygoogle"
+                style="display: block"
+                data-ad-client="ca-pub-8021810602774098"
+                data-ad-slot="7434839058"
+                data-ad-format="auto"
+                data-full-width-responsive="true"
+              ></ins>
             </div>
-            <div class="pillRow" id="docPills" aria-label="Topic tags"></div>
-          </header>
 
-          <hr class="sep" />
+            <article id="docContent" aria-live="polite"></article>
+          </section>
+        </div>
+      </main>
+    </div>
 
-          <article id="docContent" aria-live="polite"></article>
-        </section>
-      </div>
-    </main>
-  </div>
-
-  <script src="assets/js/app.js" defer></script>
-</body>
+    <script src="assets/js/app.js" defer></script>
+  </body>
 </html>

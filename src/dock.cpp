@@ -666,7 +666,7 @@ void LowerThirdDock::populateBrowserSources(bool keepSelection)
 	browserSourceCombo->clear();
 
 	// Placeholder / None
-	browserSourceCombo->addItem(tr("— Select a Browser Source —"), QVariant(QString()));
+	browserSourceCombo->addItem(tr("→ Select a Browser Source ←"), QVariant(QString()));
 
 	const auto names = vflow::list_browser_source_names();
 	for (const auto &n : names) {

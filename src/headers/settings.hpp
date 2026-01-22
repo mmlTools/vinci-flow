@@ -214,6 +214,7 @@ private:
 	void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
 	void updateColorButton(QPushButton *btn, const QColor &c);
 	void rebuildMarketplaceList();
+	void updateApiTemplateUi();
 
 private:
 	QString currentId;
@@ -258,6 +259,9 @@ private:
 	QPlainTextEdit *htmlEdit = nullptr;
 	QPlainTextEdit *cssEdit = nullptr;
 	QPlainTextEdit *jsEdit = nullptr;
+	QPlainTextEdit *apiEdit = nullptr;
+	QLineEdit *apiPathEdit = nullptr;
+	QLabel *apiStatusLabel = nullptr;
 
 	QPushButton *importBtn = nullptr;
 	QPushButton *exportBtn = nullptr;

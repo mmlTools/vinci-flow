@@ -658,6 +658,47 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		makeTab(tr("CSS"), cssEdit);
 		makeTab(tr("JS"), jsEdit);
 
+		{
+			auto *page = new QWidget(tplTabs);
+			auto *v = new QVBoxLayout(page);
+			v->setContentsMargins(0, 0, 0, 0);
+			v->setSpacing(8);
+
+			auto *help = new QLabel(page);
+			help->setWordWrap(true);
+			help->setText(tr(
+				"Paste a JSON object here. On Save & Apply, VinciFlow will generate a per-lower-third parameters file\n"
+				"(parameters_lt_<ID>.json) by appending missing keys only. External programs can edit that file, and\n"
+				"the base script will update elements with matching data-* attributes inside this lower third."));
+			help->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+			v->addWidget(help);
+
+			auto *pathRow = new QHBoxLayout();
+			pathRow->setContentsMargins(0, 0, 0, 0);
+			pathRow->setSpacing(6);
+			pathRow->addWidget(new QLabel(tr("Path:"), page));
+			apiPathEdit = new QLineEdit(page);
+			apiPathEdit->setReadOnly(true);
+			apiPathEdit->setPlaceholderText(tr("Save & Apply to generate the file."));
+			pathRow->addWidget(apiPathEdit, 1);
+			v->addLayout(pathRow);
+
+			apiStatusLabel = new QLabel(page);
+			apiStatusLabel->setText(tr("Status: not validated"));
+			apiStatusLabel->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+			v->addWidget(apiStatusLabel);
+
+			apiEdit = new QPlainTextEdit(page);
+			apiEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
+			apiEdit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+			apiEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+			apiEdit->setPlaceholderText("{\n  \"param1\": \"Test\",\n  \"param2\": \"Value\"\n}");
+			v->addWidget(apiEdit, 1);
+
+			tplTabs->addTab(page, tr("API Template (NEW)"));
+			connect(apiEdit, &QPlainTextEdit::textChanged, this, &LowerThirdSettingsDialog::updateApiTemplateUi);
+		}
+
 		auto *expandBtn = new QPushButton(tplTabs);
 		expandBtn->setFlat(true);
 		expandBtn->setCursor(Qt::PointingHandCursor);
@@ -674,6 +715,8 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 				onOpenCssEditorDialog();
 			else if (idx == 2)
 				onOpenJsEditorDialog();
+			else if (idx == 3)
+				openTemplateEditorDialog(tr("Edit API Template"), apiEdit);
 		});
 
 		editorsV->addWidget(tplTabs, 1);
@@ -980,6 +1023,9 @@ void LowerThirdSettingsDialog::loadFromState()
 	htmlEdit->setPlainText(QString::fromStdString(cfg->html_template));
 	cssEdit->setPlainText(QString::fromStdString(cfg->css_template));
 	jsEdit->setPlainText(QString::fromStdString(cfg->js_template));
+	if (apiEdit)
+		apiEdit->setPlainText(QString::fromStdString(cfg->api_template));
+	updateApiTemplateUi();
 
 	if (cfg->profile_picture.empty())
 		profilePictureEdit->clear();
@@ -1143,6 +1189,8 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->html_template = htmlEdit->toPlainText().toStdString();
 	cfg->css_template = cssEdit->toPlainText().toStdString();
 	cfg->js_template = jsEdit->toPlainText().toStdString();
+	if (apiEdit)
+		cfg->api_template = apiEdit->toPlainText().toStdString();
 
 	if (!pendingProfilePicturePath.isEmpty() && vflow::has_output_dir()) {
 		const QString outDir = QString::fromStdString(vflow::output_dir());
@@ -1651,6 +1699,44 @@ void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor 
 	btn->setText(hex);
 }
 
+void LowerThirdSettingsDialog::updateApiTemplateUi()
+{
+	// Provide immediate feedback + show the generated parameters file path.
+	if (!apiStatusLabel || !apiPathEdit)
+		return;
+
+	std::string id = currentId.toStdString();
+	if (id.empty()) {
+		apiStatusLabel->setText(tr("Status: no lower third selected"));
+		apiPathEdit->clear();
+		return;
+	}
+
+	if (vflow::has_output_dir()) {
+		apiPathEdit->setText(QString::fromStdString(vflow::path_parameters_lt_json(id)));
+	} else {
+		apiPathEdit->setText(tr("(Set an output folder first)"));
+	}
+
+	const QString txt = apiEdit ? apiEdit->toPlainText().trimmed() : QString();
+	if (txt.isEmpty()) {
+		apiStatusLabel->setText(tr("Status: empty (no file will be generated)"));
+		apiStatusLabel->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+		return;
+	}
+
+	QJsonParseError err{};
+	const QJsonDocument doc = QJsonDocument::fromJson(txt.toUtf8(), &err);
+	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+		apiStatusLabel->setText(tr("Status: invalid JSON object (%1)").arg(err.errorString()));
+		apiStatusLabel->setStyleSheet(QStringLiteral("color: #F87171;"));
+		return;
+	}
+
+	apiStatusLabel->setText(tr("Status: valid JSON object"));
+	apiStatusLabel->setStyleSheet(QStringLiteral("color: #34D399;"));
+}
+
 void LowerThirdSettingsDialog::openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit)
 {
 	if (!sourceEdit)
@@ -1888,6 +1974,7 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	o["avatar_height"] = cfg->avatar_height;
 	o["anim_in"] = QString::fromStdString(cfg->anim_in);
 	o["anim_out"] = QString::fromStdString(cfg->anim_out);
+	o["api_template"] = apiEdit ? apiEdit->toPlainText() : QString();
 
 	{
 		QString sin, sout;
@@ -2165,6 +2252,7 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->hotkey = obj.value("hotkey").toString().toStdString();
 	cfg->repeat_every_sec = obj.value("repeat_every_sec").toInt(0);
 	cfg->repeat_visible_sec = obj.value("repeat_visible_sec").toInt(0);
+	cfg->api_template = obj.value("api_template").toString().toStdString();
 
 	{
 		QFile f(htmlPath);
