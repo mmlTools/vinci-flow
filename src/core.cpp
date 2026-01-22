@@ -19,6 +19,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSaveFile>
 
 #include <obs.h>
 #include <obs-module.h>
@@ -103,6 +104,40 @@ static bool write_text_file(const std::string &path, const std::string &data)
 	}
 	f.flush();
 	f.close();
+	return true;
+}
+
+static bool write_text_file_atomic(const std::string &path, const std::string &data)
+{
+	QSaveFile f(QString::fromStdString(path));
+	f.setDirectWriteFallback(true);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		LOGW("Failed opening '%s' for atomic write (err=%d '%s')", path.c_str(), (int)f.error(),
+		     f.errorString().toUtf8().constData());
+		return false;
+	}
+	const qint64 written = f.write(data.data(), (qint64)data.size());
+	if (written != (qint64)data.size()) {
+		LOGW("Short atomic write for '%s' (%lld/%lld)", path.c_str(), (long long)written,
+		     (long long)data.size());
+		f.cancelWriting();
+		return false;
+	}
+	if (!f.commit()) {
+		LOGW("Commit failed for '%s' (err=%d '%s')", path.c_str(), (int)f.error(),
+		     f.errorString().toUtf8().constData());
+		return false;
+	}
+	return true;
+}
+
+static bool parse_json_object_text(const std::string &txt, QJsonObject &out)
+{
+	QJsonParseError err{};
+	const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
+	if (err.error != QJsonParseError::NoError || !doc.isObject())
+		return false;
+	out = doc.object();
 	return true;
 }
 
@@ -712,6 +747,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
 		const std::string inSound = c.anim_in_sound.empty() ? std::string() : ("./" + c.anim_in_sound);
 		const std::string outSound = c.anim_out_sound.empty() ? std::string() : ("./" + c.anim_out_sound);
+		const std::string apiTplTrim = QString::fromStdString(c.api_template).trimmed().toStdString();
+		const std::string paramsFile = apiTplTrim.empty() ? std::string() : ("./parameters_lt_" + c.id + ".json");
 
 		int delay = 0;
 
@@ -735,6 +772,9 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 		       "outSound: " +
 		       (outSound.empty() ? "null" : ("\"" + outSound + "\"")) +
 		       ", "
+		       "paramsFile: " +
+		       (paramsFile.empty() ? "null" : ("\"" + paramsFile + "\"")) +
+		       ", "
 		       "delay: " +
 		       std::to_string(delay) + " },\n";
 	}
@@ -744,11 +784,92 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 /* VinciFlow – Base Animation Script (simple polling + per-item transition lock) */
 (() => {
   const VISIBLE_URL = "./lt-visible.json";
+  const PARAMS_URL  = "./parameters.json";
   const animMap = )JS") +
 	       map + std::string(R"JS(
   // Safety bounds (avoid deadlocks if a template forgets to resolve)
   const MAX_CUSTOM_WAIT_MS = 8000;
   const MAX_ANIM_WAIT_MS   = 2000;
+
+  // Parameters polling
+  const PARAMS_POLL_MS = 500;
+  const __paramsText = Object.create(null); // url -> raw text snapshot
+  const __paramsData = Object.create(null); // url -> parsed object
+  let __paramsBusy = false;
+
+  function isSafeParamKey(k) {
+    return /^[A-Za-z0-9_\-]+$/.test(String(k));
+  }
+
+  async function fetchJsonText(url) {
+    const r = await fetch(url + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return null;
+    return await r.text();
+  }
+
+  async function pollParameters() {
+    if (__paramsBusy) return;
+    __paramsBusy = true;
+    try {
+      const urls = new Set([PARAMS_URL]);
+      for (const k in animMap) {
+        const cfg = animMap[k] || {};
+        if (cfg && cfg.paramsFile) urls.add(cfg.paramsFile);
+      }
+
+      const arr = Array.from(urls);
+      const results = await Promise.allSettled(arr.map(u => fetchJsonText(u)));
+      for (let i = 0; i < arr.length; i++) {
+        const url = arr[i];
+        const res = results[i];
+        if (res.status !== 'fulfilled' || res.value === null) continue;
+        const txt = res.value;
+        if (__paramsText[url] === txt) continue; // unchanged
+        try {
+          const json = JSON.parse(txt);
+          if (json && typeof json === 'object') {
+            __paramsText[url] = txt;
+            __paramsData[url] = json;
+          }
+        } catch (e) {
+          // Ignore parse errors (external writer may be mid-update)
+        }
+      }
+
+      // Apply to DOM (change-only updates)
+      const els = Array.from(document.querySelectorAll("#slt-root > li[id]"));
+      for (const el of els) {
+        const cfg = animMap[el.id] || {};
+        const url = (cfg && cfg.paramsFile) ? cfg.paramsFile : PARAMS_URL;
+        const data = __paramsData[url];
+        if (!data || typeof data !== 'object') continue;
+        const obj = (url === PARAMS_URL) ? (data[el.id] || null) : data;
+        if (!obj || typeof obj !== 'object') continue;
+
+        el.__slt_param_cache = (el.__slt_param_cache && typeof el.__slt_param_cache === 'object')
+          ? el.__slt_param_cache
+          : Object.create(null);
+
+        for (const key in obj) {
+          if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+          if (!isSafeParamKey(key)) continue;
+          const val = obj[key];
+          const sval = (val === null || val === undefined) ? "" : String(val);
+          if (el.__slt_param_cache[key] === sval) continue;
+
+          const nodes = el.querySelectorAll(`[data-${key}]`);
+          if (!nodes || nodes.length === 0) {
+            el.__slt_param_cache[key] = sval;
+            continue;
+          }
+          nodes.forEach(n => { try { n.innerHTML = sval; } catch (e) {} });
+          el.__slt_param_cache[key] = sval;
+        }
+      }
+    } finally {
+      __paramsBusy = false;
+    }
+  }
 
   function playCue(url) {
     if (!url || !String(url).trim()) return;
@@ -941,6 +1062,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   document.addEventListener("DOMContentLoaded", () => {
     tick();
     setInterval(tick, 350);
+
+    // Parameter polling is async and independent from animation flow.
+    pollParameters();
+    setInterval(pollParameters, PARAMS_POLL_MS);
   });
 })();
 )JS");
@@ -1031,6 +1156,18 @@ std::string path_styles_css()
 std::string path_scripts_js()
 {
 	return has_output_dir() ? join_path(g_output_dir, "lt.js") : "";
+}
+
+std::string path_parameters_json()
+{
+	return has_output_dir() ? join_path(g_output_dir, "parameters.json") : "";
+}
+
+std::string path_parameters_lt_json(const std::string &id)
+{
+	if (!has_output_dir())
+		return {};
+	return join_path(g_output_dir, "parameters_lt_" + id + ".json");
 }
 
 std::string path_animate_css()
@@ -1239,6 +1376,86 @@ bool ensure_output_artifacts_exist()
 	return true;
 }
 
+static bool ensure_parameters_files_from_api_templates()
+{
+	if (!has_output_dir())
+		return false;
+
+	// Combined file is optional; if it exists and is invalid, we will not touch it.
+	const std::string combinedPath = path_parameters_json();
+	const bool combinedExists = QFile::exists(QString::fromStdString(combinedPath));
+	QJsonObject combinedRoot;
+	bool combinedOk = true;
+	if (combinedExists) {
+		const std::string txt = read_text_file(combinedPath);
+		combinedOk = parse_json_object_text(txt, combinedRoot);
+	}
+	bool combinedDirty = false;
+
+	// If combined file exists but is invalid, do not modify it (do not interfere).
+	const bool allowCombinedWrite = !combinedExists || combinedOk;
+
+	for (const auto &lt : g_items) {
+		const std::string api = QString::fromStdString(lt.api_template).trimmed().toStdString();
+		if (api.empty())
+			continue;
+
+		QJsonObject apiObj;
+		if (!parse_json_object_text(api, apiObj)) {
+			// Invalid API template; skip file generation for this LT.
+			continue;
+		}
+
+		const std::string perPath = path_parameters_lt_json(lt.id);
+		const bool perExists = QFile::exists(QString::fromStdString(perPath));
+		QJsonObject perObj;
+		bool perOk = true;
+		if (perExists) {
+			const std::string txt = read_text_file(perPath);
+			perOk = parse_json_object_text(txt, perObj);
+		}
+		// Do not overwrite an existing invalid JSON file.
+		if (perExists && !perOk)
+			continue;
+
+		bool perDirty = false;
+		for (auto it = apiObj.begin(); it != apiObj.end(); ++it) {
+			if (!perObj.contains(it.key())) {
+				perObj.insert(it.key(), it.value());
+				perDirty = true;
+			}
+		}
+		if (!perExists && !perDirty) {
+			// Ensure the file exists even if the object is empty.
+			perDirty = true;
+		}
+		if (perDirty) {
+			write_text_file_atomic(perPath, QJsonDocument(perObj).toJson(QJsonDocument::Indented).toStdString());
+		}
+
+		if (allowCombinedWrite) {
+			QJsonObject bucket = combinedRoot.value(QString::fromStdString(lt.id)).toObject();
+			bool bucketDirty = false;
+			for (auto it = apiObj.begin(); it != apiObj.end(); ++it) {
+				if (!bucket.contains(it.key())) {
+					bucket.insert(it.key(), it.value());
+					bucketDirty = true;
+				}
+			}
+			if (bucketDirty || !combinedRoot.contains(QString::fromStdString(lt.id))) {
+				combinedRoot.insert(QString::fromStdString(lt.id), bucket);
+				combinedDirty = true;
+			}
+		}
+	}
+
+	if (allowCombinedWrite && (combinedDirty || !combinedExists)) {
+		write_text_file_atomic(combinedPath, QJsonDocument(combinedRoot).toJson(QJsonDocument::Indented).toStdString());
+	}
+
+	return true;
+}
+
 bool load_state_json()
 {
 	if (!has_output_dir())
@@ -1340,6 +1557,7 @@ bool load_state_json()
 		c.html_template = o.value("html_template").toString().toStdString();
 		c.css_template = o.value("css_template").toString().toStdString();
 		c.js_template = o.value("js_template").toString().toStdString();
+		c.api_template = o.value("api_template").toString().toStdString();
 
 		c.hotkey = o.value("hotkey").toString().toStdString();
 		if (c.hotkey.empty()) {
@@ -1513,7 +1731,7 @@ bool save_state_json()
 		return false;
 
 	QJsonObject root;
-	root["version"] = 3;
+	root["version"] = 4;
 
 	QJsonArray items;
 	for (const auto &c : g_items) {
@@ -1551,6 +1769,7 @@ bool save_state_json()
 		o["html_template"] = QString::fromStdString(c.html_template);
 		o["css_template"] = QString::fromStdString(c.css_template);
 		o["js_template"] = QString::fromStdString(c.js_template);
+		o["api_template"] = QString::fromStdString(c.api_template);
 
 		o["hotkey"] = QString::fromStdString(c.hotkey);
 		o["repeat_every_sec"] = c.repeat_every_sec;
@@ -2018,6 +2237,9 @@ bool rebuild_and_swap()
 		return false;
 
 	ensure_output_artifacts_exist();
+	// Create/extend runtime parameters files derived from "API Template" without overwriting
+	// external edits (append missing keys only; use atomic writes).
+	ensure_parameters_files_from_api_templates();
 
 	const std::string ts = now_timestamp_string();
 	std::string cssFile, jsFile;

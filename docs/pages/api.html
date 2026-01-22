@@ -1,0 +1,125 @@
+<div class="callout ok">
+  <b>What this feature does</b>
+  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
+    The <b>API Template &amp; Runtime Parameters</b> system allows each lower third to expose a live JSON-driven data interface.
+    External applications can update text, counters, scores, names, or any dynamic field in real time by writing to a JSON file,
+    without reloading the overlay or interrupting animations.
+  </div>
+
+
+<div class="ocAd ocAd--h" aria-label="Advertisement">
+  <ins class="adsbygoogle"
+       style="display:block"
+       data-ad-client="ca-pub-8021810602774098"
+       data-ad-slot="7434839058"
+       data-ad-format="auto"
+       data-full-width-responsive="true"></ins>
+</div>
+
+</div>
+
+<h2>Overview</h2>
+<p>
+  Each lower third can now define an <b>API Template</b> a JSON object describing its runtime parameters.
+  When enabled, VinciFlow automatically generates and monitors a dedicated parameters file for that lower third and
+  injects values into the HTML only when they change.
+</p>
+
+<h2>Key concepts</h2>
+<div class="grid2">
+  <div class="callout">
+    <b>Per-lower-third parameters file</b>
+    <p>
+      When you define an API Template and click <i>Save &amp; Apply</i>, VinciFlow generates:
+    </p>
+    <pre><code>parameters_lt_&lt;LOWER_THIRD_ID&gt;.json</code></pre>
+    <p>
+      You can edit this file using any external program. The overlay polls it asynchronously, so it does not block
+      animations or show/hide operations.
+    </p>
+  </div>
+
+  <div class="callout">
+    <b>DOM binding via data-attributes</b>
+    <p>
+      Bind parameters directly in your HTML with <code>data-*</code> attributes:
+    </p>
+    <pre><code>&lt;span data-score&gt;0&lt;/span&gt;</code></pre>
+    <p>
+      Whenever the JSON value changes, VinciFlow replaces the element’s HTML contents:
+    </p>
+    <pre><code>{ "score": 12 }</code></pre>
+  </div>
+</div>
+
+<h2>API Template editor (Settings → Layout → API Template)</h2>
+<ul>
+  <li>Paste a valid JSON object describing your runtime fields.</li>
+  <li>Validation is performed as you type (errors are shown in the UI).</li>
+  <li>The UI displays the <b>full path and filename</b> of the generated JSON so external tools can write to it.</li>
+  <li>Files are written atomically to avoid partial reads while the overlay polls.</li>
+  <li>Existing external values are preserved (the template acts as a schema/default seed).</li>
+</ul>
+
+<h2>Example</h2>
+
+<h3>API Template</h3>
+<pre><code>{
+  "player": "John Doe",
+  "team": "Red Dragons",
+  "score": 0
+}</code></pre>
+
+<h3>HTML template bindings</h3>
+<pre><code>&lt;div class="lt-row"&gt;
+  &lt;span class="name" data-player&gt;Player&lt;/span&gt;
+  &lt;span class="team" data-team&gt;Team&lt;/span&gt;
+  &lt;span class="score" data-score&gt;0&lt;/span&gt;
+&lt;/div&gt;
+</code></pre>
+
+<h3>Runtime updates</h3>
+<p>
+  External tools update the generated file:
+</p>
+<pre><code>parameters_lt_&lt;LOWER_THIRD_ID&gt;.json</code></pre>
+
+<pre><code>{
+  "player": "John Doe",
+  "team": "Red Dragons",
+  "score": 42
+}</code></pre>
+
+<h2>Combined file mode (optional)</h2>
+<p>
+  If you prefer a single shared parameters file, VinciFlow also supports:
+</p>
+<pre><code>parameters.json</code></pre>
+
+<p>
+  Structure:
+</p>
+<pre><code>{
+  "lt_56dd64767e58d5f160639a39e4490f": {
+    "player": "John Doe",
+    "score": 42
+  }
+}</code></pre>
+
+<p>
+  The overlay binds the correct object to the matching lower third ID automatically.
+</p>
+
+<h2>Performance &amp; safety</h2>
+<ul>
+  <li>Asynchronous polling (non-blocking, animation-safe).</li>
+  <li>Change-only DOM updates (no unnecessary reflows).</li>
+  <li>Per-LT isolation (one file cannot break the entire overlay).</li>
+  <li>Graceful fallback if files are missing or malformed.</li>
+</ul>
+
+<h2>Where to go next</h2>
+<ul>
+  <li><a href="#themes">Building Your Own Themes</a> add <code>data-*</code> bindings to templates.</li>
+  <li><a href="#websocket">Setup WebSocket</a> automate visibility and groups.</li>
+</ul>

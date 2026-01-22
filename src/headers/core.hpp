@@ -74,6 +74,12 @@ struct lower_third_cfg {
 	std::string css_template;  // should be scoped to #{{ID}} (we also do best-effort)
 	std::string js_template;   // wrapped with root = document.getElementById("{{ID}}")
 
+	// Optional: "API Template" JSON object (as text).
+	// When valid and non-empty, the core generates/maintains a per-LT parameters file:
+	//   parameters_lt_<ID>.json
+	// External programs may update these files and the base script will patch the HTML.
+	std::string api_template;
+
 	std::string hotkey;
 
 	int repeat_every_sec   = 0; // 0 = disabled
@@ -216,6 +222,12 @@ bool save_visible_json();
 // -------------------------
 bool ensure_output_artifacts_exist();
 bool rebuild_and_swap();
+
+// Runtime parameters files
+// - Combined file: parameters.json (root object keyed by LT id)
+// - Per-LT file:  parameters_lt_<ID>.json (object with keys/values)
+std::string path_parameters_json();
+std::string path_parameters_lt_json(const std::string &id);
 
 // Notify UI listeners (dock, websocket bridge, etc.) that the lower-third list
 // has been updated in-place (e.g. settings changed for an existing item).

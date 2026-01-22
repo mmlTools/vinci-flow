@@ -1,4 +1,4 @@
 #pragma once
 
 #define PLUGIN_NAME "vinci-flow"
-#define PLUGIN_VERSION "3.0.1"
+#define PLUGIN_VERSION "3.1.2"
