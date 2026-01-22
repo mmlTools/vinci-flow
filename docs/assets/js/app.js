@@ -15,24 +15,6 @@
     websocket: ["obs-websocket v5", "Vendor Requests", "Events", "Automation"],
   };
 
-
-  function initAds(root) {
-    try {
-      if (!window.adsbygoogle) window.adsbygoogle = [];
-      const scope = root || document;
-      const ads = scope.querySelectorAll('ins.adsbygoogle');
-      ads.forEach((ins) => {
-        // AdSense sets data-adsbygoogle-status="done" once initialized
-        const done = ins.getAttribute("data-adsbygoogle-status");
-        if (done === "done") return;
-        try {
-          (adsbygoogle = window.adsbygoogle || []).push({});
-        } catch (_) {}
-      });
-    } catch (_) {}
-  }
-
-
   function getRoute() {
     const hash = (location.hash || "#home").replace("#", "");
     return routes[hash] ? hash : "home";
@@ -77,8 +59,6 @@
 
       const html = await res.text();
       if (content) content.innerHTML = html;
-
-      initAds(content);
 
       document.title = route.title + " · vinci-flow docs";
       window.scrollTo({ top: 0, behavior: "instant" });
