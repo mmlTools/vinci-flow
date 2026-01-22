@@ -1661,7 +1661,7 @@ void LowerThirdSettingsDialog::openTemplateEditorDialog(const QString &title, QP
 	dlg.resize(980, 760);
 
 	QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("MMLTech"),
-		    QStringLiteral("smart-lower-thirds"));
+		    QStringLiteral("vinci-flow"));
 	const int savedMode = s.value(QStringLiteral("slt/template_editor/mode"), 0).toInt();
 	const QString savedPath = s.value(QStringLiteral("slt/template_editor/path"), QString()).toString();
 

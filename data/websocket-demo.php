@@ -421,7 +421,7 @@
   <div class="panel">
     <div class="panel__hd">
       <div class="panel__ttl">Connection</div>
-      <div class="mini">Vendor: <code>smart-lower-thirds</code></div>
+      <div class="mini">Vendor: <code>vinci-flow</code></div>
     </div>
 
     <div class="panel__bd">
@@ -484,7 +484,7 @@
  * op codes: 0 Hello, 1 Identify, 2 Identified, 5 Event, 6 Request, 7 RequestResponse
  */
 
-const VENDOR = "smart-lower-thirds";
+const VENDOR = "vinci-flow";
 
 // Storage keys
 const LS_URL  = "slt_obs_ws_url";

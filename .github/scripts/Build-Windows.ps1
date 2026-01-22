@@ -105,7 +105,7 @@ function Build {
     # ------------------------------------------------------------------
     $OutputName = "${ProductName}-${ProductVersion}-windows-${Target}"
 
-    $InstallerScript = Join-Path $ProjectRoot "installer\smart-lower-thirds-installer.nsi"
+    $InstallerScript = Join-Path $ProjectRoot "installer\vinci-flow-installer.nsi"
     if (-not (Test-Path $InstallerScript)) {
         Write-Warning "NSIS script not found at: ${InstallerScript} – skipping installer build."
         return

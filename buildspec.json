@@ -33,13 +33,13 @@
   },
   "platformConfig": {
     "macos": {
-      "bundleId": "com.example.smart-lower-thirds"
+      "bundleId": "com.example.vinci-flow"
     }
   },
-  "name": "smart-lower-thirds",
-  "displayName": "A lightweight lower thirds plugin that works directly inside OBS Studio",
-  "version": "2.7.0",
-  "author": "MML Tech",
+  "name": "vinci-flow",
+  "displayName": "VinciFlow",
+  "version": "3.0.0",
+  "author": "MMLTech",
   "website": "https://ko-fi.com/mmltech",
   "email": "contact@obscountdown.com"
 }

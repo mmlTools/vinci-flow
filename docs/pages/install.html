@@ -1,0 +1,67 @@
+<h2>Requirements</h2>
+<ul>
+  <li>OBS Studio installed and working.</li>
+  <li><code>vinci-flow</code> plugin installed (copy to your OBS plugins folder or install via your distribution package).</li>
+  <li><b>obs-websocket</b> is optional unless you plan to automate the plugin externally. (Vendor requests/events require obs-websocket v5 API.)</li>
+</ul>
+
+<h2>First-time setup checklist</h2>
+
+<div class="callout warn">
+  <b>Important</b>
+  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
+    The plugin needs an <b>Output Directory</b> to write the generated overlay HTML files.
+    If no output directory is configured, actions like “Create Lower Third” can fail with <code>No output dir configured</code>.
+  </div>
+</div>
+
+<ol>
+  <li>
+    <b>Open the dock</b><br/>
+    In OBS, enable the plugin dock (usually via <code>View → Docks</code>) and open <code>Smart Lower Thirds</code>.
+  </li>
+  <li>
+    <b>Set the Output Directory</b><br/>
+    Choose a folder where the plugin will write overlay files (including <code>lt-*.html</code> and state/config files).
+  </li>
+  <li>
+    <b>Ensure the Browser Source exists</b><br/>
+    The plugin is designed to manage a Browser Source named <code>Smart Lower Thirds</code> with a 1920×1080 canvas.
+    If your workflow is manual, create a Browser Source and point it to the generated overlay file inside your Output Directory.
+  </li>
+  <li>
+    <b>Create your first lower third</b><br/>
+    Use the dock action to create a default lower third, then edit title/subtitle and styling.
+  </li>
+  <li>
+    <b>Test show/hide</b><br/>
+    Toggle visibility from the dock and confirm it appears in your scene.
+  </li>
+</ol>
+
+<h2>Troubleshooting</h2>
+<div class="grid2">
+  <div class="callout">
+    <b>“No output dir configured”</b>
+    <p>Set the Output Directory in the dock/settings first.</p>
+  </div>
+  <div class="callout">
+    <b>Nothing appears on stream</b>
+    <p>
+      Verify the managed Browser Source is in your current scene and not hidden behind other sources.
+      Confirm it is sized to 1920×1080 and not cropped.
+    </p>
+  </div>
+  <div class="callout">
+    <b>Old design still showing</b>
+    <p>
+      If you’re editing templates or assets, refresh the Browser Source (or disable/enable it) to force reload.
+    </p>
+  </div>
+  <div class="callout">
+    <b>Animations not playing</b>
+    <p>
+      If you use custom handling, ensure your theme provides <code>root.__slt_show</code> / <code>root.__slt_hide</code> and returns a Promise for hide.
+    </p>
+  </div>
+</div>

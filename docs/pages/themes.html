@@ -1,0 +1,90 @@
+<h2>Theme authoring model</h2>
+<p>
+  A “theme” is effectively the combination of:
+</p>
+<ul>
+  <li><b>HTML template</b> (rendered inside <code>&lt;li id="{{ID}}"&gt;</code>)</li>
+  <li><b>CSS template</b> (ideally scoped to <code>#{{ID}}</code>)</li>
+  <li><b>JS template</b> (executed with <code>root</code> bound to the element for this lower third)</li>
+</ul>
+
+<div class="callout ok">
+  <b>Scoping rule of thumb</b>
+  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
+    Write CSS as if multiple lower thirds can co-exist: prefix selectors with <code>#{{ID}}</code> (or <code>#{{ID}} .child</code>) to avoid bleeding into other items.
+  </div>
+</div>
+
+<h2>Placeholders</h2>
+<p>
+  Your templates can reference placeholders which are substituted at render time:
+</p>
+
+<pre><code>{{ID}}
+{{TITLE}} / {{SUBTITLE}} / {{PROFILE_PICTURE_URL}}
+{{PRIMARY_COLOR}} / {{SECONDARY_COLOR}} / {{TITLE_COLOR}} / {{SUBTITLE_COLOR}}
+{{OPACITY}} / {{RADIUS}} / {{FONT_FAMILY}}
+{{TITLE_SIZE}} / {{SUBTITLE_SIZE}} / {{AVATAR_WIDTH}} / {{AVATAR_HEIGHT}}
+{{ANIM_IN}} / {{ANIM_OUT}}
+{{SOUND_IN_URL}} / {{SOUND_OUT_URL}}
+</code></pre>
+
+<h2>Animations</h2>
+<p>
+  The plugin supports two animation strategies:
+</p>
+
+<h3>1) Animate.css classes</h3>
+<ul>
+  <li>Set <code>anim_in</code> and <code>anim_out</code> to Animate.css class names (e.g. <code>animate__fadeInUp</code>).</li>
+  <li>The placeholders <code>{{ANIM_IN}}</code> and <code>{{ANIM_OUT}}</code> resolve to the selected classes.</li>
+</ul>
+
+<h3>2) Custom-handled animations</h3>
+<p>
+  If you set:
+</p>
+<ul>
+  <li><code>anim_in = "custom_handled_in"</code></li>
+  <li><code>anim_out = "custom_handled_out"</code></li>
+</ul>
+<p>
+  …then the plugin does not apply an Animate.css class and expects your JS template to provide:
+</p>
+
+<pre><code>// Your JS template runs with:
+const root = document.getElementById("{{ID}}");
+
+// Optional: called when showing
+root.__slt_show = function(){
+  // start your custom "in" animation here
+};
+
+// Required for custom out: must return a Promise that resolves when you are done
+root.__slt_hide = function(){
+  // start your custom "out" animation and resolve when complete
+  return new Promise((resolve) => setTimeout(resolve, 3000));
+};
+</code></pre>
+
+<h2>Sound cues</h2>
+<ul>
+  <li>You can define optional sound files for “in” and “out”.</li>
+  <li>The placeholders <code>{{SOUND_IN_URL}}</code> and <code>{{SOUND_OUT_URL}}</code> allow your theme to play them.</li>
+</ul>
+
+<h2>Recommended theme structure</h2>
+<pre><code>your-output-dir/
+  assets/
+    theme.css
+    theme.js
+    images/
+  (plugin-generated) lt-*.html
+</code></pre>
+
+<div class="callout warn">
+  <b>Browser Source caching</b>
+  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
+    While iterating on theme files, you may need to refresh the Browser Source to pick up changes.
+  </div>
+</div>
