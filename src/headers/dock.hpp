@@ -55,6 +55,8 @@ public:
 	~LowerThirdDock() override;
 
 	bool init();
+	// Called when OBS scene collection changes; restores per-collection state.
+	void onSceneCollectionChanged();
 	void refreshBrowserSources();
 	// Shows/hides the update banner (safe to call with empty/unknown versions).
 	void setUpdateAvailable(const QString &remoteVersion, const QString &localVersion);

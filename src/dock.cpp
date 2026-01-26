@@ -49,11 +49,9 @@
 
 static QWidget *g_dockWidget = nullptr;
 
-
-
 struct GroupRuntime {
 	bool running = false;
-	int index = 0; // position in seq
+	int index = 0;
 	bool phaseShow = true;
 	QString currentId;
 	qint64 hideAtMs = 0;
@@ -61,7 +59,7 @@ struct GroupRuntime {
 };
 
 static QHash<QString, GroupRuntime> g_groupRuns;
-static QHash<QString, qint64> g_groupHideAtMs; // ltId -> hideAtMs (only while a group-run is showing it)
+static QHash<QString, qint64> g_groupHideAtMs;
 
 static void applyGroupRowStyle(QFrame *rowFrame)
 {
@@ -72,21 +70,19 @@ static void applyGroupRowStyle(QFrame *rowFrame)
 	const bool inCar = rowFrame->property("sltInGroup").toBool();
 	const QString col = rowFrame->property("sltGroupColor").toString();
 
-	// Only apply custom background when inactive; active styling is handled by QSS.
-	// We still keep the dynamic properties so the global stylesheet can provide a default green tint.
 	if (!active && inCar && !col.isEmpty()) {
 		QColor c(col);
 		if (c.isValid()) {
-			rowFrame->setStyleSheet(QStringLiteral(
-				"QFrame#sltRowFrame{ background: rgba(%1,%2,%3,0.14); border: 1px solid rgba(%1,%2,%3,0.55); }")
-							.arg(c.red())
-							.arg(c.green())
-							.arg(c.blue()));
+			rowFrame->setStyleSheet(
+				QStringLiteral(
+					"QFrame#sltRowFrame{ background: rgba(%1,%2,%3,0.14); border: 1px solid rgba(%1,%2,%3,0.55); }")
+					.arg(c.red())
+					.arg(c.green())
+					.arg(c.blue()));
 			return;
 		}
 	}
 
-	// Clear any per-row override.
 	rowFrame->setStyleSheet(QString());
 }
 
@@ -96,7 +92,6 @@ static void stopGroupRun(const QString &groupId)
 	if (it == g_groupRuns.end())
 		return;
 
-	// Best-effort hide currently shown item
 	if (!it->currentId.isEmpty()) {
 		g_groupHideAtMs.remove(it->currentId);
 		vflow::set_visible_persist(it->currentId.toStdString(), false);
@@ -151,14 +146,12 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 	const int intervalMs = std::max(0, car->interval_ms);
 	const int count = (int)car->members.size();
 
-	// Build / refresh sequence
 	if (it->seq.size() != count) {
 		it->seq.clear();
 		it->seq.reserve(count);
 		for (int i = 0; i < count; ++i)
 			it->seq.push_back(i);
 		if (car->order_mode == 1) {
-			// Shuffle
 			auto *rng = QRandomGenerator::global();
 			for (int i = count - 1; i > 0; --i) {
 				const int j = (int)rng->bounded((quint32)(i + 1));
@@ -169,19 +162,16 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 	}
 
 	if (it->phaseShow) {
-		// hide previous
 		if (!it->currentId.isEmpty()) {
 			g_groupHideAtMs.remove(it->currentId);
 			vflow::set_visible_persist(it->currentId.toStdString(), false);
 		}
 
-		// End condition (non-loop): stop before showing beyond last
 		if (!car->loop && it->index >= count) {
 			stopGroupRun(groupId);
 			return;
 		}
 
-		// Loop condition: wrap and reshuffle per cycle if randomized
 		if (it->index >= count) {
 			it->index = 0;
 			if (car->order_mode == 1) {
@@ -204,7 +194,6 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 		it->phaseShow = false;
 		QTimer::singleShot(visibleMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
 	} else {
-		// hide current and advance index
 		if (!it->currentId.isEmpty()) {
 			g_groupHideAtMs.remove(it->currentId);
 			vflow::set_visible_persist(it->currentId.toStdString(), false);
@@ -214,7 +203,6 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 		it->hideAtMs = 0;
 		it->index++;
 
-		// If we just finished the last item and loop is disabled, stop now.
 		if (!car->loop && it->index >= count) {
 			stopGroupRun(groupId);
 			return;
@@ -225,20 +213,14 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 	}
 }
 
-
-
 namespace vflow::ui {
 
-// -------------------------
-// NEW: Core event bus hookup
-// -------------------------
 void LowerThirdDock::coreEventThunk(const vflow::core_event &ev, void *user)
 {
 	auto *self = static_cast<LowerThirdDock *>(user);
 	if (!self)
 		return;
 
-	// Always marshal to Qt thread to keep UI safe
 	QMetaObject::invokeMethod(self, [self, ev]() { self->onCoreEvent(ev); }, Qt::QueuedConnection);
 }
 
@@ -343,10 +325,6 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 
 	auto *st = style();
 
-	// -------------------------
-	// Update banner (hidden unless API reports a newer plugin version)
-	// Placed above the Resources selector row.
-	// -------------------------
 	{
 		updateFrame_ = new QFrame(this);
 		updateFrame_->setObjectName(QStringLiteral("sltUpdateBanner"));
@@ -376,22 +354,17 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		row->addWidget(updateBtn_);
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
-			QDesktopServices::openUrl(
-				QUrl(QStringLiteral("https://obscountdown.com/r/vinci-flow")));
+			QDesktopServices::openUrl(QUrl(QStringLiteral("https://obscountdown.com/r/vinci-flow")));
 		});
 
 		rootLayout->addWidget(updateFrame_);
 	}
 
-	// -------------------------
-	// Top row: Resources (output dir)
-	// -------------------------
 	{
 		auto *grid = new QGridLayout();
 		grid->setContentsMargins(0, 0, 0, 0);
 		grid->setHorizontalSpacing(6);
 		grid->setVerticalSpacing(0);
-		// Keep the label column tight; let the controls column consume the remaining width.
 		grid->setColumnStretch(0, 0);
 		grid->setColumnStretch(1, 1);
 
@@ -426,15 +399,11 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		connect(outputBrowseBtn, &QPushButton::clicked, this, &LowerThirdDock::onBrowseOutputFolder);
 	}
 
-	// -------------------------
-	// Browser Source selector row (combo-only workflow)
-	// -------------------------
 	{
 		auto *grid = new QGridLayout();
 		grid->setContentsMargins(0, 0, 0, 0);
 		grid->setHorizontalSpacing(6);
 		grid->setVerticalSpacing(0);
-		// Keep the label column tight; let the controls column consume the remaining width.
 		grid->setColumnStretch(0, 0);
 		grid->setColumnStretch(1, 1);
 
@@ -476,15 +445,11 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 			&LowerThirdDock::onBrowserSourceChanged);
 	}
 
-	// -------------------------
-	// Browser Source size row + exclusive mode
-	// -------------------------
 	{
 		auto *grid = new QGridLayout();
 		grid->setContentsMargins(0, 0, 0, 0);
 		grid->setHorizontalSpacing(6);
 		grid->setVerticalSpacing(0);
-		// Keep the label column tight; let the controls column consume the remaining width.
 		grid->setColumnStretch(0, 0);
 		grid->setColumnStretch(1, 1);
 
@@ -528,9 +493,6 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 			&LowerThirdDock::onBrowserSizeChanged);
 	}
 
-	// -------------------------
-	// List
-	// -------------------------
 	scrollArea = new QScrollArea(this);
 	scrollArea->setObjectName(QStringLiteral("LowerThirdContent"));
 	scrollArea->setWidgetResizable(true);
@@ -544,9 +506,6 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	scrollArea->setWidget(listContainer);
 	rootLayout->addWidget(scrollArea, 1);
 
-	// -------------------------
-	// Add button
-	// -------------------------
 	{
 		auto *row = new QHBoxLayout();
 		row->setSpacing(6);
@@ -567,18 +526,17 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		addBtn->setToolTip(tr("Add new lower third"));
 		addBtn->setFlat(true);
 
-manageGroupsBtn_ = new QPushButton(this);
-manageGroupsBtn_->setCursor(Qt::PointingHandCursor);
-manageGroupsBtn_->setToolTip(tr("Manage groups"));
-manageGroupsBtn_->setFlat(true);
+		manageGroupsBtn_ = new QPushButton(this);
+		manageGroupsBtn_->setCursor(Qt::PointingHandCursor);
+		manageGroupsBtn_->setToolTip(tr("Manage groups"));
+		manageGroupsBtn_->setFlat(true);
 
-QIcon carIco = QIcon::fromTheme(QStringLiteral("view-media-playlist"));
-if (carIco.isNull())
-	carIco = QIcon::fromTheme(QStringLiteral("media-playlist-shuffle"));
-if (carIco.isNull())
-	carIco = st->standardIcon(QStyle::SP_FileDialogDetailedView);
-manageGroupsBtn_->setIcon(carIco);
-
+		QIcon carIco = QIcon::fromTheme(QStringLiteral("view-media-playlist"));
+		if (carIco.isNull())
+			carIco = QIcon::fromTheme(QStringLiteral("media-playlist-shuffle"));
+		if (carIco.isNull())
+			carIco = st->standardIcon(QStyle::SP_FileDialogDetailedView);
+		manageGroupsBtn_->setIcon(carIco);
 
 		QIcon plus = QIcon::fromTheme(QStringLiteral("list-add"));
 		if (plus.isNull())
@@ -593,12 +551,9 @@ manageGroupsBtn_->setIcon(carIco);
 		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
 		connect(manageGroupsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageGroups);
 
-		connect(infoBtn, &QPushButton::clicked, this, [this]() {
-			show_troubleshooting_dialog(this);
-		});
+		connect(infoBtn, &QPushButton::clicked, this, [this]() { show_troubleshooting_dialog(this); });
 	}
 
-	// Footer
 	rootLayout->addWidget(create_widget_carousel(this));
 
 	const bool hasDir = vflow::has_output_dir();
@@ -622,10 +577,8 @@ bool LowerThirdDock::init()
 	if (hasDir)
 		vflow::ensure_output_artifacts_exist();
 
-	// Populate browser sources from OBS + restore selection from core config
 	populateBrowserSources(true);
 
-	// Restore browser size + exclusive mode from persisted core config
 	if (browserWidthSpin) {
 		browserWidthSpin->blockSignals(true);
 		browserWidthSpin->setValue(vflow::target_browser_width());
@@ -639,7 +592,6 @@ bool LowerThirdDock::init()
 
 	rebuildList();
 
-	// Subscribe to core events so dock stays in sync with WS + external edits
 	if (!coreListenerToken_) {
 		coreListenerToken_ = vflow::add_event_listener(&LowerThirdDock::coreEventThunk, this);
 	}
@@ -649,9 +601,6 @@ bool LowerThirdDock::init()
 	return true;
 }
 
-// -------------------------
-// Browser Source selector helpers
-// -------------------------
 void LowerThirdDock::populateBrowserSources(bool keepSelection)
 {
 	if (!browserSourceCombo)
@@ -665,7 +614,6 @@ void LowerThirdDock::populateBrowserSources(bool keepSelection)
 
 	browserSourceCombo->clear();
 
-	// Placeholder / None
 	browserSourceCombo->addItem(tr("→ Select a Browser Source ←"), QVariant(QString()));
 
 	const auto names = vflow::list_browser_source_names();
@@ -708,11 +656,8 @@ void LowerThirdDock::onBrowserSourceChanged(int index)
 
 	const QString name = browserSourceCombo->itemData(index).toString();
 
-	// Persist selection (empty = none)
 	vflow::set_target_browser_source_name(name.toStdString());
 
-	// If user selected something real and we have an output dir,
-	// rebuild/swap once so it immediately points to the latest generated HTML.
 	if (!name.isEmpty() && vflow::has_output_dir()) {
 		vflow::rebuild_and_swap();
 	}
@@ -728,16 +673,11 @@ void LowerThirdDock::onBrowserSizeChanged()
 	const int w = browserWidthSpin->value();
 	const int h = browserHeightSpin->value();
 
-	// Persist + apply to selected source if exists
 	vflow::set_target_browser_dimensions(w, h);
 
 	emit requestSave();
 }
 
-
-// -------------------------
-// Repeat timer
-// -------------------------
 void LowerThirdDock::ensureRepeatTimerStarted()
 {
 	if (repeatTimer_)
@@ -782,9 +722,6 @@ void LowerThirdDock::repeatTick()
 	for (const auto &c : items) {
 		const QString qid = QString::fromStdString(c.id);
 
-		// If this lower third belongs to any currently-running group, do not let the per-item
-		// repeat/auto-hide scheduler interfere. Group run timing (visible_ms / interval_ms)
-		// must be authoritative, otherwise items may be hidden early (e.g. 3s default).
 		{
 			const auto owners = vflow::groups_containing(c.id);
 			bool inRunningGroup = false;
@@ -806,10 +743,6 @@ void LowerThirdDock::repeatTick()
 		const int every = c.repeat_every_sec;
 		int visibleSec = c.repeat_visible_sec;
 
-		// Mode matrix:
-		//  - every==0 && visible==0   => full manual (no scheduling)
-		//  - every==0 && visible>0    => manual show + auto-hide after visibleSec
-		//  - every>0                 => full automated (auto-show + auto-hide). If visible==0, use default.
 		if (every <= 0) {
 			nextOnMs_.remove(qid);
 
@@ -841,7 +774,6 @@ void LowerThirdDock::repeatTick()
 			}
 		}
 
-		// Auto-show
 		if (every > 0 && nextOnMs_.contains(qid) && now >= nextOnMs_[qid]) {
 			qint64 next = nextOnMs_[qid];
 			const qint64 step = (qint64)every * 1000;
@@ -860,9 +792,6 @@ void LowerThirdDock::repeatTick()
 	updateRowCountdowns();
 }
 
-// -------------------------
-// Actions
-// -------------------------
 void LowerThirdDock::onBrowseOutputFolder()
 {
 	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Output Folder"));
@@ -949,8 +878,8 @@ void LowerThirdDock::onManageGroups()
 	auto *tabs = new QTabWidget(&dlg);
 	auto *tabGeneral = new QWidget(&dlg);
 	auto *tabFeatures = new QWidget(&dlg);
-		tabs->addTab(tabGeneral, tr("General"));
-		tabs->addTab(tabFeatures, tr("Group Features"));
+	tabs->addTab(tabGeneral, tr("General"));
+	tabs->addTab(tabFeatures, tr("Group Features"));
 
 	auto *generalForm = new QFormLayout(tabGeneral);
 	auto *titleEd = new QLineEdit(tabGeneral);
@@ -990,14 +919,14 @@ void LowerThirdDock::onManageGroups()
 	orderCmb->addItem(tr("Randomized"), 1);
 
 	auto *visibleSpin = new QSpinBox(tabFeatures);
-		visibleSpin->setRange(1, 600);
-		visibleSpin->setSuffix(tr(" s"));
-		visibleSpin->setToolTip(tr("Duration each item is visible during carousel"));
+	visibleSpin->setRange(1, 600);
+	visibleSpin->setSuffix(tr(" s"));
+	visibleSpin->setToolTip(tr("Duration each item is visible during carousel"));
 
 	auto *intervalSpin = new QSpinBox(tabFeatures);
-		intervalSpin->setRange(0, 600);
-		intervalSpin->setSuffix(tr(" s"));
-		intervalSpin->setToolTip(tr("Time until next item during carousel"));
+	intervalSpin->setRange(0, 600);
+	intervalSpin->setSuffix(tr(" s"));
+	intervalSpin->setToolTip(tr("Time until next item during carousel"));
 
 	auto *loopChk = new QCheckBox(tr("Loop group"), tabFeatures);
 	auto *exclusiveChk = new QCheckBox(tr("Exclusive"), tabFeatures);
@@ -1030,7 +959,6 @@ void LowerThirdDock::onManageGroups()
 
 	root->addLayout(right, 2);
 
-	// Helpers
 	auto refreshList = [&]() {
 		carList->clear();
 		for (const auto &c : vflow::groups_const()) {
@@ -1048,8 +976,6 @@ void LowerThirdDock::onManageGroups()
 				inSet.insert(QString::fromStdString(m));
 		}
 
-		// Enforce UX rule: a lower third can belong to only one group.
-		// Do not show lower thirds that are already assigned to a different group.
 		const QString qCurCarId = QString::fromStdString(groupId);
 
 		for (const auto &lt : vflow::all_const()) {
@@ -1107,35 +1033,37 @@ void LowerThirdDock::onManageGroups()
 		if (auto *car = vflow::get_group_by_id(qid.toStdString())) {
 			titleEd->setText(QString::fromStdString(car->title));
 			orderCmb->setCurrentIndex(car->order_mode == 1 ? 1 : 0);
-				loopChk->setChecked(car->loop);
-				exclusiveChk->setChecked(car->exclusive);
-				{
-					const int visSec = std::max(1, (car->visible_ms + 500) / 1000);
-					const int intSec = std::max(0, (car->interval_ms + 500) / 1000);
-					visibleSpin->setValue(visSec);
-					intervalSpin->setValue(intSec);
-				}
+			loopChk->setChecked(car->loop);
+			exclusiveChk->setChecked(car->exclusive);
+			{
+				const int visSec = std::max(1, (car->visible_ms + 500) / 1000);
+				const int intSec = std::max(0, (car->interval_ms + 500) / 1000);
+				visibleSpin->setValue(visSec);
+				intervalSpin->setValue(intSec);
+			}
 			colorEd->setText(QString::fromStdString(car->dock_color));
-			toggleHkEdit->setKeySequence(QKeySequence(QString::fromStdString(car->toggle_hotkey).trimmed()));
+			toggleHkEdit->setKeySequence(
+				QKeySequence(QString::fromStdString(car->toggle_hotkey).trimmed()));
 			refreshMembers(car->id);
 		}
 		updateStartStopButtons();
 	};
 
-	QObject::connect(toggleHkClear, &QPushButton::clicked, &dlg, [&]() { toggleHkEdit->setKeySequence(QKeySequence()); });
+	QObject::connect(toggleHkClear, &QPushButton::clicked, &dlg,
+			 [&]() { toggleHkEdit->setKeySequence(QKeySequence()); });
 
 	refreshList();
 	if (carList->count() > 0)
 		carList->setCurrentRow(0);
 	loadSelected();
 
-	QObject::connect(carList, &QListWidget::currentItemChanged, &dlg, [&](QListWidgetItem *, QListWidgetItem *) {
-		loadSelected();
-	});
+	QObject::connect(carList, &QListWidget::currentItemChanged, &dlg,
+			 [&](QListWidgetItem *, QListWidgetItem *) { loadSelected(); });
 
 	QObject::connect(pickColor, &QPushButton::clicked, &dlg, [&]() {
 		const QColor cur(colorEd->text().trimmed());
-		const QColor picked = QColorDialog::getColor(cur.isValid() ? cur : QColor("#2EA043"), &dlg, tr("Pick dock color"));
+		const QColor picked =
+			QColorDialog::getColor(cur.isValid() ? cur : QColor("#2EA043"), &dlg, tr("Pick dock color"));
 		if (picked.isValid())
 			colorEd->setText(picked.name(QColor::HexRgb));
 	});
@@ -1166,8 +1094,8 @@ void LowerThirdDock::onManageGroups()
 			return;
 
 		const auto res = QMessageBox::question(&dlg, tr("Delete group"),
-					      tr("Delete this group? This will not delete any lower thirds."),
-					      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+						       tr("Delete this group? This will not delete any lower thirds."),
+						       QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 		if (res != QMessageBox::Yes)
 			return;
 
@@ -1216,10 +1144,10 @@ void LowerThirdDock::onManageGroups()
 		group_cfg upd = *car;
 		upd.title = titleEd->text().trimmed().toStdString();
 		upd.order_mode = orderCmb->currentData().toInt();
-			upd.loop = loopChk->isChecked();
-			upd.exclusive = exclusiveChk->isChecked();
-			upd.visible_ms = std::max(1, visibleSpin->value()) * 1000;
-			upd.interval_ms = std::max(0, intervalSpin->value()) * 1000;
+		upd.loop = loopChk->isChecked();
+		upd.exclusive = exclusiveChk->isChecked();
+		upd.visible_ms = std::max(1, visibleSpin->value()) * 1000;
+		upd.interval_ms = std::max(0, intervalSpin->value()) * 1000;
 		upd.dock_color = colorEd->text().trimmed().toStdString();
 
 		auto normalize = [](const QString &s) -> QString {
@@ -1264,11 +1192,9 @@ void LowerThirdDock::onManageGroups()
 		}
 		vflow::set_group_members(qid.toStdString(), mem);
 
-		// Refresh member list: items may become unavailable/available for other groups after this change.
 		refreshMembers(qid.toStdString());
 		updateStartStopButtons();
 
-		// Update list label and refresh dock styles
 		it->setText(QString::fromStdString(upd.title.empty() ? upd.id : upd.title));
 		rebuildList();
 		rebuildShortcuts();
@@ -1277,14 +1203,9 @@ void LowerThirdDock::onManageGroups()
 
 	dlg.exec();
 
-	// Ensure dock reflects latest persisted group state
 	rebuildList();
 }
 
-
-// -------------------------
-// List rendering
-// -------------------------
 void LowerThirdDock::rebuildList()
 {
 	for (auto &row : rows) {
@@ -1304,21 +1225,20 @@ void LowerThirdDock::rebuildList()
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
 		rowFrame->setProperty("sltActive", QVariant(vflow::is_visible(cfg.id)));
 
-// Mark group membership (dock-only; does not affect overlay output)
-const auto carIds = vflow::groups_containing(cfg.id);
-if (!carIds.empty()) {
-	rowFrame->setProperty("sltInGroup", QVariant(true));
+		const auto carIds = vflow::groups_containing(cfg.id);
+		if (!carIds.empty()) {
+			rowFrame->setProperty("sltInGroup", QVariant(true));
 
-	std::string col = "#2EA043";
-	if (auto *car = vflow::get_group_by_id(carIds.front())) {
-		if (!car->dock_color.empty())
-			col = car->dock_color;
-	}
-	rowFrame->setProperty("sltGroupColor", QString::fromStdString(col));
-} else {
-	rowFrame->setProperty("sltInGroup", QVariant(false));
-	rowFrame->setProperty("sltGroupColor", QString());
-}
+			std::string col = "#2EA043";
+			if (auto *car = vflow::get_group_by_id(carIds.front())) {
+				if (!car->dock_color.empty())
+					col = car->dock_color;
+			}
+			rowFrame->setProperty("sltGroupColor", QString::fromStdString(col));
+		} else {
+			rowFrame->setProperty("sltInGroup", QVariant(false));
+			rowFrame->setProperty("sltGroupColor", QString());
+		}
 
 		rowFrame->setCursor(Qt::PointingHandCursor);
 		applyGroupRowStyle(rowFrame);
@@ -1479,7 +1399,7 @@ void LowerThirdDock::updateRowActiveStyles()
 
 		if (row.row) {
 			row.row->setProperty("sltActive", QVariant(active));
-				applyGroupRowStyle(row.row);
+			applyGroupRowStyle(row.row);
 			row.row->style()->unpolish(row.row);
 			row.row->style()->polish(row.row);
 			row.row->update();
@@ -1573,8 +1493,6 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 {
 	const std::string sid = id.toStdString();
 
-	// Manual override: if this lower third is part of a running group, stop the group-run.
-	// This prevents the scheduler from fighting the user's manual toggle.
 	for (const auto &g : vflow::groups_const()) {
 		bool isMember = false;
 		for (const auto &m : g.members) {
@@ -1600,16 +1518,11 @@ void LowerThirdDock::handleToggleVisible(const QString &id)
 
 	const bool nowVisible = vflow::is_visible(sid);
 
-
 	if (!wasVisible && nowVisible) {
 		if (auto *cfg = vflow::get_by_id(sid)) {
 			const int every = cfg->repeat_every_sec;
 			int visibleSec = cfg->repeat_visible_sec;
 
-			// Same mode matrix as repeatTick()
-			//  - every==0 && visible==0   => full manual (no scheduling)
-			//  - every==0 && visible>0    => manual show + auto-hide after visibleSec
-			//  - every>0                 => full automated. If visible==0, use default.
 			if (every > 0 || visibleSec > 0) {
 				if (every > 0 && visibleSec <= 0)
 					visibleSec = 3;
@@ -1658,19 +1571,19 @@ void LowerThirdDock::handleRemove(const QString &id)
 	if (!vflow::has_output_dir())
 		return;
 
-const std::string sid = id.toStdString();
-const auto cars = vflow::groups_containing(sid);
+	const std::string sid = id.toStdString();
+	const auto cars = vflow::groups_containing(sid);
 
-QString msg = tr("Remove this lower third?\n\nThis action cannot be undone.");
-if (!cars.empty()) {
-	msg += tr("\n\nNote: This lower third is part of %1 group(s) and will also be removed from those groups.")
-		       .arg((int)cars.size());
-}
+	QString msg = tr("Remove this lower third?\n\nThis action cannot be undone.");
+	if (!cars.empty()) {
+		msg += tr("\n\nNote: This lower third is part of %1 group(s) and will also be removed from those groups.")
+			       .arg((int)cars.size());
+	}
 
-const auto res = QMessageBox::question(this, tr("Confirm Removal"), msg,
-				      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-if (res != QMessageBox::Yes)
-	return;
+	const auto res = QMessageBox::question(this, tr("Confirm Removal"), msg, QMessageBox::Yes | QMessageBox::No,
+					       QMessageBox::No);
+	if (res != QMessageBox::Yes)
+		return;
 
 	vflow::remove_lower_third(id.toStdString());
 
@@ -1705,8 +1618,6 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const QString qid = rowUi.id;
 
-	// Group-run countdown (takes precedence): if this lower third is currently being shown as part of
-	// an active group run, show time remaining until the group hides it.
 	if (g_groupHideAtMs.contains(qid) && vflow::is_visible(cfg->id)) {
 		rowUi.subLbl->setVisible(true);
 		const qint64 leftHide = g_groupHideAtMs.value(qid) - now;
@@ -1717,10 +1628,6 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 	const int every = cfg->repeat_every_sec;
 	const int keepVisible = cfg->repeat_visible_sec;
 
-	// Mode matrix:
-	//  - every==0 && keepVisible==0 => full manual (no countdowns)
-	//  - every==0 && keepVisible>0  => manual show + auto-hide countdown
-	//  - every>0                   => full automated (next + hide countdowns)
 	if (every <= 0) {
 		if (keepVisible <= 0) {
 			rowUi.subLbl->clear();
@@ -1736,7 +1643,6 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 		}
 
 		rowUi.subLbl->setVisible(true);
-
 
 		if (!offAtMs_.contains(qid))
 			offAtMs_[qid] = now + (qint64)keepVisible * 1000;
@@ -1778,7 +1684,6 @@ void LowerThirdDock::updateRowCountdowns()
 	for (const auto &r : rows)
 		updateRowCountdownFor(r);
 }
-
 
 void LowerThirdDock::connectObsSignals()
 {
@@ -1832,10 +1737,19 @@ void LowerThirdDock::onObsSourceEvent(void *data, calldata_t *cd)
 	QMetaObject::invokeMethod(self, [self]() { self->populateBrowserSources(true); }, Qt::QueuedConnection);
 }
 
-
 void LowerThirdDock::refreshBrowserSources()
 {
 	populateBrowserSources(true);
+}
+
+void LowerThirdDock::onSceneCollectionChanged()
+{
+	populateBrowserSources(false);
+
+	const QString selected = QString::fromStdString(vflow::target_browser_source_name());
+	if (!selected.isEmpty() && vflow::has_output_dir()) {
+		vflow::rebuild_and_swap();
+	}
 }
 
 void LowerThirdDock::setUpdateAvailable(const QString &remoteVersion, const QString &localVersion)

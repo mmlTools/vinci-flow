@@ -36,6 +36,11 @@ static void on_frontend_event(enum obs_frontend_event event, void *)
 	if (!dock)
 		return;
 
+	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
+		QMetaObject::invokeMethod(dock, [dock]() { dock->onSceneCollectionChanged(); }, Qt::QueuedConnection);
+		return;
+	}
+
 	QMetaObject::invokeMethod(dock, [dock]() { dock->refreshBrowserSources(); }, Qt::QueuedConnection);
 }
 

@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QSaveFile>
 
+#include <obs-frontend-api.h>
 #include <obs.h>
 #include <obs-module.h>
 #include <filesystem>
@@ -31,6 +32,7 @@ namespace vflow {
 
 static std::string g_output_dir;
 static std::string g_target_browser_source;
+static std::unordered_map<std::string, std::string> g_target_browser_source_by_collection;
 static int g_target_browser_width = sltBrowserWidth;
 static int g_target_browser_height = sltBrowserHeight;
 static std::vector<lower_third_cfg> g_items;
@@ -299,23 +301,6 @@ static void extract_keyframes_blocks(std::string &css, std::vector<extracted_key
 	}
 }
 
-static void delete_old_lt_html_keep(const std::string &keepAbsPath)
-{
-	if (!has_output_dir())
-		return;
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QFileInfo keepFi(QString::fromStdString(keepAbsPath));
-	const QString keepName = keepFi.fileName();
-
-	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	for (const QString &fn : list) {
-		if (!keepName.isEmpty() && fn == keepName)
-			continue;
-		d.remove(fn);
-	}
-}
-
 static bool file_exists(const std::string &path)
 {
 	return QFileInfo(QString::fromStdString(path)).exists();
@@ -337,6 +322,17 @@ static std::string module_config_path_cached()
 	cached = p;
 	bfree(p);
 	return cached;
+}
+
+static std::string current_scene_collection_name()
+{
+	char *name = obs_frontend_get_current_scene_collection();
+	if (!name)
+		return {};
+
+	std::string out = name;
+	bfree(name);
+	return out;
 }
 
 static void load_global_config()
@@ -371,6 +367,20 @@ static void load_global_config()
 		LOGI("Loaded target_browser_source: '%s'", g_target_browser_source.c_str());
 	}
 
+	const QJsonValue perVal = root.value("scene_collection_browser_sources");
+	if (perVal.isObject()) {
+		const QJsonObject obj = perVal.toObject();
+		g_target_browser_source_by_collection.clear();
+		for (auto it = obj.begin(); it != obj.end(); ++it) {
+			const QString k = it.key().trimmed();
+			const QString v = it.value().toString().trimmed();
+			if (!k.isEmpty())
+				g_target_browser_source_by_collection[k.toStdString()] = v.toStdString();
+		}
+		if (!g_target_browser_source_by_collection.empty())
+			LOGI("Loaded scene_collection_browser_sources: %zu entries", g_target_browser_source_by_collection.size());
+	}
+
 	const int w = root.value("target_browser_width").toInt(sltBrowserWidth);
 	const int h = root.value("target_browser_height").toInt(sltBrowserHeight);
 	if (w > 0)
@@ -391,23 +401,22 @@ bool save_global_config()
 	QJsonObject root;
 	root["output_dir"] = QString::fromStdString(g_output_dir);
 	root["target_browser_source"] = QString::fromStdString(g_target_browser_source);
+
+	// Persist per-scene-collection Browser Source mapping.
+	{
+		QJsonObject per;
+		for (const auto &kv : g_target_browser_source_by_collection) {
+			if (!kv.first.empty())
+				per[QString::fromStdString(kv.first)] = QString::fromStdString(kv.second);
+		}
+		if (!per.isEmpty())
+			root["scene_collection_browser_sources"] = per;
+	}
 	root["target_browser_width"] = g_target_browser_width;
 	root["target_browser_height"] = g_target_browser_height;
 
 	const QJsonDocument doc(root);
 	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
-}
-
-static std::string find_latest_lt_html()
-{
-	if (!has_output_dir())
-		return {};
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	if (list.isEmpty())
-		return {};
-	return d.filePath(list.first()).toStdString();
 }
 
 static std::string bundle_styles_name(const std::string &)
@@ -418,9 +427,10 @@ static std::string bundle_scripts_name(const std::string &)
 {
 	return "lt.js";
 }
-static std::string bundle_html_name(const std::string &ts)
+
+static std::string bundle_html_name_current()
 {
-	return "lt-" + ts + ".html";
+	return "lt.html";
 }
 
 static std::string bundle_styles_path(const std::string &ts)
@@ -433,22 +443,9 @@ static std::string bundle_scripts_path(const std::string &ts)
 	return has_output_dir() ? join_path(output_dir(), bundle_scripts_name(ts)) : std::string();
 }
 
-static std::string bundle_html_path(const std::string &ts)
+static std::string bundle_html_current_path()
 {
-	return has_output_dir() ? join_path(output_dir(), bundle_html_name(ts)) : std::string();
-}
-
-static void cleanup_old_bundles(int keep)
-{
-	if (!has_output_dir() || keep < 1)
-		return;
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QStringList htmls = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	for (int i = keep; i < htmls.size(); ++i) {
-		const QString fn = htmls.at(i);
-		d.remove(fn);
-	}
+	return has_output_dir() ? join_path(output_dir(), bundle_html_name_current()) : std::string();
 }
 
 static lower_third_cfg default_cfg()
@@ -1291,8 +1288,6 @@ bool set_visible_persist(const std::string &id, bool visible)
 
 	std::vector<std::string> hidden;
 
-	// Group-level exclusive mode: if this item belongs to a group with exclusive enabled,
-	// hide any other currently-visible members in the same group before showing it.
 	if (visible && !before) {
 		const auto owners = groups_containing(id);
 		if (!owners.empty()) {
@@ -1320,7 +1315,6 @@ bool set_visible_persist(const std::string &id, bool visible)
 	if (!save_visible_json())
 		return false;
 
-	// Emit per-id events so the dock stays consistent.
 	const auto visNow = visible_ids();
 	for (const auto &hid : hidden) {
 		core_event ev;
@@ -1383,7 +1377,6 @@ static bool ensure_parameters_files_from_api_templates()
 	if (!has_output_dir())
 		return false;
 
-	// Combined file is optional; if it exists and is invalid, we will not touch it.
 	const std::string combinedPath = path_parameters_json();
 	const bool combinedExists = QFile::exists(QString::fromStdString(combinedPath));
 	QJsonObject combinedRoot;
@@ -1394,7 +1387,6 @@ static bool ensure_parameters_files_from_api_templates()
 	}
 	bool combinedDirty = false;
 
-	// If combined file exists but is invalid, do not modify it (do not interfere).
 	const bool allowCombinedWrite = !combinedExists || combinedOk;
 
 	for (const auto &lt : g_items) {
@@ -1404,7 +1396,6 @@ static bool ensure_parameters_files_from_api_templates()
 
 		QJsonObject apiObj;
 		if (!parse_json_object_text(api, apiObj)) {
-			// Invalid API template; skip file generation for this LT.
 			continue;
 		}
 
@@ -1416,7 +1407,7 @@ static bool ensure_parameters_files_from_api_templates()
 			const std::string txt = read_text_file(perPath);
 			perOk = parse_json_object_text(txt, perObj);
 		}
-		// Do not overwrite an existing invalid JSON file.
+
 		if (perExists && !perOk)
 			continue;
 
@@ -1428,7 +1419,6 @@ static bool ensure_parameters_files_from_api_templates()
 			}
 		}
 		if (!perExists && !perDirty) {
-			// Ensure the file exists even if the object is empty.
 			perDirty = true;
 		}
 		if (perDirty) {
@@ -1487,9 +1477,6 @@ bool load_state_json()
 	}
 
 	const QJsonObject root = doc.object();
-	// Optional hotkey lookup map (forward compatible)
-	// Structure:
-	//   "hotkeys": { "items": {"<lt_id>": "Ctrl+..."}, "groups": {"<group_id>": "Ctrl+..."} }
 	const QJsonObject hkRoot = root.value("hotkeys").toObject();
 	const QJsonObject hkItems = hkRoot.value("items").toObject();
 	const QJsonObject hkGroups = hkRoot.value("groups").toObject();
@@ -1642,7 +1629,6 @@ bool load_state_json()
 		c.exclusive = o.value("exclusive").toBool(false);
 		c.toggle_hotkey = o.value("toggle_hotkey").toString().toStdString();
 		if (c.toggle_hotkey.empty()) {
-			// Backward compatibility: accept older start/stop hotkeys and prefer start_hotkey if present.
 			const QString start = o.value("start_hotkey").toString().trimmed();
 			const QString stop = o.value("stop_hotkey").toString().trimmed();
 			if (!start.isEmpty())
@@ -1805,8 +1791,6 @@ bool save_state_json()
 
 	root["items"] = items;
 
-	// Also persist hotkeys as a compact lookup map. This is used for
-	// forward compatibility and to make hotkeys resilient to future schema changes.
 	QJsonObject hkRoot;
 	QJsonObject hkItems;
 	for (const auto &c : g_items) {
@@ -2053,21 +2037,25 @@ static std::string generate_bundle_html(const std::string &ts, const std::string
 	if (!has_output_dir())
 		return {};
 
-	const std::string abs = bundle_html_path(ts);
-	if (abs.empty())
+	const std::string absCur = bundle_html_current_path();
+	if (absCur.empty())
 		return {};
 
-	if (!write_text_file(abs, build_full_html(ts, cssFile, jsFile)))
+	const std::string html = build_full_html(ts, cssFile, jsFile);
+
+	if (!write_text_file(absCur, html))
 		return {};
-	return abs;
+
+	return absCur;
 }
 
 static obs_source_t *get_target_browser_source()
 {
-	if (g_target_browser_source.empty())
+	const std::string name = target_browser_source_name();
+	if (name.empty())
 		return nullptr;
 
-	return obs_get_source_by_name(g_target_browser_source.c_str());
+	return obs_get_source_by_name(name.c_str());
 }
 
 std::vector<std::string> list_browser_source_names()
@@ -2102,12 +2090,27 @@ std::vector<std::string> list_browser_source_names()
 
 std::string target_browser_source_name()
 {
+	const std::string col = current_scene_collection_name();
+	if (!col.empty()) {
+		auto it = g_target_browser_source_by_collection.find(col);
+		if (it != g_target_browser_source_by_collection.end())
+			return it->second;
+	}
+
 	return g_target_browser_source;
 }
 
 bool set_target_browser_source_name(const std::string &name)
 {
 	g_target_browser_source = name;
+
+	const std::string col = current_scene_collection_name();
+	if (!col.empty()) {
+		if (name.empty())
+			g_target_browser_source_by_collection.erase(col);
+		else
+			g_target_browser_source_by_collection[col] = name;
+	}
 	return save_global_config();
 }
 
@@ -2229,8 +2232,6 @@ bool rebuild_and_swap()
 		return false;
 
 	ensure_output_artifacts_exist();
-	// Create/extend runtime parameters files derived from "API Template" without overwriting
-	// external edits (append missing keys only; use atomic writes).
 	ensure_parameters_files_from_api_templates();
 
 	const std::string ts = now_timestamp_string();
@@ -2242,7 +2243,6 @@ bool rebuild_and_swap()
 	if (newHtml.empty())
 		return false;
 
-	cleanup_old_bundles(1);
 
 	if (target_browser_source_exists()) {
 		swap_target_browser_source_to_file(newHtml);
@@ -2336,7 +2336,7 @@ void init_from_disk()
 	load_state_json();
 	load_visible_json();
 
-	g_last_html_path = find_latest_lt_html();
+	g_last_html_path = bundle_html_current_path();
 
 	if (!g_last_html_path.empty() && file_exists(g_last_html_path)) {
 		if (target_browser_source_exists()) {
