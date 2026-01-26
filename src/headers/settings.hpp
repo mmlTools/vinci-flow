@@ -15,6 +15,7 @@ class QDialogButtonBox;
 class QFontComboBox;
 class QKeySequenceEdit;
 class QLabel;
+class QCheckBox;
 class QTabWidget;
 class QSpinBox;
 class QSlider;
@@ -192,7 +193,7 @@ private slots:
 	void onPickSubtitleColor();
 
 	void onImportTemplateClicked();
-	void onInfoClicked();
+	QString infoLoadText();
 	void onExportTemplateClicked();
 
 	void onOpenHtmlEditorDialog();
@@ -214,7 +215,7 @@ private:
 	void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
 	void updateColorButton(QPushButton *btn, const QColor &c);
 	void rebuildMarketplaceList();
-	void updateApiTemplateUi();
+	void updateApiBridgeUi();
 
 private:
 	QString currentId;
@@ -259,13 +260,15 @@ private:
 	QPlainTextEdit *htmlEdit = nullptr;
 	QPlainTextEdit *cssEdit = nullptr;
 	QPlainTextEdit *jsEdit = nullptr;
-	QPlainTextEdit *apiEdit = nullptr;
-	QLineEdit *apiPathEdit = nullptr;
-	QLabel *apiStatusLabel = nullptr;
+	QCheckBox *apiBridgeEnable = nullptr;
+	QLineEdit *apiBridgePathEdit = nullptr;
+	QLabel *apiBridgeStatusPrefixLabel = nullptr;
+	QLabel *apiBridgeStatusValueLabel = nullptr;
+	QPushButton *apiBridgeCopyBtn = nullptr;
+	QPushButton *apiBridgeOpenBtn = nullptr;
 
 	QPushButton *importBtn = nullptr;
 	QPushButton *exportBtn = nullptr;
-	QPushButton *infoBtn = nullptr;
 
 	QDialogButtonBox *buttonBox = nullptr;
 
@@ -285,7 +288,7 @@ private:
 
 	QListWidget *marketList = nullptr;
 	QLabel *marketStatus = nullptr;
-	// (Update banner moved to Dock UI)
+
 	QPushButton *seeAllLowerThirdsBtn = nullptr;
 	QMultiHash<QString, QPointer<QLabel>> marketIconByUrl;
 };
