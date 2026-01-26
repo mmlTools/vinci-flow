@@ -2207,8 +2207,10 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 
 	const QJsonObject obj = doc.object();
 
-	cfg->title = obj.value("title").toString().toStdString();
-	cfg->subtitle = obj.value("subtitle").toString().toStdString();
+	// Legacy fields for backward compatibility
+	//cfg->title = obj.value("title").toString().toStdString();
+	//cfg->subtitle = obj.value("subtitle").toString().toStdString();
+
 	cfg->title_size = obj.value("title_size").toInt(cfg->title_size);
 	cfg->subtitle_size = obj.value("subtitle_size").toInt(cfg->subtitle_size);
 	cfg->title_size = std::max(6, std::min(200, cfg->title_size));

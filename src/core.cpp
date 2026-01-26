@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include <chrono>
+#include <climits>
 
 #include <QDir>
 #include <QFile>
@@ -526,7 +527,6 @@ static lower_third_cfg default_cfg()
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  color: {{TITLE_COLOR}};
 }
 
 .slt-avatar {
@@ -548,12 +548,14 @@ static lower_third_cfg default_cfg()
   font-weight: 700;
   font-size: {{TITLE_SIZE}}px;
   line-height: 1.1;
+  color: {{TITLE_COLOR}};
 }
 
 .slt-subtitle {
   opacity: 0.9;
   font-size: {{SUBTITLE_SIZE}}px;
   margin-top: 2px;
+  color: {{SUBTITLE_COLOR}};
 }
 )CSS";
 
@@ -589,7 +591,7 @@ static lower_third_cfg default_cfg()
   }
 
   root.__slt_show = function () {
-    // so your custom animation in stuff here
+    // Do your custom animation in stuff here
   };
 
   root.__slt_hide = function () {
@@ -1949,19 +1951,9 @@ static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssF
 	for (const auto &c : g_items) {
 
 		std::string per = c.css_template;
-		per = replace_all(per, "{{ID}}", c.id);
-		per = replace_all(per, "{{PRIMARY_COLOR}}", c.primary_color);
-		per = replace_all(per, "{{SECONDARY_COLOR}}", c.secondary_color);
-		per = replace_all(per, "{{TITLE_COLOR}}", c.title_color);
-		per = replace_all(per, "{{SUBTITLE_COLOR}}", c.subtitle_color);
 
-		per = replace_all(per, "{{BG_COLOR}}", c.primary_color);
-		per = replace_all(per, "{{TEXT_COLOR}}", c.title_color);
-		per = replace_all(per, "{{OPACITY}}", std::to_string(c.opacity));
-		per = replace_all(per, "{{RADIUS}}", std::to_string(c.radius));
-		per = replace_all(per, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
-		per = replace_all(per, "{{TITLE_SIZE}}", std::to_string(c.title_size));
-		per = replace_all(per, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
+		const auto repl = build_placeholder_map(c);
+		per = replace_placeholders(std::move(per), repl);
 
 		std::vector<extracted_keyframes> extracted;
 		extract_keyframes_blocks(per, extracted);
@@ -2810,4 +2802,77 @@ bool move_lower_third(const std::string &id, int delta)
 	return true;
 }
 
+bool sort_lower_thirds_by_group()
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
+
+	if (g_items.size() < 2)
+		return true;
+
+	std::unordered_map<std::string, int> group_rank;
+	group_rank.reserve(g_groups.size());
+	for (size_t gi = 0; gi < g_groups.size(); ++gi)
+		group_rank[g_groups[gi].id] = (int)gi;
+
+	struct item_sort {
+		lower_third_cfg cfg;
+		int original_index = 0;
+		bool grouped = false;
+		int group_order = INT_MAX / 2; 
+	};
+
+	std::vector<item_sort> tmp;
+	tmp.reserve(g_items.size());
+
+	for (int i = 0; i < (int)g_items.size(); ++i) {
+		item_sort t;
+		t.cfg = g_items[(size_t)i];
+		t.original_index = i;
+
+		const auto owners = groups_containing(t.cfg.id);
+		if (!owners.empty()) {
+			t.grouped = true;
+			auto it = group_rank.find(owners.front());
+			t.group_order = (it != group_rank.end()) ? it->second : INT_MAX / 2;
+		}
+
+		tmp.push_back(std::move(t));
+	}
+
+	std::stable_sort(tmp.begin(), tmp.end(), [](const item_sort &a, const item_sort &b) {
+		if (a.grouped != b.grouped)
+			return a.grouped > b.grouped; 
+
+		if (a.grouped && b.grouped) {
+			if (a.group_order != b.group_order)
+				return a.group_order < b.group_order;
+		}
+
+		return a.original_index < b.original_index;
+	});
+
+	for (size_t i = 0; i < tmp.size(); ++i) {
+		g_items[i] = std::move(tmp[i].cfg);
+		g_items[i].order = (int)i;
+	}
+
+	if (!save_state_json())
+		return false;
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = "";
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
 } // namespace vflow
+

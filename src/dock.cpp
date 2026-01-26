@@ -913,19 +913,30 @@ void LowerThirdDock::onManageGroups()
 
 	auto *root = new QHBoxLayout(&dlg);
 
-	// Left: group list
 	auto *left = new QVBoxLayout();
 	auto *carList = new QListWidget(&dlg);
 	carList->setSelectionMode(QAbstractItemView::SingleSelection);
 	left->addWidget(carList, 1);
 
 	auto *leftBtns = new QHBoxLayout();
-	auto *btnAdd = new QPushButton(tr("Add"), &dlg);
+	auto *btnAdd = new QPushButton(tr("New"), &dlg);
+	btnAdd->setCursor(Qt::PointingHandCursor);
+	btnAdd->setToolTip(tr("Add new group"));
 	auto *btnDel = new QPushButton(tr("Delete"), &dlg);
+	btnDel->setCursor(Qt::PointingHandCursor);
+	btnDel->setToolTip(tr("Delete selected group"));
+	auto *btnSort = new QPushButton(tr("Sort"), &dlg);
+	btnSort->setCursor(Qt::PointingHandCursor);
+	btnSort->setToolTip(tr("Sort Items in dock by their group"));
 	auto *btnStart = new QPushButton(tr("Start"), &dlg);
+	btnStart->setCursor(Qt::PointingHandCursor);
+	btnStart->setToolTip(tr("Start carousel for selected group"));
 	auto *btnStop = new QPushButton(tr("Stop"), &dlg);
+	btnStop->setCursor(Qt::PointingHandCursor);
+	btnStop->setToolTip(tr("Stop carousel for selected group"));
 	leftBtns->addWidget(btnAdd);
 	leftBtns->addWidget(btnDel);
+	leftBtns->addWidget(btnSort);
 	leftBtns->addStretch(1);
 	leftBtns->addWidget(btnStart);
 	leftBtns->addWidget(btnStop);
@@ -933,27 +944,20 @@ void LowerThirdDock::onManageGroups()
 
 	root->addLayout(left, 1);
 
-	// Right: editor
 	auto *right = new QVBoxLayout();
-	auto *form = new QFormLayout();
 
-	auto *titleEd = new QLineEdit(&dlg);
-	auto *visibleSpin = new QSpinBox(&dlg);
-		visibleSpin->setRange(1, 600);
-		visibleSpin->setSuffix(tr(" s"));
+	auto *tabs = new QTabWidget(&dlg);
+	auto *tabGeneral = new QWidget(&dlg);
+	auto *tabFeatures = new QWidget(&dlg);
+		tabs->addTab(tabGeneral, tr("General"));
+		tabs->addTab(tabFeatures, tr("Group Features"));
 
-	auto *intervalSpin = new QSpinBox(&dlg);
-		intervalSpin->setRange(0, 600);
-		intervalSpin->setSuffix(tr(" s"));
+	auto *generalForm = new QFormLayout(tabGeneral);
+	auto *titleEd = new QLineEdit(tabGeneral);
 
-	auto *orderCmb = new QComboBox(&dlg);
-	orderCmb->addItem(tr("Linear"), 0);
-	orderCmb->addItem(tr("Randomized"), 1);
+	auto *toggleHkEdit = new QKeySequenceEdit(tabGeneral);
+	toggleHkEdit->setToolTip(tr("Set hotkey to toggle the carousel for this group"));
 
-		auto *loopChk = new QCheckBox(tr("Loop group"), &dlg);
-		auto *exclusiveChk = new QCheckBox(tr("Exclusive"), &dlg);
-
-	auto *toggleHkEdit = new QKeySequenceEdit(&dlg);
 	auto *toggleHkClear = new QPushButton(&dlg);
 	toggleHkClear->setToolTip(tr("Clear hotkey"));
 	toggleHkClear->setCursor(Qt::PointingHandCursor);
@@ -966,33 +970,52 @@ void LowerThirdDock::onManageGroups()
 		r->setSpacing(4);
 		r->addWidget(toggleHkEdit, 1);
 		r->addWidget(toggleHkClear);
-		form->addRow(tr("Toggle Hotkey"), r);
+		generalForm->addRow(tr("Toggle Hotkey"), r);
 	}
 
-	auto *colorEd = new QLineEdit(&dlg);
+	auto *colorEd = new QLineEdit(tabGeneral);
 	colorEd->setPlaceholderText(tr("#2EA043"));
 
-	auto *pickColor = new QPushButton(tr("Pick…"), &dlg);
+	auto *pickColor = new QPushButton(tr("Pick…"), tabGeneral);
 	auto *colorRow = new QHBoxLayout();
 	colorRow->addWidget(colorEd, 1);
 	colorRow->addWidget(pickColor);
 
-		form->addRow(tr("Title"), titleEd);
-		form->addRow(tr("Order"), orderCmb);
-		form->addRow(tr("Visible duration"), visibleSpin);
-		form->addRow(tr("Time between items"), intervalSpin);
-		form->addRow(tr("Dock highlight color"), colorRow);
-		{
-			auto *checks = new QHBoxLayout();
-			checks->setContentsMargins(0, 0, 0, 0);
-			checks->setSpacing(12);
-			checks->addWidget(loopChk);
-			checks->addWidget(exclusiveChk);
-			checks->addStretch(1);
-			form->addRow(QString(), checks);
-		}
+	generalForm->addRow(tr("Title"), titleEd);
+	generalForm->addRow(tr("Dock highlight color"), colorRow);
 
-	right->addLayout(form);
+	auto *featuresForm = new QFormLayout(tabFeatures);
+	auto *orderCmb = new QComboBox(tabFeatures);
+	orderCmb->addItem(tr("Linear"), 0);
+	orderCmb->addItem(tr("Randomized"), 1);
+
+	auto *visibleSpin = new QSpinBox(tabFeatures);
+		visibleSpin->setRange(1, 600);
+		visibleSpin->setSuffix(tr(" s"));
+		visibleSpin->setToolTip(tr("Duration each item is visible during carousel"));
+
+	auto *intervalSpin = new QSpinBox(tabFeatures);
+		intervalSpin->setRange(0, 600);
+		intervalSpin->setSuffix(tr(" s"));
+		intervalSpin->setToolTip(tr("Time until next item during carousel"));
+
+	auto *loopChk = new QCheckBox(tr("Loop group"), tabFeatures);
+	auto *exclusiveChk = new QCheckBox(tr("Exclusive"), tabFeatures);
+
+	featuresForm->addRow(tr("Carousel order"), orderCmb);
+	featuresForm->addRow(tr("Visible duration"), visibleSpin);
+	featuresForm->addRow(tr("Time between items"), intervalSpin);
+	{
+		auto *checks = new QHBoxLayout();
+		checks->setContentsMargins(0, 0, 0, 0);
+		checks->setSpacing(12);
+		checks->addWidget(loopChk);
+		checks->addWidget(exclusiveChk);
+		checks->addStretch(1);
+		featuresForm->addRow(QString(), checks);
+	}
+
+	right->addWidget(tabs);
 
 	auto *membersLbl = new QLabel(tr("Members (lower thirds)"), &dlg);
 	right->addWidget(membersLbl);
@@ -1129,6 +1152,11 @@ void LowerThirdDock::onManageGroups()
 		}
 	});
 
+	QObject::connect(btnSort, &QPushButton::clicked, &dlg, [&]() {
+		(void)vflow::sort_lower_thirds_by_group();
+		emit requestSave();
+	});
+
 	QObject::connect(btnDel, &QPushButton::clicked, &dlg, [&]() {
 		auto *it = carList->currentItem();
 		if (!it)
@@ -1198,10 +1226,8 @@ void LowerThirdDock::onManageGroups()
 			return QKeySequence(s).toString(QKeySequence::PortableText).trimmed();
 		};
 
-		// Toggle hotkey (PortableText) + uniqueness enforcement
 		const QString seq = normalize(toggleHkEdit->keySequence().toString(QKeySequence::PortableText));
 		if (!seq.isEmpty()) {
-			// If this hotkey is already used by another lower third or group, clear the previous usage.
 			for (auto &it : vflow::all()) {
 				if (it.id == upd.id)
 					continue;
@@ -1246,6 +1272,7 @@ void LowerThirdDock::onManageGroups()
 		it->setText(QString::fromStdString(upd.title.empty() ? upd.id : upd.title));
 		rebuildList();
 		rebuildShortcuts();
+		dlg.accept();
 	});
 
 	dlg.exec();
@@ -1517,7 +1544,6 @@ void LowerThirdDock::rebuildShortcuts()
 		connect(sc, &QShortcut::activated, this, [this, id]() { handleToggleVisible(id); });
 	}
 
-	// Group toggle hotkeys
 	for (const auto &g : vflow::groups_const()) {
 		const QString groupId = QString::fromStdString(g.id);
 		const QString seqStr = QString::fromStdString(g.toggle_hotkey).trimmed();
