@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include <chrono>
+#include <climits>
 
 #include <QDir>
 #include <QFile>
@@ -21,6 +22,7 @@
 #include <QJsonArray>
 #include <QSaveFile>
 
+#include <obs-frontend-api.h>
 #include <obs.h>
 #include <obs-module.h>
 #include <filesystem>
@@ -30,6 +32,7 @@ namespace vflow {
 
 static std::string g_output_dir;
 static std::string g_target_browser_source;
+static std::unordered_map<std::string, std::string> g_target_browser_source_by_collection;
 static int g_target_browser_width = sltBrowserWidth;
 static int g_target_browser_height = sltBrowserHeight;
 static std::vector<lower_third_cfg> g_items;
@@ -298,23 +301,6 @@ static void extract_keyframes_blocks(std::string &css, std::vector<extracted_key
 	}
 }
 
-static void delete_old_lt_html_keep(const std::string &keepAbsPath)
-{
-	if (!has_output_dir())
-		return;
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QFileInfo keepFi(QString::fromStdString(keepAbsPath));
-	const QString keepName = keepFi.fileName();
-
-	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	for (const QString &fn : list) {
-		if (!keepName.isEmpty() && fn == keepName)
-			continue;
-		d.remove(fn);
-	}
-}
-
 static bool file_exists(const std::string &path)
 {
 	return QFileInfo(QString::fromStdString(path)).exists();
@@ -336,6 +322,17 @@ static std::string module_config_path_cached()
 	cached = p;
 	bfree(p);
 	return cached;
+}
+
+static std::string current_scene_collection_name()
+{
+	char *name = obs_frontend_get_current_scene_collection();
+	if (!name)
+		return {};
+
+	std::string out = name;
+	bfree(name);
+	return out;
 }
 
 static void load_global_config()
@@ -370,6 +367,20 @@ static void load_global_config()
 		LOGI("Loaded target_browser_source: '%s'", g_target_browser_source.c_str());
 	}
 
+	const QJsonValue perVal = root.value("scene_collection_browser_sources");
+	if (perVal.isObject()) {
+		const QJsonObject obj = perVal.toObject();
+		g_target_browser_source_by_collection.clear();
+		for (auto it = obj.begin(); it != obj.end(); ++it) {
+			const QString k = it.key().trimmed();
+			const QString v = it.value().toString().trimmed();
+			if (!k.isEmpty())
+				g_target_browser_source_by_collection[k.toStdString()] = v.toStdString();
+		}
+		if (!g_target_browser_source_by_collection.empty())
+			LOGI("Loaded scene_collection_browser_sources: %zu entries", g_target_browser_source_by_collection.size());
+	}
+
 	const int w = root.value("target_browser_width").toInt(sltBrowserWidth);
 	const int h = root.value("target_browser_height").toInt(sltBrowserHeight);
 	if (w > 0)
@@ -390,23 +401,22 @@ bool save_global_config()
 	QJsonObject root;
 	root["output_dir"] = QString::fromStdString(g_output_dir);
 	root["target_browser_source"] = QString::fromStdString(g_target_browser_source);
+
+	// Persist per-scene-collection Browser Source mapping.
+	{
+		QJsonObject per;
+		for (const auto &kv : g_target_browser_source_by_collection) {
+			if (!kv.first.empty())
+				per[QString::fromStdString(kv.first)] = QString::fromStdString(kv.second);
+		}
+		if (!per.isEmpty())
+			root["scene_collection_browser_sources"] = per;
+	}
 	root["target_browser_width"] = g_target_browser_width;
 	root["target_browser_height"] = g_target_browser_height;
 
 	const QJsonDocument doc(root);
 	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
-}
-
-static std::string find_latest_lt_html()
-{
-	if (!has_output_dir())
-		return {};
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QStringList list = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	if (list.isEmpty())
-		return {};
-	return d.filePath(list.first()).toStdString();
 }
 
 static std::string bundle_styles_name(const std::string &)
@@ -417,9 +427,10 @@ static std::string bundle_scripts_name(const std::string &)
 {
 	return "lt.js";
 }
-static std::string bundle_html_name(const std::string &ts)
+
+static std::string bundle_html_name_current()
 {
-	return "lt-" + ts + ".html";
+	return "lt.html";
 }
 
 static std::string bundle_styles_path(const std::string &ts)
@@ -432,22 +443,9 @@ static std::string bundle_scripts_path(const std::string &ts)
 	return has_output_dir() ? join_path(output_dir(), bundle_scripts_name(ts)) : std::string();
 }
 
-static std::string bundle_html_path(const std::string &ts)
+static std::string bundle_html_current_path()
 {
-	return has_output_dir() ? join_path(output_dir(), bundle_html_name(ts)) : std::string();
-}
-
-static void cleanup_old_bundles(int keep)
-{
-	if (!has_output_dir() || keep < 1)
-		return;
-
-	QDir d(QString::fromStdString(output_dir()));
-	const QStringList htmls = d.entryList(QStringList() << "lt-*.html", QDir::Files, QDir::Time);
-	for (int i = keep; i < htmls.size(); ++i) {
-		const QString fn = htmls.at(i);
-		d.remove(fn);
-	}
+	return has_output_dir() ? join_path(output_dir(), bundle_html_name_current()) : std::string();
 }
 
 static lower_third_cfg default_cfg()
@@ -526,7 +524,6 @@ static lower_third_cfg default_cfg()
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  color: {{TITLE_COLOR}};
 }
 
 .slt-avatar {
@@ -548,12 +545,14 @@ static lower_third_cfg default_cfg()
   font-weight: 700;
   font-size: {{TITLE_SIZE}}px;
   line-height: 1.1;
+  color: {{TITLE_COLOR}};
 }
 
 .slt-subtitle {
   opacity: 0.9;
   font-size: {{SUBTITLE_SIZE}}px;
   margin-top: 2px;
+  color: {{SUBTITLE_COLOR}};
 }
 )CSS";
 
@@ -589,7 +588,7 @@ static lower_third_cfg default_cfg()
   }
 
   root.__slt_show = function () {
-    // so your custom animation in stuff here
+    // Do your custom animation in stuff here
   };
 
   root.__slt_hide = function () {
@@ -686,6 +685,54 @@ html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 )CSS";
 }
 
+static inline std::string ltrim_copy(std::string s)
+{
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+				       [](unsigned char ch) { return !std::isspace(ch); }));
+	return s;
+}
+
+static inline std::string rtrim_copy(std::string s)
+{
+	s.erase(std::find_if(s.rbegin(), s.rend(),
+			     [](unsigned char ch) { return !std::isspace(ch); })
+			.base(),
+		s.end());
+	return s;
+}
+
+static inline bool contains_id(const std::string &s, const std::string &id)
+{
+	return s.find("#" + id) != std::string::npos;
+}
+
+static inline std::string scope_selector_part_best_effort(std::string part, const std::string &id)
+{
+	const auto orig = part;
+	auto trimmed = ltrim_copy(part);
+
+	if (contains_id(trimmed, id))
+		return orig;
+
+	if (trimmed.find('&') != std::string::npos) {
+		std::string replaced = trimmed;
+		const std::string needle = "&";
+		const std::string rep = "#" + id;
+
+		size_t pos = 0;
+		while ((pos = replaced.find(needle, pos)) != std::string::npos) {
+			replaced.replace(pos, needle.size(), rep);
+			pos += rep.size();
+		}
+
+		const auto lead_len = orig.size() - ltrim_copy(orig).size();
+		return orig.substr(0, lead_len) + replaced;
+	}
+
+	const auto lead_len = orig.size() - ltrim_copy(orig).size();
+	return orig.substr(0, lead_len) + "#" + id + " " + trimmed;
+}
+
 static std::string scope_css_best_effort(const lower_third_cfg &c)
 {
 	std::string css = c.css_template;
@@ -703,11 +750,10 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 	out += "/* ---- " + c.id + " ---- */\n";
 
 	while (std::getline(in, line)) {
-		std::string trimmed = line;
-		trimmed.erase(trimmed.begin(), std::find_if(trimmed.begin(), trimmed.end(),
-							    [](unsigned char ch) { return !std::isspace(ch); }));
+		std::string trimmed = ltrim_copy(line);
 
 		const bool isAt = (!trimmed.empty() && trimmed[0] == '@');
+
 		if (!isAt && line.find('{') != std::string::npos) {
 			const auto pos = line.find('{');
 			std::string sel = line.substr(0, pos);
@@ -717,14 +763,17 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 			std::string part;
 			std::string newSel;
 			bool first = true;
+
 			while (std::getline(ss, part, ',')) {
-				if (part.find("#" + c.id) == std::string::npos)
-					part = " #" + c.id + " " + part;
+				part = rtrim_copy(part); 
+				part = scope_selector_part_best_effort(part, c.id);
+
 				if (!first)
 					newSel += ",";
 				newSel += part;
 				first = false;
 			}
+
 			out += newSel + rest + "\n";
 		} else {
 			out += line + "\n";
@@ -736,7 +785,6 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 
 static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 {
-
 	std::string map = "{\n";
 	for (const auto &c : items) {
 		const bool inCustom = (c.anim_in == "custom_handled_in");
@@ -876,7 +924,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     try {
       const a = new Audio(url);
       a.volume = 1.0;
-      // play() may be blocked in some environments; ignore errors
       const p = a.play();
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch (e) {}
@@ -889,8 +936,26 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     return (typeof fn === "function") ? fn : null;
   }
 
-  function stripAnimate(el) {
-    // Remove only what we might have applied (do not destroy author classes).
+  // ---- Animation target resolution ----
+  // If the LT root <li> has lt-parent-styles, animate the first element child.
+  function getAnimTarget(rootEl) {
+    try {
+      if (rootEl && rootEl.classList && rootEl.classList.contains("lt-parent-styles")) {
+        const child = rootEl.firstElementChild;
+        return child || rootEl;
+      }
+    } catch (e) {}
+    return rootEl;
+  }
+
+  function getHookTarget(rootEl) {
+    return getAnimTarget(rootEl);
+  }
+
+  function stripAnimate(rootEl) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return;
+
     try { el.classList.remove("animate__animated"); } catch (e) {}
     const added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
     for (const c of added) {
@@ -902,7 +967,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     el.style.animationTimingFunction = "";
   }
 
-  function addAnimClasses(el, cls) {
+  function addAnimClasses(rootEl, cls) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return;
+
     el.__slt_added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
     try {
       el.classList.add("animate__animated");
@@ -915,7 +983,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     });
   }
 
-  function waitOwnAnimationEnd(el, timeoutMs) {
+  function waitOwnAnimationEnd(rootEl, timeoutMs) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return Promise.resolve();
+
     return new Promise((resolve) => {
       let done = false;
 
@@ -926,7 +997,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       };
 
       const onEnd = (ev) => {
-        // Only end when the <li> itself ends its animation (ignore child animations)
+        // Only end when the anim-target itself ends its animation (ignore child animations)
         if (ev.target !== el) return;
         cleanup();
         resolve();
@@ -937,7 +1008,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     });
   }
 
-  async function runHookWithTimeout(el, name, timeoutMs) {
+  async function runHookWithTimeout(rootEl, name, timeoutMs) {
+    const el = getHookTarget(rootEl);
     const fn = getHook(el, name);
     if (!fn) return;
 
@@ -970,7 +1042,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     setMounted(el, true);
     stripAnimate(el);
 
-    // Audio cue (handled here so it works even if the LT template does not implement playback)
     if (cfg && cfg.inSound) playCue(cfg.inSound);
 
     if (cfg && cfg.inCustom) {
@@ -979,22 +1050,22 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     }
 
     if (cfg && hasAnim(cfg.inCls)) {
-      if (cfg.delay > 0) el.style.animationDelay = cfg.delay + "ms";
+      if (cfg.delay > 0) {
+        const t = getAnimTarget(el);
+        if (t) t.style.animationDelay = cfg.delay + "ms";
+      }
       addAnimClasses(el, cfg.inCls);
       await waitOwnAnimationEnd(el, MAX_ANIM_WAIT_MS);
       stripAnimate(el);
-      el.style.animationDelay = "";
     }
   }
 
   async function doHide(el, cfg) {
     stripAnimate(el);
 
-    // Audio cue (handled here so it works even if the LT template does not implement playback)
     if (cfg && cfg.outSound) playCue(cfg.outSound);
 
     if (cfg && cfg.outCustom) {
-      // Wait for the template-driven exit animation before unmounting the <li>
       await runHookWithTimeout(el, "__slt_hide", MAX_CUSTOM_WAIT_MS);
       setMounted(el, false);
       return;
@@ -1010,10 +1081,9 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   }
 
   function enqueue(el, job) {
-    // Serialize transitions per <li> so polling never overlaps operations.
     el.__slt_queue = (el.__slt_queue || Promise.resolve())
       .then(job)
-      .catch(() => {}); // never break the chain
+      .catch(() => {});
   }
 
   async function tick() {
@@ -1033,22 +1103,18 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       const cfg = animMap[el.id] || {};
       const want = visibleSet.has(el.id);
 
-      // Store desired state
       el.dataset.want = want ? "1" : "0";
 
       const isMounted = el.classList.contains("slt-visible") || el.style.display === "block";
 
-      // Already in desired mounted state
       if (want && isMounted) continue;
       if (!want && !isMounted) continue;
 
-      // Avoid enqueuing duplicates while one is active
       if (el.dataset.busy === "1") continue;
 
       el.dataset.busy = "1";
       enqueue(el, async () => {
         try {
-          // Re-check desire at execution time (poll may have changed)
           const stillWant = el.dataset.want === "1";
           if (stillWant) await doShow(el, cfg);
           else await doHide(el, cfg);
@@ -1063,7 +1129,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     tick();
     setInterval(tick, 350);
 
-    // Parameter polling is async and independent from animation flow.
     pollParameters();
     setInterval(pollParameters, PARAMS_POLL_MS);
   });
@@ -1289,8 +1354,6 @@ bool set_visible_persist(const std::string &id, bool visible)
 
 	std::vector<std::string> hidden;
 
-	// Group-level exclusive mode: if this item belongs to a group with exclusive enabled,
-	// hide any other currently-visible members in the same group before showing it.
 	if (visible && !before) {
 		const auto owners = groups_containing(id);
 		if (!owners.empty()) {
@@ -1318,7 +1381,6 @@ bool set_visible_persist(const std::string &id, bool visible)
 	if (!save_visible_json())
 		return false;
 
-	// Emit per-id events so the dock stays consistent.
 	const auto visNow = visible_ids();
 	for (const auto &hid : hidden) {
 		core_event ev;
@@ -1381,7 +1443,6 @@ static bool ensure_parameters_files_from_api_templates()
 	if (!has_output_dir())
 		return false;
 
-	// Combined file is optional; if it exists and is invalid, we will not touch it.
 	const std::string combinedPath = path_parameters_json();
 	const bool combinedExists = QFile::exists(QString::fromStdString(combinedPath));
 	QJsonObject combinedRoot;
@@ -1392,7 +1453,6 @@ static bool ensure_parameters_files_from_api_templates()
 	}
 	bool combinedDirty = false;
 
-	// If combined file exists but is invalid, do not modify it (do not interfere).
 	const bool allowCombinedWrite = !combinedExists || combinedOk;
 
 	for (const auto &lt : g_items) {
@@ -1402,7 +1462,6 @@ static bool ensure_parameters_files_from_api_templates()
 
 		QJsonObject apiObj;
 		if (!parse_json_object_text(api, apiObj)) {
-			// Invalid API template; skip file generation for this LT.
 			continue;
 		}
 
@@ -1414,7 +1473,7 @@ static bool ensure_parameters_files_from_api_templates()
 			const std::string txt = read_text_file(perPath);
 			perOk = parse_json_object_text(txt, perObj);
 		}
-		// Do not overwrite an existing invalid JSON file.
+
 		if (perExists && !perOk)
 			continue;
 
@@ -1426,7 +1485,6 @@ static bool ensure_parameters_files_from_api_templates()
 			}
 		}
 		if (!perExists && !perDirty) {
-			// Ensure the file exists even if the object is empty.
 			perDirty = true;
 		}
 		if (perDirty) {
@@ -1485,9 +1543,6 @@ bool load_state_json()
 	}
 
 	const QJsonObject root = doc.object();
-	// Optional hotkey lookup map (forward compatible)
-	// Structure:
-	//   "hotkeys": { "items": {"<lt_id>": "Ctrl+..."}, "groups": {"<group_id>": "Ctrl+..."} }
 	const QJsonObject hkRoot = root.value("hotkeys").toObject();
 	const QJsonObject hkItems = hkRoot.value("items").toObject();
 	const QJsonObject hkGroups = hkRoot.value("groups").toObject();
@@ -1640,7 +1695,6 @@ bool load_state_json()
 		c.exclusive = o.value("exclusive").toBool(false);
 		c.toggle_hotkey = o.value("toggle_hotkey").toString().toStdString();
 		if (c.toggle_hotkey.empty()) {
-			// Backward compatibility: accept older start/stop hotkeys and prefer start_hotkey if present.
 			const QString start = o.value("start_hotkey").toString().trimmed();
 			const QString stop = o.value("stop_hotkey").toString().trimmed();
 			if (!start.isEmpty())
@@ -1803,8 +1857,6 @@ bool save_state_json()
 
 	root["items"] = items;
 
-	// Also persist hotkeys as a compact lookup map. This is used for
-	// forward compatibility and to make hotkeys resilient to future schema changes.
 	QJsonObject hkRoot;
 	QJsonObject hkItems;
 	for (const auto &c : g_items) {
@@ -1949,19 +2001,9 @@ static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssF
 	for (const auto &c : g_items) {
 
 		std::string per = c.css_template;
-		per = replace_all(per, "{{ID}}", c.id);
-		per = replace_all(per, "{{PRIMARY_COLOR}}", c.primary_color);
-		per = replace_all(per, "{{SECONDARY_COLOR}}", c.secondary_color);
-		per = replace_all(per, "{{TITLE_COLOR}}", c.title_color);
-		per = replace_all(per, "{{SUBTITLE_COLOR}}", c.subtitle_color);
 
-		per = replace_all(per, "{{BG_COLOR}}", c.primary_color);
-		per = replace_all(per, "{{TEXT_COLOR}}", c.title_color);
-		per = replace_all(per, "{{OPACITY}}", std::to_string(c.opacity));
-		per = replace_all(per, "{{RADIUS}}", std::to_string(c.radius));
-		per = replace_all(per, "{{FONT_FAMILY}}", c.font_family.empty() ? "Inter" : c.font_family);
-		per = replace_all(per, "{{TITLE_SIZE}}", std::to_string(c.title_size));
-		per = replace_all(per, "{{SUBTITLE_SIZE}}", std::to_string(c.subtitle_size));
+		const auto repl = build_placeholder_map(c);
+		per = replace_placeholders(std::move(per), repl);
 
 		std::vector<extracted_keyframes> extracted;
 		extract_keyframes_blocks(per, extracted);
@@ -2061,21 +2103,25 @@ static std::string generate_bundle_html(const std::string &ts, const std::string
 	if (!has_output_dir())
 		return {};
 
-	const std::string abs = bundle_html_path(ts);
-	if (abs.empty())
+	const std::string absCur = bundle_html_current_path();
+	if (absCur.empty())
 		return {};
 
-	if (!write_text_file(abs, build_full_html(ts, cssFile, jsFile)))
+	const std::string html = build_full_html(ts, cssFile, jsFile);
+
+	if (!write_text_file(absCur, html))
 		return {};
-	return abs;
+
+	return absCur;
 }
 
 static obs_source_t *get_target_browser_source()
 {
-	if (g_target_browser_source.empty())
+	const std::string name = target_browser_source_name();
+	if (name.empty())
 		return nullptr;
 
-	return obs_get_source_by_name(g_target_browser_source.c_str());
+	return obs_get_source_by_name(name.c_str());
 }
 
 std::vector<std::string> list_browser_source_names()
@@ -2110,12 +2156,27 @@ std::vector<std::string> list_browser_source_names()
 
 std::string target_browser_source_name()
 {
+	const std::string col = current_scene_collection_name();
+	if (!col.empty()) {
+		auto it = g_target_browser_source_by_collection.find(col);
+		if (it != g_target_browser_source_by_collection.end())
+			return it->second;
+	}
+
 	return g_target_browser_source;
 }
 
 bool set_target_browser_source_name(const std::string &name)
 {
 	g_target_browser_source = name;
+
+	const std::string col = current_scene_collection_name();
+	if (!col.empty()) {
+		if (name.empty())
+			g_target_browser_source_by_collection.erase(col);
+		else
+			g_target_browser_source_by_collection[col] = name;
+	}
 	return save_global_config();
 }
 
@@ -2237,8 +2298,6 @@ bool rebuild_and_swap()
 		return false;
 
 	ensure_output_artifacts_exist();
-	// Create/extend runtime parameters files derived from "API Template" without overwriting
-	// external edits (append missing keys only; use atomic writes).
 	ensure_parameters_files_from_api_templates();
 
 	const std::string ts = now_timestamp_string();
@@ -2250,7 +2309,6 @@ bool rebuild_and_swap()
 	if (newHtml.empty())
 		return false;
 
-	cleanup_old_bundles(1);
 
 	if (target_browser_source_exists()) {
 		swap_target_browser_source_to_file(newHtml);
@@ -2344,7 +2402,7 @@ void init_from_disk()
 	load_state_json();
 	load_visible_json();
 
-	g_last_html_path = find_latest_lt_html();
+	g_last_html_path = bundle_html_current_path();
 
 	if (!g_last_html_path.empty() && file_exists(g_last_html_path)) {
 		if (target_browser_source_exists()) {
@@ -2810,4 +2868,77 @@ bool move_lower_third(const std::string &id, int delta)
 	return true;
 }
 
+bool sort_lower_thirds_by_group()
+{
+	if (!has_output_dir())
+		return false;
+
+	ensure_output_artifacts_exist();
+	load_state_json();
+	load_visible_json();
+
+	if (g_items.size() < 2)
+		return true;
+
+	std::unordered_map<std::string, int> group_rank;
+	group_rank.reserve(g_groups.size());
+	for (size_t gi = 0; gi < g_groups.size(); ++gi)
+		group_rank[g_groups[gi].id] = (int)gi;
+
+	struct item_sort {
+		lower_third_cfg cfg;
+		int original_index = 0;
+		bool grouped = false;
+		int group_order = INT_MAX / 2; 
+	};
+
+	std::vector<item_sort> tmp;
+	tmp.reserve(g_items.size());
+
+	for (int i = 0; i < (int)g_items.size(); ++i) {
+		item_sort t;
+		t.cfg = g_items[(size_t)i];
+		t.original_index = i;
+
+		const auto owners = groups_containing(t.cfg.id);
+		if (!owners.empty()) {
+			t.grouped = true;
+			auto it = group_rank.find(owners.front());
+			t.group_order = (it != group_rank.end()) ? it->second : INT_MAX / 2;
+		}
+
+		tmp.push_back(std::move(t));
+	}
+
+	std::stable_sort(tmp.begin(), tmp.end(), [](const item_sort &a, const item_sort &b) {
+		if (a.grouped != b.grouped)
+			return a.grouped > b.grouped; 
+
+		if (a.grouped && b.grouped) {
+			if (a.group_order != b.group_order)
+				return a.group_order < b.group_order;
+		}
+
+		return a.original_index < b.original_index;
+	});
+
+	for (size_t i = 0; i < tmp.size(); ++i) {
+		g_items[i] = std::move(tmp[i].cfg);
+		g_items[i].order = (int)i;
+	}
+
+	if (!save_state_json())
+		return false;
+
+	core_event l;
+	l.type = event_type::ListChanged;
+	l.reason = list_change_reason::Update;
+	l.id = "";
+	l.count = (int64_t)g_items.size();
+	emit_event(l);
+
+	return true;
+}
+
 } // namespace vflow
+

@@ -164,10 +164,10 @@ inline const std::vector<CbxOption> AnimOutOptions = {
 };
 
 inline const std::vector<CbxOption> LtPositionOptions = {
-	{"Bottom Left", "lt-pos-bottom-left"},   {"Bottom Center", "lt-pos-bottom-center"},
+	{"Bottom Left", "lt-pos-bottom-left"}, {"Bottom Center", "lt-pos-bottom-center"},
 	{"Bottom Right", "lt-pos-bottom-right"}, {"Top Left", "lt-pos-top-left"},
-	{"Top Center", "lt-pos-top-center"},     {"Top Right", "lt-pos-top-right"},
-	{"Screen Center", "lt-pos-center"},
+	{"Top Center", "lt-pos-top-center"}, {"Top Right", "lt-pos-top-right"},
+	{"Screen Center", "lt-pos-center"}, {"Custom Position", "lt-parent-styles"},
 };
 
 class LowerThirdSettingsDialog : public QDialog {

@@ -276,4 +276,12 @@ bool remove_lower_third(const std::string &id);
 // Reorder helpers (persist + notify). delta: -1 (up), +1 (down)
 bool move_lower_third(const std::string &id, int delta);
 
+// Reorders lower thirds so that items belonging to the same group appear clustered.
+// Sort order:
+//  1) Grouped items first, ordered by group title (fallback: group id)
+//  2) Within a group, preserve previous dock order (stable)
+//  3) Ungrouped items last, preserving previous dock order (stable)
+// Persists state and emits a ListChanged event.
+bool sort_lower_thirds_by_group();
+
 } // namespace vflow
