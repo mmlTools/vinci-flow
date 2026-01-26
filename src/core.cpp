@@ -685,6 +685,54 @@ html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 )CSS";
 }
 
+static inline std::string ltrim_copy(std::string s)
+{
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+				       [](unsigned char ch) { return !std::isspace(ch); }));
+	return s;
+}
+
+static inline std::string rtrim_copy(std::string s)
+{
+	s.erase(std::find_if(s.rbegin(), s.rend(),
+			     [](unsigned char ch) { return !std::isspace(ch); })
+			.base(),
+		s.end());
+	return s;
+}
+
+static inline bool contains_id(const std::string &s, const std::string &id)
+{
+	return s.find("#" + id) != std::string::npos;
+}
+
+static inline std::string scope_selector_part_best_effort(std::string part, const std::string &id)
+{
+	const auto orig = part;
+	auto trimmed = ltrim_copy(part);
+
+	if (contains_id(trimmed, id))
+		return orig;
+
+	if (trimmed.find('&') != std::string::npos) {
+		std::string replaced = trimmed;
+		const std::string needle = "&";
+		const std::string rep = "#" + id;
+
+		size_t pos = 0;
+		while ((pos = replaced.find(needle, pos)) != std::string::npos) {
+			replaced.replace(pos, needle.size(), rep);
+			pos += rep.size();
+		}
+
+		const auto lead_len = orig.size() - ltrim_copy(orig).size();
+		return orig.substr(0, lead_len) + replaced;
+	}
+
+	const auto lead_len = orig.size() - ltrim_copy(orig).size();
+	return orig.substr(0, lead_len) + "#" + id + " " + trimmed;
+}
+
 static std::string scope_css_best_effort(const lower_third_cfg &c)
 {
 	std::string css = c.css_template;
@@ -702,11 +750,10 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 	out += "/* ---- " + c.id + " ---- */\n";
 
 	while (std::getline(in, line)) {
-		std::string trimmed = line;
-		trimmed.erase(trimmed.begin(), std::find_if(trimmed.begin(), trimmed.end(),
-							    [](unsigned char ch) { return !std::isspace(ch); }));
+		std::string trimmed = ltrim_copy(line);
 
 		const bool isAt = (!trimmed.empty() && trimmed[0] == '@');
+
 		if (!isAt && line.find('{') != std::string::npos) {
 			const auto pos = line.find('{');
 			std::string sel = line.substr(0, pos);
@@ -716,14 +763,17 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 			std::string part;
 			std::string newSel;
 			bool first = true;
+
 			while (std::getline(ss, part, ',')) {
-				if (part.find("#" + c.id) == std::string::npos)
-					part = " #" + c.id + " " + part;
+				part = rtrim_copy(part); 
+				part = scope_selector_part_best_effort(part, c.id);
+
 				if (!first)
 					newSel += ",";
 				newSel += part;
 				first = false;
 			}
+
 			out += newSel + rest + "\n";
 		} else {
 			out += line + "\n";
@@ -735,7 +785,6 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 
 static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 {
-
 	std::string map = "{\n";
 	for (const auto &c : items) {
 		const bool inCustom = (c.anim_in == "custom_handled_in");
@@ -875,7 +924,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     try {
       const a = new Audio(url);
       a.volume = 1.0;
-      // play() may be blocked in some environments; ignore errors
       const p = a.play();
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch (e) {}
@@ -888,8 +936,26 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     return (typeof fn === "function") ? fn : null;
   }
 
-  function stripAnimate(el) {
-    // Remove only what we might have applied (do not destroy author classes).
+  // ---- Animation target resolution ----
+  // If the LT root <li> has lt-parent-styles, animate the first element child.
+  function getAnimTarget(rootEl) {
+    try {
+      if (rootEl && rootEl.classList && rootEl.classList.contains("lt-parent-styles")) {
+        const child = rootEl.firstElementChild;
+        return child || rootEl;
+      }
+    } catch (e) {}
+    return rootEl;
+  }
+
+  function getHookTarget(rootEl) {
+    return getAnimTarget(rootEl);
+  }
+
+  function stripAnimate(rootEl) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return;
+
     try { el.classList.remove("animate__animated"); } catch (e) {}
     const added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
     for (const c of added) {
@@ -901,7 +967,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     el.style.animationTimingFunction = "";
   }
 
-  function addAnimClasses(el, cls) {
+  function addAnimClasses(rootEl, cls) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return;
+
     el.__slt_added = Array.isArray(el.__slt_added) ? el.__slt_added : [];
     try {
       el.classList.add("animate__animated");
@@ -914,7 +983,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     });
   }
 
-  function waitOwnAnimationEnd(el, timeoutMs) {
+  function waitOwnAnimationEnd(rootEl, timeoutMs) {
+    const el = getAnimTarget(rootEl);
+    if (!el) return Promise.resolve();
+
     return new Promise((resolve) => {
       let done = false;
 
@@ -925,7 +997,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       };
 
       const onEnd = (ev) => {
-        // Only end when the <li> itself ends its animation (ignore child animations)
+        // Only end when the anim-target itself ends its animation (ignore child animations)
         if (ev.target !== el) return;
         cleanup();
         resolve();
@@ -936,7 +1008,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     });
   }
 
-  async function runHookWithTimeout(el, name, timeoutMs) {
+  async function runHookWithTimeout(rootEl, name, timeoutMs) {
+    const el = getHookTarget(rootEl);
     const fn = getHook(el, name);
     if (!fn) return;
 
@@ -969,7 +1042,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     setMounted(el, true);
     stripAnimate(el);
 
-    // Audio cue (handled here so it works even if the LT template does not implement playback)
     if (cfg && cfg.inSound) playCue(cfg.inSound);
 
     if (cfg && cfg.inCustom) {
@@ -978,22 +1050,22 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     }
 
     if (cfg && hasAnim(cfg.inCls)) {
-      if (cfg.delay > 0) el.style.animationDelay = cfg.delay + "ms";
+      if (cfg.delay > 0) {
+        const t = getAnimTarget(el);
+        if (t) t.style.animationDelay = cfg.delay + "ms";
+      }
       addAnimClasses(el, cfg.inCls);
       await waitOwnAnimationEnd(el, MAX_ANIM_WAIT_MS);
       stripAnimate(el);
-      el.style.animationDelay = "";
     }
   }
 
   async function doHide(el, cfg) {
     stripAnimate(el);
 
-    // Audio cue (handled here so it works even if the LT template does not implement playback)
     if (cfg && cfg.outSound) playCue(cfg.outSound);
 
     if (cfg && cfg.outCustom) {
-      // Wait for the template-driven exit animation before unmounting the <li>
       await runHookWithTimeout(el, "__slt_hide", MAX_CUSTOM_WAIT_MS);
       setMounted(el, false);
       return;
@@ -1009,10 +1081,9 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   }
 
   function enqueue(el, job) {
-    // Serialize transitions per <li> so polling never overlaps operations.
     el.__slt_queue = (el.__slt_queue || Promise.resolve())
       .then(job)
-      .catch(() => {}); // never break the chain
+      .catch(() => {});
   }
 
   async function tick() {
@@ -1032,22 +1103,18 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       const cfg = animMap[el.id] || {};
       const want = visibleSet.has(el.id);
 
-      // Store desired state
       el.dataset.want = want ? "1" : "0";
 
       const isMounted = el.classList.contains("slt-visible") || el.style.display === "block";
 
-      // Already in desired mounted state
       if (want && isMounted) continue;
       if (!want && !isMounted) continue;
 
-      // Avoid enqueuing duplicates while one is active
       if (el.dataset.busy === "1") continue;
 
       el.dataset.busy = "1";
       enqueue(el, async () => {
         try {
-          // Re-check desire at execution time (poll may have changed)
           const stillWant = el.dataset.want === "1";
           if (stillWant) await doShow(el, cfg);
           else await doHide(el, cfg);
@@ -1062,7 +1129,6 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     tick();
     setInterval(tick, 350);
 
-    // Parameter polling is async and independent from animation flow.
     pollParameters();
     setInterval(pollParameters, PARAMS_POLL_MS);
   });
