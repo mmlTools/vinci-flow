@@ -717,6 +717,12 @@ void LowerThirdDock::repeatTick()
 			else
 				++it;
 		}
+		for (auto it = reShowAtMs_.begin(); it != reShowAtMs_.end();) {
+			if (!alive.contains(it.key()))
+				it = reShowAtMs_.erase(it);
+			else
+				++it;
+		}
 	}
 
 	for (const auto &c : items) {
@@ -736,6 +742,7 @@ void LowerThirdDock::repeatTick()
 			if (inRunningGroup) {
 				nextOnMs_.remove(qid);
 				offAtMs_.remove(qid);
+				reShowAtMs_.remove(qid);
 				continue;
 			}
 		}
@@ -774,6 +781,17 @@ void LowerThirdDock::repeatTick()
 			}
 		}
 
+		// If a re-show was scheduled (used to re-trigger when already visible), execute it.
+		if (reShowAtMs_.contains(qid) && now >= reShowAtMs_[qid]) {
+			reShowAtMs_.remove(qid);
+			if (!vflow::is_visible(c.id)) {
+				vflow::set_visible_persist(c.id, true);
+				if (visibleSec > 0)
+					offAtMs_[qid] = now + (qint64)visibleSec * 1000;
+				emit requestSave();
+			}
+		}
+
 		if (every > 0 && nextOnMs_.contains(qid) && now >= nextOnMs_[qid]) {
 			qint64 next = nextOnMs_[qid];
 			const qint64 step = (qint64)every * 1000;
@@ -783,8 +801,19 @@ void LowerThirdDock::repeatTick()
 
 			if (!vflow::is_visible(c.id)) {
 				vflow::set_visible_persist(c.id, true);
-				offAtMs_[qid] = now + (qint64)visibleSec * 1000;
+				if (visibleSec > 0)
+					offAtMs_[qid] = now + (qint64)visibleSec * 1000;
 				emit requestSave();
+			} else {
+				// Already visible (e.g., user manually kept it visible). To honor "repeat every",
+				// briefly toggle off then back on after a very short delay.
+				// This keeps individual automation working without interfering with carousel runs.
+				if (!reShowAtMs_.contains(qid)) {
+					vflow::set_visible_persist(c.id, false);
+					offAtMs_.remove(qid);
+					reShowAtMs_[qid] = now + 150; // ms
+					emit requestSave();
+				}
 			}
 		}
 	}
@@ -802,6 +831,7 @@ void LowerThirdDock::onBrowseOutputFolder()
 
 	nextOnMs_.clear();
 	offAtMs_.clear();
+	reShowAtMs_.clear();
 
 	outputPathEdit->setText(dir);
 
@@ -1589,6 +1619,7 @@ void LowerThirdDock::handleRemove(const QString &id)
 
 	nextOnMs_.remove(id);
 	offAtMs_.remove(id);
+	reShowAtMs_.remove(id);
 
 	emit requestSave();
 }

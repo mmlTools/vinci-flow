@@ -401,8 +401,6 @@ bool save_global_config()
 	QJsonObject root;
 	root["output_dir"] = QString::fromStdString(g_output_dir);
 	root["target_browser_source"] = QString::fromStdString(g_target_browser_source);
-
-	// Persist per-scene-collection Browser Source mapping.
 	{
 		QJsonObject per;
 		for (const auto &kv : g_target_browser_source_by_collection) {
@@ -507,7 +505,6 @@ static lower_third_cfg default_cfg()
   font-family: {{FONT_FAMILY}}, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-/* Background overlay layer (controls opacity without dimming text/avatar) */
 .slt-bg {
   position: absolute;
   inset: 0;
@@ -571,7 +568,6 @@ static lower_third_cfg default_cfg()
       };
 
       const onEnd = (ev) => {
-        // strict match (same pattern as your custom scripts)
         if (ev.target !== target) return;
         if (name && ev.animationName !== name) return;
         cleanup();
@@ -795,8 +791,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
 		const std::string inSound = c.anim_in_sound.empty() ? std::string() : ("./" + c.anim_in_sound);
 		const std::string outSound = c.anim_out_sound.empty() ? std::string() : ("./" + c.anim_out_sound);
-		const std::string apiTplTrim = QString::fromStdString(c.api_template).trimmed().toStdString();
-		const std::string paramsFile = apiTplTrim.empty() ? std::string() : ("./parameters_lt_" + c.id + ".json");
+		const bool bridgeEnabled = c.api_bridge_enabled;
+		const std::string paramsFile = bridgeEnabled ? ("./parameters_" + c.id + ".json") : std::string();
 
 		int delay = 0;
 
@@ -1232,7 +1228,7 @@ std::string path_parameters_lt_json(const std::string &id)
 {
 	if (!has_output_dir())
 		return {};
-	return join_path(g_output_dir, "parameters_lt_" + id + ".json");
+	return join_path(g_output_dir, "parameters_" + id + ".json");
 }
 
 std::string path_animate_css()
@@ -1456,16 +1452,25 @@ static bool ensure_parameters_files_from_api_templates()
 	const bool allowCombinedWrite = !combinedExists || combinedOk;
 
 	for (const auto &lt : g_items) {
-		const std::string api = QString::fromStdString(lt.api_template).trimmed().toStdString();
-		if (api.empty())
-			continue;
+		const std::string perPath = path_parameters_lt_json(lt.id);
 
-		QJsonObject apiObj;
-		if (!parse_json_object_text(api, apiObj)) {
+		if (!lt.api_bridge_enabled) {
+			// Bridge disabled: remove stale file if present.
+			const QString qp = QString::fromStdString(perPath);
+			if (QFile::exists(qp))
+				QFile::remove(qp);
 			continue;
 		}
 
-		const std::string perPath = path_parameters_lt_json(lt.id);
+		// Bridge enabled: create/update the per-LT file.
+		QJsonObject seedObj;
+		bool seedOk = false;
+
+		// Backward compatibility: if a legacy API template exists, use it as a seed schema.
+		const std::string api = QString::fromStdString(lt.api_template).trimmed().toStdString();
+		if (!api.empty())
+			seedOk = parse_json_object_text(api, seedObj);
+
 		const bool perExists = QFile::exists(QString::fromStdString(perPath));
 		QJsonObject perObj;
 		bool perOk = true;
@@ -1478,28 +1483,39 @@ static bool ensure_parameters_files_from_api_templates()
 			continue;
 
 		bool perDirty = false;
-		for (auto it = apiObj.begin(); it != apiObj.end(); ++it) {
-			if (!perObj.contains(it.key())) {
-				perObj.insert(it.key(), it.value());
-				perDirty = true;
+
+		if (seedOk) {
+			for (auto it = seedObj.begin(); it != seedObj.end(); ++it) {
+				if (!perObj.contains(it.key())) {
+					perObj.insert(it.key(), it.value());
+					perDirty = true;
+				}
 			}
 		}
-		if (!perExists && !perDirty) {
+
+		// If file does not exist, create at least an empty object.
+		if (!perExists) {
 			perDirty = true;
 		}
+
 		if (perDirty) {
 			write_text_file_atomic(perPath, QJsonDocument(perObj).toJson(QJsonDocument::Indented).toStdString());
 		}
 
+		// Optional combined parameters.json (kept only for tooling convenience).
 		if (allowCombinedWrite) {
 			QJsonObject bucket = combinedRoot.value(QString::fromStdString(lt.id)).toObject();
 			bool bucketDirty = false;
-			for (auto it = apiObj.begin(); it != apiObj.end(); ++it) {
-				if (!bucket.contains(it.key())) {
-					bucket.insert(it.key(), it.value());
-					bucketDirty = true;
+
+			if (seedOk) {
+				for (auto it = seedObj.begin(); it != seedObj.end(); ++it) {
+					if (!bucket.contains(it.key())) {
+						bucket.insert(it.key(), it.value());
+						bucketDirty = true;
+					}
 				}
 			}
+
 			if (bucketDirty || !combinedRoot.contains(QString::fromStdString(lt.id))) {
 				combinedRoot.insert(QString::fromStdString(lt.id), bucket);
 				combinedDirty = true;
@@ -1513,6 +1529,7 @@ static bool ensure_parameters_files_from_api_templates()
 
 	return true;
 }
+
 
 bool load_state_json()
 {
@@ -1613,6 +1630,13 @@ bool load_state_json()
 		c.css_template = o.value("css_template").toString().toStdString();
 		c.js_template = o.value("js_template").toString().toStdString();
 		c.api_template = o.value("api_template").toString().toStdString();
+		c.api_bridge_enabled = o.value("api_bridge_enabled").toBool(o.value("api_bridge").toBool(false));
+		// Backward compatibility: if a legacy api_template exists and no explicit flag was set, assume enabled.
+		if (!o.contains("api_bridge_enabled") && !o.contains("api_bridge")) {
+			if (!QString::fromStdString(c.api_template).trimmed().isEmpty())
+				c.api_bridge_enabled = true;
+		}
+
 
 		c.hotkey = o.value("hotkey").toString().toStdString();
 		if (c.hotkey.empty()) {
@@ -1823,6 +1847,7 @@ bool save_state_json()
 		o["html_template"] = QString::fromStdString(c.html_template);
 		o["css_template"] = QString::fromStdString(c.css_template);
 		o["js_template"] = QString::fromStdString(c.js_template);
+		o["api_bridge_enabled"] = c.api_bridge_enabled;
 		o["api_template"] = QString::fromStdString(c.api_template);
 
 		o["hotkey"] = QString::fromStdString(c.hotkey);
