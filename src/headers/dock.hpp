@@ -127,7 +127,6 @@ private:
 	QSpinBox *browserHeightSpin = nullptr;
 	QPushButton *applyBrowserSizeBtn = nullptr;
 
-
 	// Footer tools
 	QPushButton *infoBtn = nullptr;
 
@@ -144,6 +143,9 @@ private:
 	QTimer *repeatTimer_ = nullptr;
 	QHash<QString, qint64> nextOnMs_;
 	QHash<QString, qint64> offAtMs_;
+	// When auto-repeat is enabled and the lower third is already visible, we briefly
+	// toggle it off then back on to re-trigger animations without breaking group runs.
+	QHash<QString, qint64> reShowAtMs_;
 
 	// Helps avoid recursive signals while repopulating
 	bool populatingSources_ = false;

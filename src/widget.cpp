@@ -352,7 +352,7 @@ void show_troubleshooting_dialog(QWidget *parent)
         cl->addWidget(make_link_card(
             content, QString::fromUtf8("🌐"), QObject::tr("Visit the Website"),
             QObject::tr("Downloads, updates, documentation, and templates."),
-            QObject::tr("Open obscountdown.com"), QUrl(QStringLiteral("https://obscountdown.com/r/vinci-flow"))));
+            QObject::tr("Open streamrsc.com"), QUrl(QStringLiteral("https://streamrsc.com/r/vinci-flow"))));
 
         cl->addWidget(make_link_card(
             content, QString::fromUtf8("💬"), QObject::tr("Join Discord"),

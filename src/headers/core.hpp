@@ -74,10 +74,12 @@ struct lower_third_cfg {
 	std::string css_template;  // should be scoped to #{{ID}} (we also do best-effort)
 	std::string js_template;   // wrapped with root = document.getElementById("{{ID}}")
 
-	// Optional: "API Template" JSON object (as text).
-	// When valid and non-empty, the core generates/maintains a per-LT parameters file:
-	//   parameters_lt_<ID>.json
+	// API Bridge: when enabled, the core maintains a per-LT parameters file:
+	//   parameters_<ID>.json
 	// External programs may update these files and the base script will patch the HTML.
+	bool api_bridge_enabled = false;
+
+	// Backward compatibility: legacy API template schema (no longer edited in the UI).
 	std::string api_template;
 
 	std::string hotkey;
@@ -225,7 +227,7 @@ bool rebuild_and_swap();
 
 // Runtime parameters files
 // - Combined file: parameters.json (root object keyed by LT id)
-// - Per-LT file:  parameters_lt_<ID>.json (object with keys/values)
+// - Per-LT file:  parameters_<ID>.json (object with keys/values)
 std::string path_parameters_json();
 std::string path_parameters_lt_json(const std::string &id);
 

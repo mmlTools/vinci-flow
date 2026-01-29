@@ -46,6 +46,7 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSlider>
+#include <QCheckBox>
 
 #include <QDesktopServices>
 #include <QListWidget>
@@ -202,6 +203,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	addNavItem(tr("Style & Anim"));
 	addNavItem(tr("Color"));
 	addNavItem(tr("Layout"));
+	addNavItem(tr("API Bridge"));
 	addNavItem(tr("Templates Gallery"));
 
 	auto *stack = new QStackedWidget(this);
@@ -225,18 +227,21 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	QVBoxLayout *stylePageLayout = nullptr;
 	QVBoxLayout *colorsPageLayout = nullptr;
 	QVBoxLayout *templatesPageLayout = nullptr;
+	QVBoxLayout *apiBridgePageLayout = nullptr;
 	QVBoxLayout *templatesGalleryLayout = nullptr;
 
 	auto *contentPageSa = makeScrollPage(contentPageLayout);
 	auto *stylePageSa = makeScrollPage(stylePageLayout);
 	auto *colorsPageSa = makeScrollPage(colorsPageLayout);
 	auto *templatesPageSa = makeScrollPage(templatesPageLayout);
+	auto *apiBridgePageSa = makeScrollPage(apiBridgePageLayout);
 	auto *templatesGallerySa = makeScrollPage(templatesGalleryLayout);
 
 	stack->addWidget(contentPageSa);
 	stack->addWidget(stylePageSa);
 	stack->addWidget(colorsPageSa);
 	stack->addWidget(templatesPageSa);
+	stack->addWidget(apiBridgePageSa);
 	stack->addWidget(templatesGallerySa);
 
 	body->addWidget(nav);
@@ -510,7 +515,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		avatarWidthSpin->setToolTip(tr("Avatar width in pixels for {{AVATAR_WIDTH}} placeholder"));
 		g->addWidget(avatarWidthSpin, row, 1);
 
-
 		row++;
 		g->addWidget(new QLabel(tr("Opacity:"), this), row, 0);
 		opacitySlider = new QSlider(Qt::Horizontal, this);
@@ -572,7 +576,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 			&LowerThirdSettingsDialog::onAnimOutChanged);
 	}
 
-
 	{
 		auto *colorsBox = new QGroupBox(tr("Colors"), this);
 		colorsBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -620,7 +623,8 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		colorsPageLayout->addWidget(colorsBox);
 
 		connect(primaryColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickPrimaryColor);
-		connect(secondaryColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickSecondaryColor);
+		connect(secondaryColorBtn, &QPushButton::clicked, this,
+			&LowerThirdSettingsDialog::onPickSecondaryColor);
 		connect(titleColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickTitleColor);
 		connect(subtitleColorBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onPickSubtitleColor);
 	}
@@ -658,47 +662,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		makeTab(tr("CSS"), cssEdit);
 		makeTab(tr("JS"), jsEdit);
 
-		{
-			auto *page = new QWidget(tplTabs);
-			auto *v = new QVBoxLayout(page);
-			v->setContentsMargins(0, 0, 0, 0);
-			v->setSpacing(8);
-
-			auto *help = new QLabel(page);
-			help->setWordWrap(true);
-			help->setText(tr(
-				"Paste a JSON object here. On Save & Apply, VinciFlow will generate a per-lower-third parameters file\n"
-				"(parameters_lt_<ID>.json) by appending missing keys only. External programs can edit that file, and\n"
-				"the base script will update elements with matching data-* attributes inside this lower third."));
-			help->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-			v->addWidget(help);
-
-			auto *pathRow = new QHBoxLayout();
-			pathRow->setContentsMargins(0, 0, 0, 0);
-			pathRow->setSpacing(6);
-			pathRow->addWidget(new QLabel(tr("Path:"), page));
-			apiPathEdit = new QLineEdit(page);
-			apiPathEdit->setReadOnly(true);
-			apiPathEdit->setPlaceholderText(tr("Save & Apply to generate the file."));
-			pathRow->addWidget(apiPathEdit, 1);
-			v->addLayout(pathRow);
-
-			apiStatusLabel = new QLabel(page);
-			apiStatusLabel->setText(tr("Status: not validated"));
-			apiStatusLabel->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-			v->addWidget(apiStatusLabel);
-
-			apiEdit = new QPlainTextEdit(page);
-			apiEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
-			apiEdit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-			apiEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-			apiEdit->setPlaceholderText("{\n  \"param1\": \"Test\",\n  \"param2\": \"Value\"\n}");
-			v->addWidget(apiEdit, 1);
-
-			tplTabs->addTab(page, tr("API Template (NEW)"));
-			connect(apiEdit, &QPlainTextEdit::textChanged, this, &LowerThirdSettingsDialog::updateApiTemplateUi);
-		}
-
 		auto *expandBtn = new QPushButton(tplTabs);
 		expandBtn->setFlat(true);
 		expandBtn->setCursor(Qt::PointingHandCursor);
@@ -715,8 +678,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 				onOpenCssEditorDialog();
 			else if (idx == 2)
 				onOpenJsEditorDialog();
-			else if (idx == 3)
-				openTemplateEditorDialog(tr("Edit API Template"), apiEdit);
 		});
 
 		editorsV->addWidget(tplTabs, 1);
@@ -738,32 +699,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		phText->setMinimumHeight(150);
 		phText->setMaximumHeight(220);
 
-		phText->setPlainText("Text\n"
-				     "  {{TITLE}}            Title text\n"
-				     "  {{SUBTITLE}}         Subtitle text\n"
-				     "  {{TITLE_SIZE}}       Title font size (px)\n"
-				     "  {{SUBTITLE_SIZE}}    Subtitle font size (px)\n"
-				     "\n"
-				     "Avatar\n"
-				     "  {{PROFILE_PICTURE}}  Profile image URL/path (may be empty)\n"
-				     "  {{AVATAR_WIDTH}}     Avatar width (px)\n"
-				     "  {{AVATAR_HEIGHT}}    Avatar height (px)\n"
-				     "\n"
-				     				     "Colors\n"
-				     "  {{PRIMARY_COLOR}}    Primary color\n"
-				     "  {{SECONDARY_COLOR}}  Secondary color\n"
-				     "  {{TITLE_COLOR}}      Title color\n"
-				     "  {{SUBTITLE_COLOR}}   Subtitle color\n"
-				     "  {{BG_COLOR}}         (Legacy) maps to PRIMARY_COLOR\n"
-				     "  {{TEXT_COLOR}}       (Legacy) maps to TITLE_COLOR\n"
-				     "\n"
-				     "  {{OPACITY}}          Opacity (0-100 or normalized based on your templater)\n"
-				     "  {{RADIUS}}           Radius (0-100)\n"
-				     "\n"
-				     "Behavior\n"
-				     "  {{ANIM_IN}}          Animate.css in class\n"
-				     "  {{ANIM_OUT}}         Animate.css out class\n"
-				     "  {{POSITION}}         Screen position key\n");
+		phText->setPlainText(infoLoadText());
 
 		phV->addWidget(phText);
 
@@ -771,6 +707,121 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		templatesPageLayout->addWidget(editorsBox, /*stretch*/ 1);
 		templatesPageLayout->addWidget(phBox, /*stretch*/ 0);
+	}
+	{
+		auto *bridgeBox = new QGroupBox(tr("API Bridge"), this);
+		bridgeBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+
+		auto *bv = new QVBoxLayout(bridgeBox);
+		bv->setSpacing(10);
+		bv->setContentsMargins(8, 8, 8, 8);
+
+		auto *help = new QLabel(bridgeBox);
+		help->setWordWrap(true);
+		help->setText(tr(
+			"Use the API Bridge when you want to control a lower third contents from an external tool.\n\n"
+			"When enabled, VinciFlow creates a per-lower-third JSON file named:\n"
+			"  parameters_<ID>.json\n\n"
+			"Your HTML can bind values from that JSON by adding attributes like:\n"
+			"  data-player, data-team, data-score\n\n"
+			"The base script will update elements inside this lower third that have matching data-{param} attributes."));
+		help->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+		bv->addWidget(help);
+
+		apiBridgeEnable = new QCheckBox(tr("Enable API Bridge (create parameters_<ID>.json on Save & Apply)"),
+						bridgeBox);
+		apiBridgeEnable->setCursor(Qt::PointingHandCursor);
+		bv->addWidget(apiBridgeEnable);
+
+		auto *pathRow = new QHBoxLayout();
+		pathRow->setContentsMargins(0, 0, 0, 0);
+		pathRow->setSpacing(6);
+		pathRow->addWidget(new QLabel(tr("File:"), bridgeBox));
+
+		apiBridgePathEdit = new QLineEdit(bridgeBox);
+		apiBridgePathEdit->setReadOnly(true);
+		apiBridgePathEdit->setPlaceholderText(tr("Save & Apply to (re)create the file."));
+		pathRow->addWidget(apiBridgePathEdit, 1);
+
+		auto *st = bridgeBox->style();
+
+		apiBridgeCopyBtn = new QPushButton(bridgeBox);
+		apiBridgeCopyBtn->setCursor(Qt::PointingHandCursor);
+		apiBridgeCopyBtn->setToolTip(tr("Copy file path to clipboard"));
+		apiBridgeCopyBtn->setFlat(true);
+		apiBridgeCopyBtn->setIcon(
+			QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
+		apiBridgeCopyBtn->setIconSize(QSize(16, 16));
+		apiBridgeCopyBtn->setFixedWidth(32);
+		apiBridgeCopyBtn->setFocusPolicy(Qt::NoFocus);
+
+		apiBridgeOpenBtn = new QPushButton(bridgeBox);
+		apiBridgeOpenBtn->setCursor(Qt::PointingHandCursor);
+		apiBridgeOpenBtn->setToolTip(tr("Open file location"));
+		apiBridgeOpenBtn->setFlat(true);
+		{
+			QIcon folder = QIcon::fromTheme(QStringLiteral("folder-open"));
+			if (folder.isNull())
+				folder = QIcon::fromTheme(QStringLiteral("system-file-manager"));
+			if (folder.isNull())
+				folder = st->standardIcon(QStyle::SP_DirOpenIcon);
+			apiBridgeOpenBtn->setIcon(folder);
+		}
+		apiBridgeOpenBtn->setIconSize(QSize(16, 16));
+		apiBridgeOpenBtn->setFixedWidth(32);
+		apiBridgeOpenBtn->setFocusPolicy(Qt::NoFocus);
+
+		pathRow->addWidget(apiBridgeCopyBtn);
+		pathRow->addWidget(apiBridgeOpenBtn);
+
+		QObject::connect(apiBridgeCopyBtn, &QPushButton::clicked, this, [this]() {
+			if (!apiBridgePathEdit)
+				return;
+			QApplication::clipboard()->setText(apiBridgePathEdit->text().trimmed());
+		});
+
+		QObject::connect(apiBridgeOpenBtn, &QPushButton::clicked, this, [this]() {
+			if (!apiBridgePathEdit)
+				return;
+			const QString p = apiBridgePathEdit->text().trimmed();
+			if (p.isEmpty())
+				return;
+
+#if defined(Q_OS_WIN)
+			const QString native = QDir::toNativeSeparators(p);
+			QProcess::startDetached(QStringLiteral("explorer.exe"),
+						QStringList{QStringLiteral("/select,") + native});
+#elif defined(Q_OS_MACOS)
+			QProcess::startDetached(QStringLiteral("open"), QStringList{QStringLiteral("-R"), p});
+#else
+			QFileInfo fi(p);
+			QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
+#endif
+		});
+
+		bv->addLayout(pathRow);
+
+		auto *statusRow = new QHBoxLayout();
+		statusRow->setContentsMargins(0, 0, 0, 0);
+		statusRow->setSpacing(6);
+		statusRow->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+		apiBridgeStatusPrefixLabel = new QLabel(tr("Status:"), bridgeBox);
+		apiBridgeStatusPrefixLabel->setStyleSheet(QString());
+		statusRow->addWidget(apiBridgeStatusPrefixLabel, 0);
+
+		apiBridgeStatusValueLabel = new QLabel(tr("disabled"), bridgeBox);
+		apiBridgeStatusValueLabel->setWordWrap(true);
+		statusRow->addWidget(apiBridgeStatusValueLabel, 1);
+
+		bv->addLayout(statusRow);
+
+		bv->addStretch(1);
+
+		if (apiBridgePageLayout)
+			apiBridgePageLayout->addWidget(bridgeBox);
+
+		connect(apiBridgeEnable, &QCheckBox::toggled, this, [this](bool) { updateApiBridgeUi(); });
 	}
 
 	{
@@ -858,7 +909,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		connect(seeAllLowerThirdsBtn, &QPushButton::clicked, this, []() {
 			QDesktopServices::openUrl(
-				QUrl(QStringLiteral("https://obscountdown.com/?type=lower-thirds-templates")));
+				QUrl(QStringLiteral("https://streamrsc.com/?type=lower-thirds-templates")));
 		});
 
 		marketList->viewport()->installEventFilter(this);
@@ -900,7 +951,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
 
-		auto *applyBtn = buttonBox->addButton(tr("Save && Apply"), QDialogButtonBox::ApplyRole);
+		auto *applyBtn = buttonBox->addButton(tr("Save & Apply"), QDialogButtonBox::ApplyRole);
 		applyBtn->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
 		applyBtn->setAutoDefault(false);
 		applyBtn->setDefault(false);
@@ -915,10 +966,6 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		connect(importBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onImportTemplateClicked);
 		connect(exportBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onExportTemplateClicked);
-
-		if (infoBtn)
-			connect(infoBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onInfoClicked);
-
 		connect(buttonBox, &QDialogButtonBox::rejected, this, &LowerThirdSettingsDialog::reject,
 			Qt::UniqueConnection);
 		connect(applyBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onSaveAndApply,
@@ -979,7 +1026,6 @@ void LowerThirdSettingsDialog::loadFromState()
 	if (!cfg)
 		return;
 
-	// More contextual window title (guarded for empty label/title)
 	{
 		QString lbl = QString::fromStdString(cfg->label).trimmed();
 		if (lbl.isEmpty())
@@ -1023,9 +1069,9 @@ void LowerThirdSettingsDialog::loadFromState()
 	htmlEdit->setPlainText(QString::fromStdString(cfg->html_template));
 	cssEdit->setPlainText(QString::fromStdString(cfg->css_template));
 	jsEdit->setPlainText(QString::fromStdString(cfg->js_template));
-	if (apiEdit)
-		apiEdit->setPlainText(QString::fromStdString(cfg->api_template));
-	updateApiTemplateUi();
+	if (apiBridgeEnable)
+		apiBridgeEnable->setChecked(cfg->api_bridge_enabled);
+	updateApiBridgeUi();
 
 	if (cfg->profile_picture.empty())
 		profilePictureEdit->clear();
@@ -1149,7 +1195,6 @@ void LowerThirdSettingsDialog::saveToState()
 		};
 
 		const QString seq = normalize(hotkeyEdit->keySequence().toString(QKeySequence::PortableText));
-		// Enforce uniqueness across all lower thirds and groups.
 		if (!seq.isEmpty()) {
 			for (auto &it : vflow::all()) {
 				if (it.id == cfg->id)
@@ -1168,7 +1213,6 @@ void LowerThirdSettingsDialog::saveToState()
 					clearedAnyGroup = true;
 				}
 			}
-			// If we cleared any group hotkeys, notify so dock refreshes and shortcuts are rebuilt.
 			if (clearedAnyGroup)
 				vflow::notify_list_updated();
 		}
@@ -1189,8 +1233,8 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->html_template = htmlEdit->toPlainText().toStdString();
 	cfg->css_template = cssEdit->toPlainText().toStdString();
 	cfg->js_template = jsEdit->toPlainText().toStdString();
-	if (apiEdit)
-		cfg->api_template = apiEdit->toPlainText().toStdString();
+	if (apiBridgeEnable)
+		cfg->api_bridge_enabled = apiBridgeEnable->isChecked();
 
 	if (!pendingProfilePicturePath.isEmpty() && vflow::has_output_dir()) {
 		const QString outDir = QString::fromStdString(vflow::output_dir());
@@ -1295,8 +1339,6 @@ void LowerThirdSettingsDialog::onSaveAndApply()
 {
 	saveToState();
 
-	// Rebuild/swap updates the Browser Source, but the dock UI still needs a
-	// model refresh. Emit a core list-change event so any listeners re-sync.
 	if (vflow::rebuild_and_swap()) {
 		vflow::notify_list_updated(currentId.toStdString());
 	}
@@ -1419,7 +1461,6 @@ void LowerThirdSettingsDialog::onDeleteAnimOutSound()
 	vflow::save_state_json();
 }
 
-
 void LowerThirdSettingsDialog::onPickPrimaryColor()
 {
 	QColor start = currentPrimaryColor ? *currentPrimaryColor : QColor(17, 24, 39);
@@ -1480,8 +1521,6 @@ void LowerThirdSettingsDialog::onPickSubtitleColor()
 	updateColorButton(subtitleColorBtn, c);
 }
 
-
-
 void LowerThirdSettingsDialog::onAnimInChanged(int) {}
 void LowerThirdSettingsDialog::onAnimOutChanged(int) {}
 
@@ -1525,169 +1564,168 @@ void LowerThirdSettingsDialog::onMarketplaceImageFailed(const QString &url, cons
 
 void LowerThirdSettingsDialog::rebuildMarketplaceList()
 {
-    if (!marketList)
-        return;
+	if (!marketList)
+		return;
 
-    marketList->clear();
-    marketIconByUrl.clear();
+	marketList->clear();
+	marketIconByUrl.clear();
 
-    auto &api = vflow::api::ApiClient::instance();
-    const auto items = api.lowerThirds();
+	auto &api = vflow::api::ApiClient::instance();
+	const auto items = api.lowerThirds();
 
-    if (marketStatus) {
-        if (!items.isEmpty()) {
-            marketStatus->setText(tr("Custom templates library FREE & Paid."));
-        } else {
-            const QString err = api.lastError().trimmed();
-            marketStatus->setText(err.isEmpty()
-                                  ? tr("No recommendations yet.")
-                                  : tr("No recommendations yet. %1").arg(err));
-        }
-    }
+	if (marketStatus) {
+		if (!items.isEmpty()) {
+			marketStatus->setText(tr("Custom templates library FREE & Paid."));
+		} else {
+			const QString err = api.lastError().trimmed();
+			marketStatus->setText(err.isEmpty() ? tr("No recommendations yet.")
+							    : tr("No recommendations yet. %1").arg(err));
+		}
+	}
 
-    const int iconPx = 60;
+	const int iconPx = 60;
 
-    auto trunc = [](const QString &s, int maxChars) -> QString {
-	    QString t = s.trimmed();
-	    if (maxChars <= 0)
-		    return QString();
-	    if (t.size() <= maxChars)
-		    return t;
-	    return t.left(maxChars - 1).trimmed() + QStringLiteral("…");
-    };
+	auto trunc = [](const QString &s, int maxChars) -> QString {
+		QString t = s.trimmed();
+		if (maxChars <= 0)
+			return QString();
+		if (t.size() <= maxChars)
+			return t;
+		return t.left(maxChars - 1).trimmed() + QStringLiteral("…");
+	};
 
-    const int rowW = marketList->viewport()->width();
+	const int rowW = marketList->viewport()->width();
 
-    for (const auto &r : items) {
-	    const QString title = r.title.trimmed().isEmpty() ? r.slug : r.title.trimmed();
-	    const QString desc = r.shortDescription.trimmed();
-	    const QString url = r.url.trimmed();
-	    const QString ico = r.iconPublicUrl.trimmed();
-	    const QString dl = r.downloadUrl.trimmed();
-	    const QString badge = r.badgeValue.trimmed();
+	for (const auto &r : items) {
+		const QString title = r.title.trimmed().isEmpty() ? r.slug : r.title.trimmed();
+		const QString desc = r.shortDescription.trimmed();
+		const QString url = r.url.trimmed();
+		const QString ico = r.iconPublicUrl.trimmed();
+		const QString dl = r.downloadUrl.trimmed();
+		const QString badge = r.badgeValue.trimmed();
 
-	    auto *rowItem = new QListWidgetItem(marketList);
-	    rowItem->setData(Qt::UserRole, url);
-	    rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+		auto *rowItem = new QListWidgetItem(marketList);
+		rowItem->setData(Qt::UserRole, url);
+		rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
-	    auto *card = new QFrame(marketList);
-	    card->setObjectName(QStringLiteral("oc_marketCard"));
-	    card->setFrameShape(QFrame::NoFrame);
-	    card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-	    card->setMinimumWidth(rowW);
+		auto *card = new QFrame(marketList);
+		card->setObjectName(QStringLiteral("oc_marketCard"));
+		card->setFrameShape(QFrame::NoFrame);
+		card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		card->setMinimumWidth(rowW);
 
-	    card->setStyleSheet(QStringLiteral("#oc_marketCard {"
-					       "  border: none;"
-					       "  border-radius: 10px;"
-					       "  background: rgba(255,255,255,0.04);"
-					       "}"
-					       "#oc_marketCard QLabel { background: transparent; }"));
+		card->setStyleSheet(QStringLiteral("#oc_marketCard {"
+						   "  border: none;"
+						   "  border-radius: 10px;"
+						   "  background: rgba(255,255,255,0.04);"
+						   "}"
+						   "#oc_marketCard QLabel { background: transparent; }"));
 
-	    auto *h = new QHBoxLayout(card);
-	    h->setContentsMargins(8, 8, 8, 8);
-	    h->setSpacing(10);
+		auto *h = new QHBoxLayout(card);
+		h->setContentsMargins(8, 8, 8, 8);
+		h->setSpacing(10);
 
-	    auto *icon = new QLabel(card);
-	    icon->setFixedSize(iconPx, iconPx);
-	    icon->setAlignment(Qt::AlignCenter);
-	    icon->setStyleSheet(QStringLiteral("border: 1px solid rgba(255,255,255,0.10);"
-					       "border-radius: 20px;"
-					       "background: rgba(0,0,0,0.10);"));
-	    icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
-	    h->addWidget(icon);
+		auto *icon = new QLabel(card);
+		icon->setFixedSize(iconPx, iconPx);
+		icon->setAlignment(Qt::AlignCenter);
+		icon->setStyleSheet(QStringLiteral("border: 1px solid rgba(255,255,255,0.10);"
+						   "border-radius: 20px;"
+						   "background: rgba(0,0,0,0.10);"));
+		icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
+		h->addWidget(icon);
 
-	    if (!ico.isEmpty()) {
-		    marketIconByUrl.insert(ico, icon);
-		    api.requestImage(ico, iconPx);
-	    }
+		if (!ico.isEmpty()) {
+			marketIconByUrl.insert(ico, icon);
+			api.requestImage(ico, iconPx);
+		}
 
-	    auto *textCol = new QVBoxLayout();
-	    textCol->setContentsMargins(0, 0, 0, 0);
-	    textCol->setSpacing(2);
+		auto *textCol = new QVBoxLayout();
+		textCol->setContentsMargins(0, 0, 0, 0);
+		textCol->setSpacing(2);
 
-	    auto *t = new QLabel(trunc(title, 62), card);
-	    t->setTextFormat(Qt::PlainText);
-	    t->setStyleSheet(QStringLiteral("font-weight: 700;"));
-	    t->setWordWrap(false);
-	    t->setToolTip(title);
-	    textCol->addWidget(t);
+		auto *t = new QLabel(trunc(title, 62), card);
+		t->setTextFormat(Qt::PlainText);
+		t->setStyleSheet(QStringLiteral("font-weight: 700;"));
+		t->setWordWrap(false);
+		t->setToolTip(title);
+		textCol->addWidget(t);
 
-	    if (!desc.isEmpty()) {
-		    auto *d = new QLabel(trunc(desc, 110), card);
-		    d->setTextFormat(Qt::PlainText);
-		    d->setWordWrap(false);
-		    d->setToolTip(desc);
-		    d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-		    textCol->addWidget(d);
-	    }
+		if (!desc.isEmpty()) {
+			auto *d = new QLabel(trunc(desc, 110), card);
+			d->setTextFormat(Qt::PlainText);
+			d->setWordWrap(false);
+			d->setToolTip(desc);
+			d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
+			textCol->addWidget(d);
+		}
 
-	    h->addLayout(textCol, 1);
+		h->addLayout(textCol, 1);
 
-	    auto *ctaCol = new QVBoxLayout();
-	    ctaCol->setContentsMargins(0, 0, 0, 0);
-	    ctaCol->setSpacing(6);
+		auto *ctaCol = new QVBoxLayout();
+		ctaCol->setContentsMargins(0, 0, 0, 0);
+		ctaCol->setSpacing(6);
 
-	    ctaCol->addStretch(1);
+		ctaCol->addStretch(1);
 
-	    const int ctaWidth = 160;
-	    auto *previewBtn = new QPushButton(tr("Get Template"), card);
-	    previewBtn->setCursor(Qt::PointingHandCursor);
-	    previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
-	    previewBtn->setToolTip(tr("Open the template page"));
-	    previewBtn->setFixedWidth(ctaWidth);
-	    previewBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+		const int ctaWidth = 160;
+		auto *previewBtn = new QPushButton(tr("Get Template"), card);
+		previewBtn->setCursor(Qt::PointingHandCursor);
+		previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
+		previewBtn->setToolTip(tr("Open the template page"));
+		previewBtn->setFixedWidth(ctaWidth);
+		previewBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-	    ctaCol->addWidget(previewBtn, 0, Qt::AlignHCenter);
+		ctaCol->addWidget(previewBtn, 0, Qt::AlignHCenter);
 
-	    if (!badge.isEmpty()) {
-		    auto *badgeLab = new QLabel(badge, card);
-		    badgeLab->setAlignment(Qt::AlignCenter);
-		    badgeLab->setFixedWidth(ctaWidth);
-		    badgeLab->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-		    badgeLab->setTextFormat(Qt::PlainText);
+		if (!badge.isEmpty()) {
+			auto *badgeLab = new QLabel(badge, card);
+			badgeLab->setAlignment(Qt::AlignCenter);
+			badgeLab->setFixedWidth(ctaWidth);
+			badgeLab->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+			badgeLab->setTextFormat(Qt::PlainText);
 
-		    const bool isFree = (badge.compare(QStringLiteral("FREE"), Qt::CaseInsensitive) == 0);
-		    badgeLab->setStyleSheet(isFree ? QStringLiteral("padding: 3px;"
-								    "border-radius: 3px;"
-								    "border: 1px solid rgba(34,197,94,0.55);"
-								    "background: rgba(34,197,94,0.16);"
-								    "color: rgba(255,255,255,0.96);"
-								    "font-weight: 800;"
-								    "letter-spacing: 0.4px;"
-								    "min-height: 14px;")
-						   : QStringLiteral("padding: 3px;"
-								    "border-radius: 3px;"
-								    "border: 1px solid rgba(11, 66, 245, 0.55);"
-								    "background: rgba(11, 15, 245, 0.14);"
-								    "color: rgba(255,255,255,0.96);"
-								    "font-weight: 800;"
-								    "letter-spacing: 0.4px;"
-								    "min-height: 14px;"));
+			const bool isFree = (badge.compare(QStringLiteral("FREE"), Qt::CaseInsensitive) == 0);
+			badgeLab->setStyleSheet(isFree ? QStringLiteral("padding: 3px;"
+									"border-radius: 3px;"
+									"border: 1px solid rgba(34,197,94,0.55);"
+									"background: rgba(34,197,94,0.16);"
+									"color: rgba(255,255,255,0.96);"
+									"font-weight: 800;"
+									"letter-spacing: 0.4px;"
+									"min-height: 14px;")
+						       : QStringLiteral("padding: 3px;"
+									"border-radius: 3px;"
+									"border: 1px solid rgba(11, 66, 245, 0.55);"
+									"background: rgba(11, 15, 245, 0.14);"
+									"color: rgba(255,255,255,0.96);"
+									"font-weight: 800;"
+									"letter-spacing: 0.4px;"
+									"min-height: 14px;"));
 
-		    ctaCol->addWidget(badgeLab, 0, Qt::AlignHCenter);
-	    }
+			ctaCol->addWidget(badgeLab, 0, Qt::AlignHCenter);
+		}
 
-	    ctaCol->addStretch(1);
+		ctaCol->addStretch(1);
 
-	    h->addLayout(ctaCol);
+		h->addLayout(ctaCol);
 
-	    connect(previewBtn, &QPushButton::clicked, this, [url]() {
-		    if (!url.isEmpty())
-			    QDesktopServices::openUrl(QUrl(url));
-	    });
+		connect(previewBtn, &QPushButton::clicked, this, [url]() {
+			if (!url.isEmpty())
+				QDesktopServices::openUrl(QUrl(url));
+		});
 
-	    QString tip = title;
-	    if (!desc.isEmpty())
-		    tip += QStringLiteral("\n\n") + desc;
-	    if (!dl.isEmpty())
-		    tip += QStringLiteral("\n\n") + tr("Download: %1").arg(dl);
-	    rowItem->setToolTip(tip);
+		QString tip = title;
+		if (!desc.isEmpty())
+			tip += QStringLiteral("\n\n") + desc;
+		if (!dl.isEmpty())
+			tip += QStringLiteral("\n\n") + tr("Download: %1").arg(dl);
+		rowItem->setToolTip(tip);
 
-	    rowItem->setSizeHint(QSize(rowW, badge.isEmpty() ? 96 : 112));
+		rowItem->setSizeHint(QSize(rowW, badge.isEmpty() ? 96 : 112));
 
-	    marketList->addItem(rowItem);
-	    marketList->setItemWidget(rowItem, card);
-    }
+		marketList->addItem(rowItem);
+		marketList->setItemWidget(rowItem, card);
+	}
 }
 
 void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor &c)
@@ -1699,42 +1737,53 @@ void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor 
 	btn->setText(hex);
 }
 
-void LowerThirdSettingsDialog::updateApiTemplateUi()
+void LowerThirdSettingsDialog::updateApiBridgeUi()
 {
-	// Provide immediate feedback + show the generated parameters file path.
-	if (!apiStatusLabel || !apiPathEdit)
+	if (!apiBridgeStatusPrefixLabel || !apiBridgeStatusValueLabel || !apiBridgePathEdit)
 		return;
 
-	std::string id = currentId.toStdString();
-	if (id.empty()) {
-		apiStatusLabel->setText(tr("Status: no lower third selected"));
-		apiPathEdit->clear();
+	const std::string id = currentId.toStdString();
+	const QString path = QString::fromStdString(vflow::path_parameters_lt_json(id));
+	apiBridgePathEdit->setText(path);
+
+	const bool hasPath = !path.trimmed().isEmpty();
+	if (apiBridgeCopyBtn)
+		apiBridgeCopyBtn->setEnabled(hasPath);
+	if (apiBridgeOpenBtn)
+		apiBridgeOpenBtn->setEnabled(hasPath);
+
+	auto setStatusStyle = [&](bool en) {
+		if (en) {
+			apiBridgeStatusValueLabel->setStyleSheet(QStringLiteral("color: rgba(110,231,183,0.95);"));
+		} else {
+			apiBridgeStatusValueLabel->setStyleSheet(QStringLiteral("color: rgba(255,190,120,0.95);"));
+		}
+	};
+
+	const bool enabled = apiBridgeEnable && apiBridgeEnable->isChecked();
+	if (!enabled) {
+		setStatusStyle(false);
+		apiBridgeStatusValueLabel->setText(tr("disabled (file will be deleted on Save & Apply)"));
 		return;
 	}
 
-	if (vflow::has_output_dir()) {
-		apiPathEdit->setText(QString::fromStdString(vflow::path_parameters_lt_json(id)));
+	setStatusStyle(true);
+
+	if (!vflow::has_output_dir()) {
+		apiBridgeStatusValueLabel->setText(tr("enabled (output folder not ready yet)"));
+		return;
+	}
+
+	if (path.isEmpty()) {
+		apiBridgeStatusValueLabel->setText(tr("enabled (no path)"));
+		return;
+	}
+
+	if (QFile::exists(path)) {
+		apiBridgeStatusValueLabel->setText(tr("enabled (file exists)"));
 	} else {
-		apiPathEdit->setText(tr("(Set an output folder first)"));
+		apiBridgeStatusValueLabel->setText(tr("enabled (file will be created on Save & Apply)"));
 	}
-
-	const QString txt = apiEdit ? apiEdit->toPlainText().trimmed() : QString();
-	if (txt.isEmpty()) {
-		apiStatusLabel->setText(tr("Status: empty (no file will be generated)"));
-		apiStatusLabel->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-		return;
-	}
-
-	QJsonParseError err{};
-	const QJsonDocument doc = QJsonDocument::fromJson(txt.toUtf8(), &err);
-	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-		apiStatusLabel->setText(tr("Status: invalid JSON object (%1)").arg(err.errorString()));
-		apiStatusLabel->setStyleSheet(QStringLiteral("color: #F87171;"));
-		return;
-	}
-
-	apiStatusLabel->setText(tr("Status: valid JSON object"));
-	apiStatusLabel->setStyleSheet(QStringLiteral("color: #34D399;"));
 }
 
 void LowerThirdSettingsDialog::openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit)
@@ -1966,15 +2015,13 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	const QByteArray js = jsEdit->toPlainText().toUtf8();
 
 	QJsonObject o;
-	o["title"] = QString::fromStdString(cfg->title);
-	o["subtitle"] = QString::fromStdString(cfg->subtitle);
 	o["title_size"] = cfg->title_size;
 	o["subtitle_size"] = cfg->subtitle_size;
 	o["avatar_width"] = cfg->avatar_width;
 	o["avatar_height"] = cfg->avatar_height;
 	o["anim_in"] = QString::fromStdString(cfg->anim_in);
 	o["anim_out"] = QString::fromStdString(cfg->anim_out);
-	o["api_template"] = apiEdit ? apiEdit->toPlainText() : QString();
+	o["api_template"] = QString::fromStdString(cfg->api_template);
 
 	{
 		QString sin, sout;
@@ -1999,8 +2046,6 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	o["secondary_color"] = QString::fromStdString(cfg->secondary_color);
 	o["title_color"] = QString::fromStdString(cfg->title_color);
 	o["subtitle_color"] = QString::fromStdString(cfg->subtitle_color);
-
-	// Legacy keys for backward compatibility
 	o["bg_color"] = QString::fromStdString(cfg->primary_color);
 	o["text_color"] = QString::fromStdString(cfg->title_color);
 	o["opacity"] = cfg->opacity;
@@ -2067,99 +2112,47 @@ void LowerThirdSettingsDialog::onExportTemplateClicked()
 	QMessageBox::information(this, tr("Export"), tr("Template exported successfully."));
 }
 
-void LowerThirdSettingsDialog::onInfoClicked()
+QString LowerThirdSettingsDialog::infoLoadText()
 {
 	QString text;
+
 	text += tr("Placeholders you can use inside your HTML/CSS/JS templates:") + "\n\n";
-
-	text += "  {{ID}}\n    " + tr("The unique <li> element id for this lower third (used for scoping).") + "\n\n";
-	text += "  {{TITLE}}\n    " + tr("Replaced with the Title field value.") + "\n\n";
-	text += "  {{SUBTITLE}}\n    " + tr("Replaced with the Subtitle field value.") + "\n\n";
-	text += "  {{PROFILE_PICTURE_URL}}\n    " +
-		tr("Resolved file URL for the selected profile picture (empty when none).") + "\n\n";
-
-	text += "  {{PRIMARY_COLOR}}\n    " + tr("Primary color (hex).") + "\n\n";
-	text += "  {{SECONDARY_COLOR}}\n    " + tr("Secondary color (hex).") + "\n\n";
-	text += "  {{TITLE_COLOR}}\n    " + tr("Title text color (hex).") + "\n\n";
-	text += "  {{SUBTITLE_COLOR}}\n    " + tr("Subtitle text color (hex).") + "\n\n";
-	text += "  {{BG_COLOR}}\n    " + tr("(Legacy) Maps to {{PRIMARY_COLOR}} for older templates.") + "\n\n";
-	text += "  {{TEXT_COLOR}}\n    " + tr("(Legacy) Maps to {{TITLE_COLOR}} for older templates.") + "\n\n";
-	text += "  {{OPACITY}}\n    " + tr("Opacity value (0..100). Typically used with rgba/alpha in CSS.") + "\n\n";
-	text += "  {{RADIUS}}\n    " + tr("Border radius value (0..100).") + "\n\n";
-
-	text += "  {{FONT_FAMILY}}\n    " + tr("Selected font family name.") + "\n\n";
-	text += "  {{TITLE_SIZE}}\n    " + tr("Title font size in pixels.") + "\n\n";
-	text += "  {{SUBTITLE_SIZE}}\n    " + tr("Subtitle font size in pixels.") + "\n\n";
-	text += "  {{AVATAR_WIDTH}}\n    " + tr("Avatar width in pixels.") + "\n\n";
-	text += "  {{AVATAR_HEIGHT}}\n    " + tr("Avatar height in pixels.") + "\n\n";
-
+	text += tr("Identity & Text") + "\n";
+	text += "  {{ID}} - " + tr("Unique <li> element id for this lower third (used for scoping).") + "\n";
+	text += "  {{TITLE}} - " + tr("Replaced with the Title field value.") + "\n";
+	text += "  {{SUBTITLE}} - " + tr("Replaced with the Subtitle field value.") + "\n\n";
+	text += tr("Media") + "\n";
+	text += "  {{PROFILE_PICTURE_URL}} - " +
+		tr("Resolved relative URL for the selected profile picture (\"./<file>\"). Uses \"./\" when none is set.") + "\n";
+	text += "  {{SOUND_IN_URL}} - " +
+		tr("Resolved relative URL for the selected intro sound (\"./<file>\"). Empty when none is set.") + "\n";
+	text += "  {{SOUND_OUT_URL}} - " +
+		tr("Resolved relative URL for the selected outro sound (\"./<file>\"). Empty when none is set.") + "\n\n";
+	text += tr("Colors") + "\n";
+	text += "  {{PRIMARY_COLOR}} - " + tr("Primary color (hex).") + "\n";
+	text += "  {{SECONDARY_COLOR}} - " + tr("Secondary color (hex).") + "\n";
+	text += "  {{TITLE_COLOR}} - " + tr("Title text color (hex).") + "\n";
+	text += "  {{SUBTITLE_COLOR}} - " + tr("Subtitle text color (hex).") + "\n\n";
+	text += tr("Legacy Aliases") + "\n";
+	text += "  {{BG_COLOR}} - " + tr("(Legacy) Alias for {{PRIMARY_COLOR}}.") + "\n";
+	text += "  {{TEXT_COLOR}} - " + tr("(Legacy) Alias for {{TITLE_COLOR}}.") + "\n\n";
+	text += tr("Layout & Styling") + "\n";
+	text += "  {{OPACITY}} - " + tr("Opacity value (0..100). Typically used with rgba/alpha in CSS.") + "\n";
+	text += "  {{RADIUS}} - " + tr("Border radius value (0..100).") + "\n";
+	text += "  {{FONT_FAMILY}} - " + tr("Selected font family name. Defaults to \"Inter\" when not set.") + "\n";
+	text += "  {{TITLE_SIZE}} - " + tr("Title font size in pixels.") + "\n";
+	text += "  {{SUBTITLE_SIZE}} - " + tr("Subtitle font size in pixels.") + "\n";
+	text += "  {{AVATAR_WIDTH}} - " + tr("Avatar width in pixels.") + "\n";
+	text += "  {{AVATAR_HEIGHT}} - " + tr("Avatar height in pixels.") + "\n\n";
+	text += tr("Animations") + "\n";
+	text += "  {{ANIM_IN}} - " + tr("Animation-in name/key (used by templates to pick an intro animation).") + "\n";
+	text += "  {{ANIM_OUT}} - " + tr("Animation-out name/key (used by templates to pick an outro animation).") + "\n\n";
 	text += tr("Notes:") + "\n";
 	text += tr("- HTML templates render inside the <li id=\"{{ID}}\"> container.") + "\n";
 	text += tr("- CSS templates are auto-scoped to the lower third id when possible.") + "\n";
 	text += tr("- JS templates run with a 'root' variable pointing to the <li> element.") + "\n";
 
-	auto *dlg = new QDialog(this);
-	dlg->setAttribute(Qt::WA_DeleteOnClose, true);
-	dlg->setWindowTitle(tr("Template Placeholders"));
-	dlg->setModal(true);
-	dlg->resize(720, 560);
-
-	auto *root = new QVBoxLayout(dlg);
-	root->setContentsMargins(14, 14, 14, 14);
-	root->setSpacing(10);
-
-	auto *lead = new QLabel(
-		tr("Copy / paste placeholders into your templates. They are replaced at runtime per lower third."),
-		dlg);
-	lead->setWordWrap(true);
-	lead->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.80);"));
-	root->addWidget(lead);
-
-	auto *box = new QPlainTextEdit(dlg);
-	box->setPlainText(text);
-	box->setReadOnly(true);
-	box->setLineWrapMode(QPlainTextEdit::NoWrap);
-	box->setStyleSheet(QStringLiteral("QPlainTextEdit {"
-					  "  background: rgba(255,255,255,0.06);"
-					  "  border: 1px solid rgba(255,255,255,0.10);"
-					  "  border-radius: 10px;"
-					  "  padding: 10px;"
-					  "  font-family: 'Consolas','Courier New',monospace;"
-					  "  font-size: 12px;"
-					  "}"));
-	root->addWidget(box, 1);
-
-	auto *btnRow = new QHBoxLayout();
-	btnRow->setContentsMargins(0, 0, 0, 0);
-	btnRow->setSpacing(8);
-
-	auto *copyBtn = new QPushButton(tr("Copy All"), dlg);
-	copyBtn->setCursor(Qt::PointingHandCursor);
-	copyBtn->setMinimumHeight(30);
-	copyBtn->setStyleSheet(QStringLiteral("QPushButton {"
-					      "  background: rgba(255,255,255,0.10);"
-					      "  border: 1px solid rgba(255,255,255,0.12);"
-					      "  border-radius: 10px;"
-					      "  padding: 6px 12px;"
-					      "  font-weight: 700;"
-					      "}"
-					      "QPushButton:hover { background: rgba(255,255,255,0.14); }"
-					      "QPushButton:pressed { background: rgba(255,255,255,0.18); }"));
-	QObject::connect(copyBtn, &QPushButton::clicked, dlg,
-			 [box]() { QApplication::clipboard()->setText(box->toPlainText()); });
-
-	btnRow->addWidget(copyBtn);
-	btnRow->addStretch(1);
-
-	auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
-	QObject::connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::close);
-	btnRow->addWidget(bb);
-
-	root->addLayout(btnRow);
-
-	dlg->setStyleSheet(QStringLiteral("QDialog { background: #141416; color: white; }"));
-
-	dlg->show();
+	return text;
 }
 
 void LowerThirdSettingsDialog::onImportTemplateClicked()
@@ -2207,10 +2200,6 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 
 	const QJsonObject obj = doc.object();
 
-	// Legacy fields for backward compatibility
-	//cfg->title = obj.value("title").toString().toStdString();
-	//cfg->subtitle = obj.value("subtitle").toString().toStdString();
-
 	cfg->title_size = obj.value("title_size").toInt(cfg->title_size);
 	cfg->subtitle_size = obj.value("subtitle_size").toInt(cfg->subtitle_size);
 	cfg->title_size = std::max(6, std::min(200, cfg->title_size));
@@ -2240,10 +2229,14 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->title_color = obj.value("title_color").toString().toStdString();
 	cfg->subtitle_color = obj.value("subtitle_color").toString().toStdString();
 
-	if (cfg->primary_color.empty()) cfg->primary_color = obj.value("bg_color").toString().toStdString();
-	if (cfg->title_color.empty()) cfg->title_color = obj.value("text_color").toString().toStdString();
-	if (cfg->secondary_color.empty()) cfg->secondary_color = cfg->primary_color;
-	if (cfg->subtitle_color.empty()) cfg->subtitle_color = cfg->title_color;
+	if (cfg->primary_color.empty())
+		cfg->primary_color = obj.value("bg_color").toString().toStdString();
+	if (cfg->title_color.empty())
+		cfg->title_color = obj.value("text_color").toString().toStdString();
+	if (cfg->secondary_color.empty())
+		cfg->secondary_color = cfg->primary_color;
+	if (cfg->subtitle_color.empty())
+		cfg->subtitle_color = cfg->title_color;
 	cfg->opacity = obj.value("opacity").toInt(cfg->opacity);
 	cfg->radius = obj.value("radius").toInt(cfg->radius);
 
