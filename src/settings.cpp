@@ -858,7 +858,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		connect(seeAllLowerThirdsBtn, &QPushButton::clicked, this, []() {
 			QDesktopServices::openUrl(
-				QUrl(QStringLiteral("https://obscountdown.com/?type=lower-thirds-templates")));
+				QUrl(QStringLiteral("https://streamrsc.com/?type=lower-thirds-templates")));
 		});
 
 		marketList->viewport()->installEventFilter(this);

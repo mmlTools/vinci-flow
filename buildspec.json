@@ -33,13 +33,13 @@
   },
   "platformConfig": {
     "macos": {
-      "bundleId": "com.example.vinci-flow"
+      "bundleId": "com.streamrsc.vinci-flow"
     }
   },
   "name": "vinci-flow",
   "displayName": "VinciFlow",
-  "version": "3.4.4",
+  "version": "3.5.4",
   "author": "MMLTech",
   "website": "https://ko-fi.com/mmltech",
-  "email": "contact@obscountdown.com"
+  "email": "contact@streamrsc.com"
 }

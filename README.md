@@ -18,7 +18,7 @@ data API into a single, coherent system for managing on-screen identity,
 motion, and live information.
 
 📘 **Full Documentation:**\
-https://vinciflow.obscountdown.com/
+https://vinciflow.streamrsc.com/
 
 ------------------------------------------------------------------------
 
@@ -126,7 +126,7 @@ Browser Source.
 
 ## Ecosystem
 
-VinciFlow is part of the **obscountdown.com** production toolchain for
+VinciFlow is part of the **streamrsc.com** production toolchain for
 OBS Studio, providing:
 
 -   Lower thirds
@@ -141,11 +141,11 @@ OBS Studio, providing:
 
 ## Community & Support
 
--   Documentation: https://vinciflow.obscountdown.com/
+-   Documentation: https://vinciflow.streamrsc.com/
 -   Discord: https://discord.gg/2yD6B2PTuQ\
 -   Facebook Group:
     https://www.facebook.com/groups/freestreamerspromotion\
--   Mastodon: https://mastodon.social/@obscountdown\
+-   Mastodon: https://mastodon.social/@streamrsc\
 -   X (Twitter): https://x.com/streamcd_net\
 -   Ko-fi: https://ko-fi.com/mmltech
 
@@ -155,7 +155,7 @@ OBS Studio, providing:
 
 GNU GPL v2.\
 Commercial themes and premium extensions are distributed via
-obscountdown.com.
+streamrsc.com.
 
 ------------------------------------------------------------------------
 
