@@ -254,7 +254,7 @@ namespace vflow::api {
 
 namespace {
 
-static constexpr const char *kBaseEndpoint = "https://obscountdown.com/api/resources";
+static constexpr const char *kBaseEndpoint = "https://streamrsc.com/api/resources";
 static constexpr int kDefaultLimit = 8;
 static constexpr qint64 kCacheTtlSec = 3600;
 
@@ -649,7 +649,7 @@ void ApiClient::parseAndSet(const QByteArray &rawJson)
             continue;
 
         if (it.url.trimmed().isEmpty() && !it.slug.trimmed().isEmpty())
-            it.url = QStringLiteral("https://obscountdown.com/r/") + it.slug;
+            it.url = QStringLiteral("https://streamrsc.com/r/") + it.slug;
 
         out.push_back(it);
     }

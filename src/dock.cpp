@@ -354,7 +354,7 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		row->addWidget(updateBtn_);
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
-			QDesktopServices::openUrl(QUrl(QStringLiteral("https://obscountdown.com/r/vinci-flow")));
+			QDesktopServices::openUrl(QUrl(QStringLiteral("https://streamrsc.com/r/vinci-flow")));
 		});
 
 		rootLayout->addWidget(updateFrame_);
