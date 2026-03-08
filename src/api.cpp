@@ -601,60 +601,91 @@ void ApiClient::saveCacheToDisk(const QByteArray &rawJson, qint64 fetchedAtEpoch
 
 QUrl ApiClient::buildLowerThirdsUrl() const
 {
-    QUrl url(QString::fromUtf8(kBaseEndpoint));
-    QUrlQuery q(url);
+	QUrl url(QString::fromUtf8(kBaseEndpoint));
+	QUrlQuery q(url);
 
-    q.addQueryItem(QStringLiteral("type"), QStringLiteral("lower-thirds-templates"));
-    q.addQueryItem(QStringLiteral("limit"), QString::number(kDefaultLimit));
+	q.addQueryItem(QStringLiteral("type"), QStringLiteral("lower-thirds-templates"));
+	q.addQueryItem(QStringLiteral("limit"), QString::number(kDefaultLimit));
 
-    url.setQuery(q);
-    return url;
+	url.setQuery(q);
+	return url;
 }
 
 void ApiClient::parseAndSet(const QByteArray &rawJson)
 {
-    QJsonParseError jerr{};
-    const QJsonDocument doc = QJsonDocument::fromJson(rawJson, &jerr);
-    if (jerr.error != QJsonParseError::NoError || !doc.isObject())
-        return;
+	QJsonParseError jerr{};
+	const QJsonDocument doc = QJsonDocument::fromJson(rawJson, &jerr);
+	if (jerr.error != QJsonParseError::NoError || !doc.isObject())
+		return;
 
-    const QJsonObject root = doc.object();
-    // Optional: plugin version for update checks (may be missing on older cached payloads)
-    m_remotePluginVersion = root.value(QStringLiteral("plugin_version")).toString().trimmed();
-    const QJsonArray arr = root.value(QStringLiteral("data")).toArray();
+	const QJsonObject root = doc.object();
 
-    QVector<ResourceItem> out;
-    out.reserve(arr.size());
+	m_remotePluginVersion = root.value(QStringLiteral("plugin_version")).toString().trimmed();
 
-    for (QJsonValue v : arr) {
-        if (!v.isObject())
-            continue;
-        const QJsonObject o = v.toObject();
+	const QJsonArray arr = root.value(QStringLiteral("data")).toArray();
 
-        ResourceItem it;
-        it.guid = o.value(QStringLiteral("guid")).toString();
-        it.slug = o.value(QStringLiteral("slug")).toString();
-        it.url = o.value(QStringLiteral("url")).toString();
-        it.title = o.value(QStringLiteral("title")).toString();
-        it.shortDescription = o.value(QStringLiteral("short_description")).toString();
-        it.typeLabel = o.value(QStringLiteral("type_label")).toString();
+	QVector<ResourceItem> out;
+	out.reserve(arr.size());
 
-        // Optional extras (your API includes these)
-        it.downloadUrl = o.value(QStringLiteral("download_url")).toString();
-        it.iconPublicUrl = o.value(QStringLiteral("icon_public_url")).toString();
-        it.coverPublicUrl = o.value(QStringLiteral("cover_public_url")).toString();
-        it.badgeValue = o.value(QStringLiteral("badge_value")).toString();
+	for (const QJsonValue &v : arr) {
+		if (!v.isObject())
+			continue;
 
-        if (it.title.trimmed().isEmpty())
-            continue;
+		const QJsonObject o = v.toObject();
 
-        if (it.url.trimmed().isEmpty() && !it.slug.trimmed().isEmpty())
-            it.url = QStringLiteral("https://streamrsc.com/r/") + it.slug;
+		ResourceItem it;
+		it.guid = o.value(QStringLiteral("guid")).toString().trimmed();
+		it.type = o.value(QStringLiteral("type")).toString().trimmed();
+		it.slug = o.value(QStringLiteral("slug")).toString().trimmed();
+		it.url = o.value(QStringLiteral("url")).toString().trimmed();
+		it.title = o.value(QStringLiteral("title")).toString().trimmed();
+		it.shortDescription = o.value(QStringLiteral("short_description")).toString().trimmed();
+		it.metaTitle = o.value(QStringLiteral("meta_title")).toString().trimmed();
+		it.metaDescription = o.value(QStringLiteral("meta_description")).toString().trimmed();
 
-        out.push_back(it);
-    }
+		it.iconPath = o.value(QStringLiteral("icon_path")).toString().trimmed();
+		it.iconPublicUrl = o.value(QStringLiteral("icon_public_url")).toString().trimmed();
+		it.coverPath = o.value(QStringLiteral("cover_path")).toString().trimmed();
+		it.coverPublicUrl = o.value(QStringLiteral("cover_public_url")).toString().trimmed();
 
-    m_lowerThirds = out;
+		it.buttonUrl = o.value(QStringLiteral("button_url")).toString().trimmed();
+		it.buttonLabel = o.value(QStringLiteral("button_label")).toString().trimmed();
+		it.priceUsd = o.value(QStringLiteral("price_usd")).toString().trimmed();
+
+		it.memberOnly = o.value(QStringLiteral("member_only")).toInt(0);
+		it.requiredRole = o.value(QStringLiteral("required_role")).toString().trimmed();
+
+		it.publishedAt = o.value(QStringLiteral("published_at")).toString().trimmed();
+		it.createdAt = o.value(QStringLiteral("created_at")).toString().trimmed();
+		it.updatedAt = o.value(QStringLiteral("updated_at")).toString().trimmed();
+
+		const QJsonObject publisher = o.value(QStringLiteral("publisher")).toObject();
+		it.publisherGuid = publisher.value(QStringLiteral("guid")).toString().trimmed();
+		it.publisherNickname = publisher.value(QStringLiteral("nickname")).toString().trimmed();
+		it.publisherPublicToken = publisher.value(QStringLiteral("public_token")).toString().trimmed();
+		it.publisherAvatarUrl = publisher.value(QStringLiteral("avatar_url")).toString().trimmed();
+
+		const QJsonObject totals = o.value(QStringLiteral("totals")).toObject();
+		it.views = totals.value(QStringLiteral("views")).toInt(0);
+		it.likes = totals.value(QStringLiteral("likes")).toInt(0);
+		it.saves = totals.value(QStringLiteral("saves")).toInt(0);
+		it.shares = totals.value(QStringLiteral("shares")).toInt(0);
+		it.downloads = totals.value(QStringLiteral("downloads")).toInt(0);
+
+		if (it.title.isEmpty())
+			continue;
+
+		if (it.url.isEmpty() && !it.slug.isEmpty()) {
+			if (it.type.compare(QStringLiteral("article"), Qt::CaseInsensitive) == 0)
+				it.url = QStringLiteral("https://streamrsc.com/streaming-article/") + it.slug;
+			else
+				it.url = QStringLiteral("https://streamrsc.com/streaming-resource/") + it.slug;
+		}
+
+		out.push_back(it);
+	}
+
+	m_lowerThirds = out;
 }
 
 void ApiClient::scheduleRetry()

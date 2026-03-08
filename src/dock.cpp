@@ -46,6 +46,7 @@
 #include <QMessageBox>
 #include <QRandomGenerator>
 #include <QKeySequenceEdit>
+#include <QSettings>
 
 static QWidget *g_dockWidget = nullptr;
 
@@ -60,6 +61,26 @@ struct GroupRuntime {
 
 static QHash<QString, GroupRuntime> g_groupRuns;
 static QHash<QString, qint64> g_groupHideAtMs;
+
+static constexpr const char *kDockUiSettingsGroup = "LowerThirdDock";
+static constexpr const char *kDockUiCarouselVisibleKey = "widgetCarouselVisible";
+
+static bool loadWidgetCarouselVisibleState()
+{
+	QSettings s;
+	s.beginGroup(QString::fromLatin1(kDockUiSettingsGroup));
+	const bool visible = s.value(QString::fromLatin1(kDockUiCarouselVisibleKey), true).toBool();
+	s.endGroup();
+	return visible;
+}
+
+static void saveWidgetCarouselVisibleState(bool visible)
+{
+	QSettings s;
+	s.beginGroup(QString::fromLatin1(kDockUiSettingsGroup));
+	s.setValue(QString::fromLatin1(kDockUiCarouselVisibleKey), visible);
+	s.endGroup();
+}
 
 static void applyGroupRowStyle(QFrame *rowFrame)
 {
@@ -84,6 +105,29 @@ static void applyGroupRowStyle(QFrame *rowFrame)
 	}
 
 	rowFrame->setStyleSheet(QString());
+}
+
+static void updateWidgetCarouselToggleUi(QPushButton *btn, QWidget *carousel, QStyle *st)
+{
+	if (!btn || !carousel || !st)
+		return;
+
+	const bool visible = carousel->isVisible();
+
+	btn->blockSignals(true);
+	btn->setChecked(visible);
+	btn->setText(visible ? QObject::tr("Hide Carousel") : QObject::tr("Show Carousel"));
+	btn->setToolTip(visible ? QObject::tr("Hide widget carousel") : QObject::tr("Show widget carousel"));
+
+	QIcon ico = visible ? QIcon::fromTheme(QStringLiteral("pan-down-symbolic"))
+			    : QIcon::fromTheme(QStringLiteral("pan-end-symbolic"));
+
+	if (ico.isNull()) {
+		ico = st->standardIcon(visible ? QStyle::SP_TitleBarShadeButton : QStyle::SP_TitleBarUnshadeButton);
+	}
+
+	btn->setIcon(ico);
+	btn->blockSignals(false);
 }
 
 static void stopGroupRun(const QString &groupId)
@@ -297,6 +341,18 @@ QPushButton#sltUpdateBannerBtn {
   background: rgba(255,255,255,0.06);
 }
 QPushButton#sltUpdateBannerBtn:hover { background: rgba(255,255,255,0.10); }
+QPushButton#sltToggleCarouselBtn {
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(240,246,252,0.95);
+}
+QPushButton#sltToggleCarouselBtn:hover { background: rgba(255,255,255,0.10); }
+QPushButton#sltToggleCarouselBtn:checked {
+  background: rgba(88,166,255,0.16);
+  border: 1px solid rgba(88,166,255,0.75);
+}
 QFrame#sltRowFrame {
   border: 1px solid rgba(255,255,255,40);
   border-radius: 4px;
@@ -354,7 +410,8 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		row->addWidget(updateBtn_);
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
-			QDesktopServices::openUrl(QUrl(QStringLiteral("https://streamrsc.com/r/vinci-flow")));
+			QDesktopServices::openUrl(
+				QUrl(QStringLiteral("https://streamrsc.com/streaming-resource/vinci-flow")));
 		});
 
 		rootLayout->addWidget(updateFrame_);
@@ -506,9 +563,23 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 	scrollArea->setWidget(listContainer);
 	rootLayout->addWidget(scrollArea, 1);
 
+	widgetCarousel_ = create_widget_carousel(this);
+	const bool carouselVisible = loadWidgetCarouselVisibleState();
+	if (widgetCarousel_)
+		widgetCarousel_->setVisible(carouselVisible);
+
 	{
 		auto *row = new QHBoxLayout();
 		row->setSpacing(6);
+
+		toggleCarouselBtn_ = new QPushButton(this);
+		toggleCarouselBtn_->setObjectName(QStringLiteral("sltToggleCarouselBtn"));
+		toggleCarouselBtn_->setCursor(Qt::PointingHandCursor);
+		toggleCarouselBtn_->setCheckable(true);
+		toggleCarouselBtn_->setFlat(false);
+		updateWidgetCarouselToggleUi(toggleCarouselBtn_, widgetCarousel_, st);
+
+		row->addWidget(toggleCarouselBtn_);
 		row->addStretch(1);
 
 		infoBtn = new QPushButton(this);
@@ -548,13 +619,21 @@ QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0
 		row->addWidget(manageGroupsBtn_);
 		rootLayout->addLayout(row);
 
+		connect(toggleCarouselBtn_, &QPushButton::clicked, this, [this, st](bool checked) {
+			if (!widgetCarousel_)
+				return;
+			widgetCarousel_->setVisible(checked);
+			saveWidgetCarouselVisibleState(checked);
+			updateWidgetCarouselToggleUi(toggleCarouselBtn_, widgetCarousel_, st);
+		});
+
 		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
 		connect(manageGroupsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageGroups);
-
 		connect(infoBtn, &QPushButton::clicked, this, [this]() { show_troubleshooting_dialog(this); });
 	}
 
-	rootLayout->addWidget(create_widget_carousel(this));
+	if (widgetCarousel_)
+		rootLayout->addWidget(widgetCarousel_);
 
 	const bool hasDir = vflow::has_output_dir();
 	addBtn->setEnabled(hasDir);
@@ -781,7 +860,6 @@ void LowerThirdDock::repeatTick()
 			}
 		}
 
-		// If a re-show was scheduled (used to re-trigger when already visible), execute it.
 		if (reShowAtMs_.contains(qid) && now >= reShowAtMs_[qid]) {
 			reShowAtMs_.remove(qid);
 			if (!vflow::is_visible(c.id)) {
@@ -805,13 +883,10 @@ void LowerThirdDock::repeatTick()
 					offAtMs_[qid] = now + (qint64)visibleSec * 1000;
 				emit requestSave();
 			} else {
-				// Already visible (e.g., user manually kept it visible). To honor "repeat every",
-				// briefly toggle off then back on after a very short delay.
-				// This keeps individual automation working without interfering with carousel runs.
 				if (!reShowAtMs_.contains(qid)) {
 					vflow::set_visible_persist(c.id, false);
 					offAtMs_.remove(qid);
-					reShowAtMs_[qid] = now + 150; // ms
+					reShowAtMs_[qid] = now + 150;
 					emit requestSave();
 				}
 			}
@@ -1005,8 +1080,6 @@ void LowerThirdDock::onManageGroups()
 			for (const auto &m : car->members)
 				inSet.insert(QString::fromStdString(m));
 		}
-
-		const QString qCurCarId = QString::fromStdString(groupId);
 
 		for (const auto &lt : vflow::all_const()) {
 			const auto owners = vflow::groups_containing(lt.id);

@@ -1,4 +1,3 @@
-// dock.hpp
 #pragma once
 
 #include <cstdint>
@@ -29,7 +28,7 @@ class QComboBox;
 class QSpinBox;
 
 namespace vflow {
-struct core_event; // provided by core (event bus)
+struct core_event;
 }
 
 namespace vflow::ui {
@@ -55,10 +54,8 @@ public:
 	~LowerThirdDock() override;
 
 	bool init();
-	// Called when OBS scene collection changes; restores per-collection state.
 	void onSceneCollectionChanged();
 	void refreshBrowserSources();
-	// Shows/hides the update banner (safe to call with empty/unknown versions).
 	void setUpdateAvailable(const QString &remoteVersion, const QString &localVersion);
 
 signals:
@@ -70,7 +67,6 @@ private slots:
 	void onManageGroups();
 
 private:
-	// Update banner (top of dock)
 	QFrame *updateFrame_ = nullptr;
 	QLabel *updateLabel_ = nullptr;
 	QPushButton *updateBtn_ = nullptr;
@@ -97,12 +93,10 @@ private:
 	void ensureRepeatTimerStarted();
 	void repeatTick();
 
-	// NEW: combo-box workflow
 	void populateBrowserSources(bool keepSelection = true);
 	void onBrowserSourceChanged(int index);
 	void onBrowserSizeChanged();
 
-	// NEW: core event bus sync (bidirectional with websocket)
 	void onCoreEvent(const vflow::core_event &ev);
 	static void coreEventThunk(const vflow::core_event &ev, void *user);
 
@@ -114,28 +108,25 @@ protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-	// Resources row
 	QLineEdit *outputPathEdit = nullptr;
 	QPushButton *outputBrowseBtn = nullptr;
 
-	// Browser Source selector row
 	QComboBox *browserSourceCombo = nullptr;
 	QPushButton *refreshSourcesBtn = nullptr;
 
-	// Browser Source sizing row
 	QSpinBox *browserWidthSpin = nullptr;
 	QSpinBox *browserHeightSpin = nullptr;
 	QPushButton *applyBrowserSizeBtn = nullptr;
 
-	// Footer tools
 	QPushButton *infoBtn = nullptr;
+	QPushButton *toggleCarouselBtn_ = nullptr;
 
-	// Add
 	QPushButton *addBtn = nullptr;
 
 	QScrollArea *scrollArea = nullptr;
 	QWidget *listContainer = nullptr;
 	QVBoxLayout *listLayout = nullptr;
+	QWidget *widgetCarousel_ = nullptr;
 
 	QVector<LowerThirdRowUi> rows;
 	QVector<QShortcut *> shortcuts_;
@@ -143,16 +134,12 @@ private:
 	QTimer *repeatTimer_ = nullptr;
 	QHash<QString, qint64> nextOnMs_;
 	QHash<QString, qint64> offAtMs_;
-	// When auto-repeat is enabled and the lower third is already visible, we briefly
-	// toggle it off then back on to re-trigger animations without breaking group runs.
 	QHash<QString, qint64> reShowAtMs_;
 
-	// Helps avoid recursive signals while repopulating
 	bool populatingSources_ = false;
 	signal_handler_t *obsSignalHandler_ = nullptr;
 	bool obsSignalsConnected_ = false;
 
-	// Core event bus listener token
 	uint64_t coreListenerToken_ = 0;
 };
 

@@ -349,12 +349,12 @@ void show_troubleshooting_dialog(QWidget *parent)
         secTitle->setStyleSheet(QStringLiteral("font-weight:700;"));
         cl->addWidget(secTitle);
 
-        cl->addWidget(make_link_card(
-            content, QString::fromUtf8("🌐"), QObject::tr("Visit the Website"),
-            QObject::tr("Downloads, updates, documentation, and templates."),
-            QObject::tr("Open streamrsc.com"), QUrl(QStringLiteral("https://streamrsc.com/r/vinci-flow"))));
+	cl->addWidget(make_link_card(content, QString::fromUtf8("🌐"), QObject::tr("Visit the Website"),
+				     QObject::tr("Downloads, updates, documentation, and templates."),
+				     QObject::tr("Open streamrsc.com"),
+				     QUrl(QStringLiteral("https://streamrsc.com/streaming-resource/vinci-flow"))));
 
-        cl->addWidget(make_link_card(
+	cl->addWidget(make_link_card(
             content, QString::fromUtf8("💬"), QObject::tr("Join Discord"),
             QObject::tr("Community support, feedback, and announcements."),
             QObject::tr("Join Discord"), QUrl(QStringLiteral("https://discord.gg/2yD6B2PTuQ"))));

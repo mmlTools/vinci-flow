@@ -1,98 +1,99 @@
-// api.hpp
 #pragma once
 
 #include <QObject>
-#include <QString>
-#include <QUrl>
+#include <QPixmap>
 #include <QVector>
+#include <QString>
 #include <QHash>
 #include <QSet>
-#include <QPixmap>
 
 namespace vflow::api {
 
 struct ResourceItem {
-    QString guid;
-    QString slug;
-    QString url;
-    QString title;
-    QString shortDescription;
-    QString typeLabel;
-    QString downloadUrl;
-    QString iconPublicUrl;
-    QString coverPublicUrl;
-    QString badgeValue;
+	QString guid;
+	QString type;
+	QString slug;
+	QString url;
+	QString title;
+	QString shortDescription;
+	QString metaTitle;
+	QString metaDescription;
+
+	QString iconPath;
+	QString iconPublicUrl;
+	QString coverPath;
+	QString coverPublicUrl;
+
+	QString buttonUrl;
+	QString buttonLabel;
+	QString priceUsd;
+
+	int memberOnly = 0;
+	QString requiredRole;
+
+	QString publisherGuid;
+	QString publisherNickname;
+	QString publisherPublicToken;
+	QString publisherAvatarUrl;
+
+	QString publishedAt;
+	QString createdAt;
+	QString updatedAt;
+
+	int views = 0;
+	int likes = 0;
+	int saves = 0;
+	int shares = 0;
+	int downloads = 0;
 };
 
 class ApiClient final : public QObject {
-    Q_OBJECT
+	Q_OBJECT
 public:
-    static ApiClient &instance();
+	static ApiClient &instance();
 
-    // Call once after plugin startup (safe to call multiple times).
-    void init();
+	explicit ApiClient(QObject *parent = nullptr);
 
-    // Fetch Marketplace lower thirds list.
-    // - force=false respects TTL and skips network when cache is fresh.
-    // - force=true always attempts a network refresh.
-    void fetchLowerThirds(bool force = false);
+	void init();
+	void fetchLowerThirds(bool force = false);
+	void requestImage(const QString &imageUrl, int targetPx = 0);
 
-    // Fetch and decode an image with in-memory + disk caching.
-    void requestImage(const QString &imageUrl, int targetPx = 48);
-
-    QVector<ResourceItem> lowerThirds() const;
-    // Optional value returned by the API root: "plugin_version"
-    // Empty when not provided / not fetched.
-    QString remotePluginVersion() const;
-    QString lastError() const;
+	QVector<ResourceItem> lowerThirds() const;
+	QString remotePluginVersion() const;
+	QString lastError() const;
 
 signals:
-    // Emitted when m_lowerThirds has been populated/updated (from disk cache or network).
-    void lowerThirdsUpdated();
-
-    // Emitted on network/parse failures.
-    // Important: callers should NOT clear existing UI items on this signal.
-    void lowerThirdsFailed(const QString &err);
-
-    void imageReady(const QString &imageUrl, const QPixmap &pixmap);
-    void imageFailed(const QString &imageUrl, const QString &err);
+	void lowerThirdsUpdated();
+	void lowerThirdsFailed(const QString &err);
+	void imageReady(const QString &url, const QPixmap &pm);
+	void imageFailed(const QString &url, const QString &err);
 
 private:
-    explicit ApiClient(QObject *parent = nullptr);
-
-    void loadCacheFromDisk();
-    void saveCacheToDisk(const QByteArray &rawJson, qint64 fetchedAtEpochSec);
-    bool isCacheFresh(qint64 nowEpochSec) const;
-    QString cacheFilePath() const;
-
-    void parseAndSet(const QByteArray &rawJson);
-    QUrl buildLowerThirdsUrl() const;
-
-    QString imageCacheDir() const;
-    QString imageCachePathForUrl(const QString &imageUrl) const;
-
-    // Retry/backoff for failed API calls.
-    void scheduleRetry();
-    void resetRetry();
+	bool isCacheFresh(qint64 nowEpochSec) const;
+	QString cacheFilePath() const;
+	QString imageCacheDir() const;
+	QString imageCachePathForUrl(const QString &imageUrl) const;
+	void loadCacheFromDisk();
+	void saveCacheToDisk(const QByteArray &rawJson, qint64 fetchedAtEpochSec);
+	QUrl buildLowerThirdsUrl() const;
+	void parseAndSet(const QByteArray &rawJson);
+	void scheduleRetry();
+	void resetRetry();
 
 private:
-    QVector<ResourceItem> m_lowerThirds;
-    QString m_lastError;
-    QByteArray m_lastRaw;
-    qint64 m_cacheFetchedAt = 0;
+	bool m_inited = false;
+	bool m_fetchInFlight = false;
+	bool m_retryScheduled = false;
+	int m_retryCount = 0;
+	qint64 m_cacheFetchedAt = 0;
 
-    QString m_remotePluginVersion;
+	QString m_remotePluginVersion;
+	QString m_lastError;
+	QByteArray m_lastRaw;
 
-    bool m_inited = false;
-    bool m_fetchInFlight = false;
-
-    // Retry state
-    int m_retryCount = 0;
-    bool m_retryScheduled = false;
-
-    // Image caches
-    QHash<QString, QPixmap> m_pixCache;
-    QSet<QString> m_imgInFlight;
+	QVector<ResourceItem> m_lowerThirds;
+	QHash<QString, QPixmap> m_pixCache;
+	QSet<QString> m_imgInFlight;
 };
 
 } // namespace vflow::api
