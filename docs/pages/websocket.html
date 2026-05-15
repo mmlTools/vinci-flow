@@ -20,6 +20,8 @@
 GetVisible
 SetVisible
 ToggleVisible
+SetTemplateParameters
+GetTemplateParameters
 CreateLowerThird
 CloneLowerThird
 DeleteLowerThird
@@ -37,6 +39,37 @@ ReloadFromDisk
     "requestData": {
       "id": "your_lower_third_id",
       "visible": true
+    }
+  }
+}
+</code></pre>
+
+<p><b>SetTemplateParameters</b></p>
+<pre><code>{
+  "requestType": "CallVendorRequest",
+  "requestData": {
+    "vendorName": "vinci-flow",
+    "requestType": "SetTemplateParameters",
+    "requestData": {
+      "id": "your_lower_third_id",
+      "data": {
+        "Name": "Kevin",
+        "Title": "Lead Developer",
+        "Social": "@kevin"
+      }
+    }
+  }
+}
+</code></pre>
+
+<p><b>GetTemplateParameters</b></p>
+<pre><code>{
+  "requestType": "CallVendorRequest",
+  "requestData": {
+    "vendorName": "vinci-flow",
+    "requestType": "GetTemplateParameters",
+    "requestData": {
+      "id": "your_lower_third_id"
     }
   }
 }

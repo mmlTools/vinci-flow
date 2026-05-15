@@ -1231,6 +1231,74 @@ std::string path_parameters_lt_json(const std::string &id)
 	return join_path(g_output_dir, "parameters_" + id + ".json");
 }
 
+bool set_template_parameters(const std::string &id, const QJsonObject &data)
+{
+	if (!has_output_dir())
+		return false;
+
+	const std::string sid = sanitize_id(id);
+	if (sid.empty() || !get_by_id(sid))
+		return false;
+
+	const std::string perPath = path_parameters_lt_json(sid);
+	if (!write_text_file_atomic(perPath, QJsonDocument(data).toJson(QJsonDocument::Indented).toStdString()))
+		return false;
+
+	const std::string combinedPath = path_parameters_json();
+	if (!combinedPath.empty()) {
+		const QString qCombinedPath = QString::fromStdString(combinedPath);
+		if (QFile::exists(qCombinedPath)) {
+			QJsonObject combinedRoot;
+			const std::string txt = read_text_file(combinedPath);
+			if (parse_json_object_text(txt, combinedRoot)) {
+				combinedRoot[QString::fromStdString(sid)] = data;
+				write_text_file_atomic(
+					combinedPath,
+					QJsonDocument(combinedRoot).toJson(QJsonDocument::Indented).toStdString());
+			}
+		}
+	}
+
+	return true;
+}
+
+bool get_template_parameters(const std::string &id, QJsonObject &out)
+{
+	out = QJsonObject();
+	if (!has_output_dir())
+		return false;
+
+	const std::string sid = sanitize_id(id);
+	if (sid.empty() || !get_by_id(sid))
+		return false;
+
+	const std::string perPath = path_parameters_lt_json(sid);
+	const QString qPerPath = QString::fromStdString(perPath);
+	if (QFile::exists(qPerPath)) {
+		const std::string txt = read_text_file(perPath);
+		if (!parse_json_object_text(txt, out))
+			return false;
+		return true;
+	}
+
+	const std::string combinedPath = path_parameters_json();
+	if (!combinedPath.empty()) {
+		const QString qCombinedPath = QString::fromStdString(combinedPath);
+		if (QFile::exists(qCombinedPath)) {
+			QJsonObject combinedRoot;
+			const std::string txt = read_text_file(combinedPath);
+			if (!parse_json_object_text(txt, combinedRoot))
+				return false;
+			const QJsonValue entry = combinedRoot.value(QString::fromStdString(sid));
+			if (entry.isObject())
+				out = entry.toObject();
+			return true;
+		}
+	}
+
+	return true;
+}
+
 std::string path_animate_css()
 {
 	return has_output_dir() ? join_path(g_output_dir, "animate.min.css") : "";

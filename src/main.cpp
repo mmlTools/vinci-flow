@@ -58,32 +58,9 @@ void obs_module_post_load(void)
 	obs_frontend_add_event_callback(on_frontend_event, nullptr);
 	vflow::ws::init();
 
-	// Update check: compare local PLUGIN_VERSION vs API "plugin_version".
-	// IMPORTANT: Connect BEFORE init(), because init() may synchronously emit
-	// lowerThirdsUpdated() when loading the on-disk cache.
-	if (auto *dock = LowerThird_get_dock()) {
-		auto &api = vflow::api::ApiClient::instance();
-		QObject::connect(&api, &vflow::api::ApiClient::lowerThirdsUpdated, dock, [dock]() {
-			auto &api2 = vflow::api::ApiClient::instance();
-			const QString remoteV = api2.remotePluginVersion().trimmed();
-			const QString localV = QStringLiteral(PLUGIN_VERSION);
-			QMetaObject::invokeMethod(dock,
-					      [dock, remoteV, localV]() { dock->setUpdateAvailable(remoteV, localV); },
-					      Qt::QueuedConnection);
-		}, Qt::UniqueConnection);
-	}
+	// StreamRSC remote API endpoints are no longer reachable.
+	// Remote marketplace and version-check behavior are disabled.
 
-	// Marketplace preload (cached on disk; refresh is async).
-	vflow::api::ApiClient::instance().init();
-
-	// Also apply the version check once immediately after init() (covers the case
-	// where cache load happened before the Qt signal loop processes queued calls).
-	if (auto *dock = LowerThird_get_dock()) {
-		QTimer::singleShot(0, dock, [dock]() {
-			auto &api = vflow::api::ApiClient::instance();
-			dock->setUpdateAvailable(api.remotePluginVersion().trimmed(), QStringLiteral(PLUGIN_VERSION));
-		});
-	}
 	if (auto *dock = LowerThird_get_dock()) {
 		QTimer::singleShot(250, dock, [dock]() { dock->refreshBrowserSources(); });
 		QTimer::singleShot(1000, dock, [dock]() { dock->refreshBrowserSources(); });

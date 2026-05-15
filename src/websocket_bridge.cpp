@@ -3,6 +3,9 @@
 
 #include "core.hpp"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+
 // vendored header
 #include "thirdparty/obs-websocket-api.h"
 
@@ -195,6 +198,85 @@ static void req_SetVisible(obs_data_t *request, obs_data_t *response, void *priv
 	obs_data_set_bool(response, "visible", vflow::is_visible(sid));
 }
 
+static bool parse_json_object(obs_data_t *data, QJsonObject &out)
+{
+	const char *json = obs_data_get_json(data);
+	if (!json)
+		return false;
+
+	QJsonParseError err{};
+	const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(json), &err);
+	if (err.error != QJsonParseError::NoError || !doc.isObject())
+		return false;
+
+	out = doc.object();
+	return true;
+}
+
+static void req_SetTemplateParameters(obs_data_t *request, obs_data_t *response, void *priv)
+{
+	UNUSED_PARAMETER(priv);
+
+	QJsonObject root;
+	if (!parse_json_object(request, root)) {
+		set_error(response, "Invalid request payload");
+		return;
+	}
+
+	const std::string sid = sanitize_id_local(root.value("id").toString().toStdString());
+	if (sid.empty() || !vflow::get_by_id(sid)) {
+		set_error(response, "Invalid id");
+		return;
+	}
+
+	const QJsonValue dataValue = root.value("data");
+	if (!dataValue.isObject()) {
+		set_error(response, "Invalid data object");
+		return;
+	}
+
+	if (!vflow::set_template_parameters(sid, dataValue.toObject())) {
+		set_error(response, "Failed to set template parameters");
+		return;
+	}
+
+	set_ok(response, true);
+	obs_data_set_string(response, "id", sid.c_str());
+	obs_data_t *dataObj = obs_data_create_from_json(
+		QJsonDocument(dataValue.toObject()).toJson(QJsonDocument::Compact).constData());
+	if (dataObj)
+		obs_data_set_obj(response, "data", dataObj);
+}
+
+static void req_GetTemplateParameters(obs_data_t *request, obs_data_t *response, void *priv)
+{
+	UNUSED_PARAMETER(priv);
+
+	QJsonObject root;
+	if (!parse_json_object(request, root)) {
+		set_error(response, "Invalid request payload");
+		return;
+	}
+
+	const std::string sid = sanitize_id_local(root.value("id").toString().toStdString());
+	if (sid.empty() || !vflow::get_by_id(sid)) {
+		set_error(response, "Invalid id");
+		return;
+	}
+
+	QJsonObject dataObj;
+	if (!vflow::get_template_parameters(sid, dataObj)) {
+		set_error(response, "Failed to read template parameters");
+		return;
+	}
+
+	set_ok(response, true);
+	obs_data_set_string(response, "id", sid.c_str());
+	obs_data_t *data = obs_data_create_from_json(QJsonDocument(dataObj).toJson(QJsonDocument::Compact).constData());
+	if (data)
+		obs_data_set_obj(response, "data", data);
+}
+
 static void req_ToggleVisible(obs_data_t *request, obs_data_t *response, void *priv)
 {
 	UNUSED_PARAMETER(priv);
@@ -336,6 +418,10 @@ bool init()
 	ok = ok && obs_websocket_vendor_register_request(g_vendor, "GetVisible", req_GetVisible, nullptr);
 	ok = ok && obs_websocket_vendor_register_request(g_vendor, "SetVisible", req_SetVisible, nullptr);
 	ok = ok && obs_websocket_vendor_register_request(g_vendor, "ToggleVisible", req_ToggleVisible, nullptr);
+	ok = ok && obs_websocket_vendor_register_request(g_vendor, "SetTemplateParameters", req_SetTemplateParameters,
+							 nullptr);
+	ok = ok && obs_websocket_vendor_register_request(g_vendor, "GetTemplateParameters", req_GetTemplateParameters,
+							 nullptr);
 
 	ok = ok && obs_websocket_vendor_register_request(g_vendor, "CreateLowerThird", req_CreateLowerThird, nullptr);
 	ok = ok && obs_websocket_vendor_register_request(g_vendor, "CloneLowerThird", req_CloneLowerThird, nullptr);

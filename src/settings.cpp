@@ -862,7 +862,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		heroTitle->setStyleSheet(QStringLiteral("font-weight: 700;"));
 		heroTextCol->addWidget(heroTitle);
 
-		marketStatus = new QLabel(tr("Loading recommendations…"), hero);
+		marketStatus = new QLabel(tr("Browse lower third templates."), hero);
 		marketStatus->setWordWrap(true);
 		marketStatus->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
 		heroTextCol->addWidget(marketStatus);
@@ -908,21 +908,9 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		});
 
 		connect(seeAllLowerThirdsBtn, &QPushButton::clicked, this, []() {
-			QDesktopServices::openUrl(QUrl(
-				QStringLiteral("https://streamrsc.com/streaming-resources/lower-thirds-templates")));
+			QDesktopServices::openUrl(QUrl(QStringLiteral("https://streamrsc.com/search?q=lower+third")));
 		});
-
 		marketList->viewport()->installEventFilter(this);
-
-		auto &api = vflow::api::ApiClient::instance();
-		connect(&api, &vflow::api::ApiClient::lowerThirdsUpdated, this,
-			&LowerThirdSettingsDialog::onMarketplaceUpdated);
-		connect(&api, &vflow::api::ApiClient::lowerThirdsFailed, this,
-			&LowerThirdSettingsDialog::onMarketplaceFailed);
-		connect(&api, &vflow::api::ApiClient::imageReady, this,
-			&LowerThirdSettingsDialog::onMarketplaceImageReady);
-		connect(&api, &vflow::api::ApiClient::imageFailed, this,
-			&LowerThirdSettingsDialog::onMarketplaceImageFailed);
 
 		rebuildMarketplaceList();
 	}
@@ -1570,227 +1558,8 @@ void LowerThirdSettingsDialog::rebuildMarketplaceList()
 	marketList->clear();
 	marketIconByUrl.clear();
 
-	auto &api = vflow::api::ApiClient::instance();
-	const auto items = api.lowerThirds();
-
 	if (marketStatus) {
-		if (!items.isEmpty()) {
-			marketStatus->setText(tr("Custom lower thirds library with free and paid templates."));
-		} else {
-			const QString err = api.lastError().trimmed();
-			marketStatus->setText(err.isEmpty() ? tr("No templates available right now.")
-							    : tr("No templates available right now. %1").arg(err));
-		}
-	}
-
-	const int iconPx = 60;
-
-	auto trunc = [](const QString &s, int maxChars) -> QString {
-		QString t = s.trimmed();
-		if (maxChars <= 0)
-			return QString();
-		if (t.size() <= maxChars)
-			return t;
-		return t.left(maxChars - 1).trimmed() + QStringLiteral("…");
-	};
-
-	auto badgeTextForPrice = [](const QString &priceUsd) -> QString {
-		const QString p = priceUsd.trimmed();
-		if (p.isEmpty())
-			return QStringLiteral("FREE");
-
-		bool ok = false;
-		const double val = p.toDouble(&ok);
-		if (!ok || val <= 0.00001)
-			return QStringLiteral("FREE");
-
-		return QStringLiteral("$%1").arg(QString::number(val, 'f', 2));
-	};
-
-	const int rowW = qMax(320, marketList->viewport()->width());
-
-	for (const auto &r : items) {
-		const QString title = r.title.trimmed().isEmpty() ? r.slug : r.title.trimmed();
-		const QString desc = r.shortDescription.trimmed();
-		const QString pageUrl = r.url.trimmed();
-		const QString ctaUrl = pageUrl;
-
-		const QString previewImage = !r.coverPublicUrl.trimmed().isEmpty() ? r.coverPublicUrl.trimmed()
-										   : r.iconPublicUrl.trimmed();
-
-		const QString badge = badgeTextForPrice(r.priceUsd);
-
-		QString ctaText;
-		if (!r.buttonLabel.trimmed().isEmpty()) {
-			ctaText = r.buttonLabel.trimmed();
-		} else if (r.type.compare(QStringLiteral("article"), Qt::CaseInsensitive) == 0) {
-			ctaText = tr("Read Article");
-		} else {
-			ctaText = tr("Get Template");
-		}
-
-		auto *rowItem = new QListWidgetItem(marketList);
-		rowItem->setData(Qt::UserRole, pageUrl);
-		rowItem->setFlags(rowItem->flags() | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-
-		auto *card = new QFrame(marketList);
-		card->setObjectName(QStringLiteral("oc_marketCard"));
-		card->setFrameShape(QFrame::NoFrame);
-		card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-		card->setMinimumWidth(rowW);
-
-		card->setStyleSheet(QStringLiteral("#oc_marketCard {"
-						   "  border: none;"
-						   "  border-radius: 10px;"
-						   "  background: rgba(255,255,255,0.04);"
-						   "}"
-						   "#oc_marketCard QLabel { background: transparent; }"));
-
-		auto *h = new QHBoxLayout(card);
-		h->setContentsMargins(8, 8, 8, 8);
-		h->setSpacing(10);
-
-		auto *icon = new QLabel(card);
-		icon->setFixedSize(iconPx, iconPx);
-		icon->setAlignment(Qt::AlignCenter);
-		icon->setStyleSheet(QStringLiteral("border: 1px solid rgba(255,255,255,0.10);"
-						   "border-radius: 10px;"
-						   "background: rgba(0,0,0,0.10);"));
-		icon->setPixmap(style()->standardIcon(QStyle::SP_FileIcon).pixmap(iconPx - 8, iconPx - 8));
-		h->addWidget(icon);
-
-		if (!previewImage.isEmpty()) {
-			marketIconByUrl.insert(previewImage, icon);
-			api.requestImage(previewImage, iconPx);
-		}
-
-		auto *textCol = new QVBoxLayout();
-		textCol->setContentsMargins(0, 0, 0, 0);
-		textCol->setSpacing(2);
-
-		auto *t = new QLabel(trunc(title, 62), card);
-		t->setTextFormat(Qt::PlainText);
-		t->setStyleSheet(QStringLiteral("font-weight: 700;"));
-		t->setWordWrap(false);
-		t->setToolTip(title);
-		textCol->addWidget(t);
-
-		if (!desc.isEmpty()) {
-			auto *d = new QLabel(trunc(desc, 110), card);
-			d->setTextFormat(Qt::PlainText);
-			d->setWordWrap(false);
-			d->setToolTip(desc);
-			d->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-			textCol->addWidget(d);
-		}
-
-		QString metaLine;
-		if (!r.publisherNickname.trimmed().isEmpty())
-			metaLine += tr("By %1").arg(r.publisherNickname.trimmed());
-
-		if (r.downloads > 0) {
-			if (!metaLine.isEmpty())
-				metaLine += QStringLiteral(" · ");
-			metaLine += tr("%1 downloads").arg(r.downloads);
-		} else if (r.views > 0) {
-			if (!metaLine.isEmpty())
-				metaLine += QStringLiteral(" · ");
-			metaLine += tr("%1 views").arg(r.views);
-		}
-
-		if (!metaLine.isEmpty()) {
-			auto *m = new QLabel(metaLine, card);
-			m->setTextFormat(Qt::PlainText);
-			m->setWordWrap(false);
-			m->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.62); font-size: 11px;"));
-			textCol->addWidget(m);
-		}
-
-		h->addLayout(textCol, 1);
-
-		auto *ctaCol = new QVBoxLayout();
-		ctaCol->setContentsMargins(0, 0, 0, 0);
-		ctaCol->setSpacing(6);
-
-		ctaCol->addStretch(1);
-
-		const int ctaWidth = 160;
-		auto *previewBtn = new QPushButton(ctaText, card);
-		previewBtn->setCursor(Qt::PointingHandCursor);
-		previewBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
-		previewBtn->setToolTip(tr("Open the template page"));
-		previewBtn->setFixedWidth(ctaWidth);
-		previewBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-
-		ctaCol->addWidget(previewBtn, 0, Qt::AlignHCenter);
-
-		if (!badge.isEmpty()) {
-			auto *badgeLab = new QLabel(badge, card);
-			badgeLab->setAlignment(Qt::AlignCenter);
-			badgeLab->setFixedWidth(ctaWidth);
-			badgeLab->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-			badgeLab->setTextFormat(Qt::PlainText);
-
-			const bool isFree = (badge.compare(QStringLiteral("FREE"), Qt::CaseInsensitive) == 0);
-
-			badgeLab->setStyleSheet(isFree ? QStringLiteral("padding: 3px;"
-									"border-radius: 3px;"
-									"border: 1px solid rgba(34,197,94,0.55);"
-									"background: rgba(34,197,94,0.16);"
-									"color: rgba(255,255,255,0.96);"
-									"font-weight: 800;"
-									"letter-spacing: 0.4px;"
-									"min-height: 14px;")
-						       : QStringLiteral("padding: 3px;"
-									"border-radius: 3px;"
-									"border: 1px solid rgba(59,130,246,0.55);"
-									"background: rgba(59,130,246,0.14);"
-									"color: rgba(255,255,255,0.96);"
-									"font-weight: 800;"
-									"letter-spacing: 0.4px;"
-									"min-height: 14px;"));
-
-			ctaCol->addWidget(badgeLab, 0, Qt::AlignHCenter);
-		}
-
-		ctaCol->addStretch(1);
-
-		h->addLayout(ctaCol);
-
-		connect(previewBtn, &QPushButton::clicked, this, [ctaUrl]() {
-			if (!ctaUrl.isEmpty())
-				QDesktopServices::openUrl(QUrl(ctaUrl));
-		});
-
-		QString tip = title;
-
-		if (!desc.isEmpty())
-			tip += QStringLiteral("\n\n") + desc;
-
-		if (!r.metaDescription.trimmed().isEmpty())
-			tip += QStringLiteral("\n\n") + r.metaDescription.trimmed();
-
-		if (!r.publisherNickname.trimmed().isEmpty())
-			tip += QStringLiteral("\n\n") + tr("Publisher: %1").arg(r.publisherNickname.trimmed());
-
-		tip += QStringLiteral("\n") +
-		       tr("Type: %1")
-			       .arg(r.type.compare(QStringLiteral("article"), Qt::CaseInsensitive) == 0
-					    ? tr("Article")
-					    : tr("Resource"));
-
-		tip += QStringLiteral("\n") + tr("Price: %1").arg(badge);
-
-		if (r.views > 0)
-			tip += QStringLiteral("\n") + tr("Views: %1").arg(r.views);
-		if (r.downloads > 0)
-			tip += QStringLiteral("\n") + tr("Downloads: %1").arg(r.downloads);
-
-		rowItem->setToolTip(tip);
-		rowItem->setSizeHint(QSize(rowW, 112));
-
-		marketList->addItem(rowItem);
-		marketList->setItemWidget(rowItem, card);
+		marketStatus->setText(tr("Browse lower third templates."));
 	}
 }
 

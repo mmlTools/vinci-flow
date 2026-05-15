@@ -8,6 +8,7 @@
 #include <obs.h>
 #include <obs-module.h>
 
+#include <QJsonObject>
 #include "config.hpp"
 
 #ifndef LOG_TAG
@@ -230,6 +231,11 @@ bool rebuild_and_swap();
 // - Per-LT file:  parameters_<ID>.json (object with keys/values)
 std::string path_parameters_json();
 std::string path_parameters_lt_json(const std::string &id);
+
+// Set or get runtime template parameters for a lower third.
+// These are persisted to the same per-LT JSON files used by the API bridge.
+bool set_template_parameters(const std::string &id, const QJsonObject &data);
+bool get_template_parameters(const std::string &id, QJsonObject &out);
 
 // Notify UI listeners (dock, websocket bridge, etc.) that the lower-third list
 // has been updated in-place (e.g. settings changed for an existing item).
