@@ -21,6 +21,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QSaveFile>
+#include <QTemporaryFile>
 
 #include <obs-frontend-api.h>
 #include <obs.h>
@@ -156,6 +157,21 @@ static std::string read_text_file(const std::string &path)
 static void ensure_dir(const std::string &dir)
 {
 	QDir().mkpath(QString::fromStdString(dir));
+}
+
+static bool prepare_output_dir(const std::string &dir)
+{
+	if (dir.empty() || !QDir().mkpath(QString::fromStdString(dir)))
+		return false;
+	// Test actual access: host permissions alone do not describe sandbox or
+	// document-portal access. The temporary probe is removed automatically.
+	QTemporaryFile probe(QDir(QString::fromStdString(dir)).filePath(".vflow-write-XXXXXX"));
+	if (!probe.open() || probe.write("ok", 2) != 2 || !probe.flush()) {
+		LOGW("Resources folder is not writable: '%s' (%s)", dir.c_str(),
+		     probe.errorString().toUtf8().constData());
+		return false;
+	}
+	return true;
 }
 
 static std::string sanitize_id(const std::string &s)
@@ -2504,7 +2520,8 @@ bool reload_from_disk_and_rebuild()
 
 bool set_output_dir_and_load(const std::string &dir)
 {
-	if (dir.empty())
+	// Validate before replacing the saved path or loading a different state.
+	if (!prepare_output_dir(dir))
 		return false;
 
 	g_output_dir = dir;
@@ -2533,6 +2550,22 @@ bool set_output_dir_and_load(const std::string &dir)
 void init_from_disk()
 {
 	load_global_config();
+
+#if defined(__linux__)
+	// Flatpak's /app is read-only. OBS resolves its module config path under
+	// the application's writable XDG_CONFIG_HOME inside the sandbox.
+	if (g_output_dir.empty() && (QFile::exists("/.flatpak-info") || !qgetenv("FLATPAK_ID").isEmpty())) {
+		const std::string configPath = module_config_path_cached();
+		if (!configPath.empty()) {
+			const std::string resources =
+				QFileInfo(QString::fromStdString(configPath)).dir().filePath("resources").toStdString();
+			if (prepare_output_dir(resources)) {
+				g_output_dir = resources;
+				save_global_config();
+			}
+		}
+	}
+#endif
 
 	if (g_output_dir.empty())
 		return;

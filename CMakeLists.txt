@@ -101,12 +101,10 @@ target_include_directories(minizip PUBLIC
   ${MINIZIP_DIR}
 )
 
-# Try to link against zlib if CMake package is available.
-# OBS already brings zlib in most environments, so this is optional-safe.
-find_package(ZLIB QUIET)
-if(ZLIB_FOUND)
-  target_link_libraries(minizip PUBLIC ZLIB::ZLIB)
-endif()
+# MiniZip requires zlib directly; do not rely on the host OBS process exporting
+# its symbols (in particular when building against the Flatpak runtime).
+find_package(ZLIB REQUIRED)
+target_link_libraries(minizip PUBLIC ZLIB::ZLIB)
 
 # ---------------------------------------------------------------------------
 # Target (OBS plugin)

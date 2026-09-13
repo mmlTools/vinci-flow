@@ -39,6 +39,9 @@ No local servers. No scene duplication.\
 All output is generated as a local HTML file and consumed by an OBS
 Browser Source.
 
+For OBS installed through Flatpak, use the dedicated extension bundle. See the
+[Flatpak installation and build guide](build-aux/flatpak/README.md).
+
 ------------------------------------------------------------------------
 
 ## Capabilities

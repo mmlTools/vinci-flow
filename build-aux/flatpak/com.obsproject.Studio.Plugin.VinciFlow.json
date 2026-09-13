@@ -1,0 +1,44 @@
+{
+  "id": "com.obsproject.Studio.Plugin.VinciFlow",
+  "branch": "stable",
+  "runtime": "com.obsproject.Studio",
+  "runtime-version": "stable",
+  "sdk": "org.freedesktop.Sdk//25.08",
+  "build-extension": true,
+  "separate-locales": false,
+  "build-options": {
+    "prefix": "/app/plugins/VinciFlow"
+  },
+  "modules": [
+    {
+      "name": "vinci-flow",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_INSTALL_DATAROOTDIR=share",
+        "-DENABLE_FRONTEND_API=ON",
+        "-DENABLE_QT=ON"
+      ],
+      "post-install": [
+        "install -Dm644 ${FLATPAK_BUILDER_BUILDDIR}/build-aux/flatpak/com.obsproject.Studio.Plugin.VinciFlow.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml",
+        "test -f ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so",
+        "test -f ${FLATPAK_DEST}/share/obs/obs-plugins/vinci-flow/locale/en-US.ini",
+        "ldd ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so > vinciflow-dependencies.txt && ! grep -q 'not found' vinciflow-dependencies.txt"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../..",
+          "skip": [
+            ".git", ".deps", ".flatpak-builder", "build_flatpak", "flatpak-repo",
+            "build_x64", "build_x86_64", "build_macos", "build-tests",
+            "build_scene_switch", "build_scene_switch_tests", "build_scene_switch_validation",
+            "vinci-flow-flatpak-x86_64.flatpak", "release"
+          ]
+        }
+      ]
+    }
+  ]
+}

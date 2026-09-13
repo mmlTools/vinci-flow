@@ -898,11 +898,18 @@ void LowerThirdDock::repeatTick()
 
 void LowerThirdDock::onBrowseOutputFolder()
 {
-	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Output Folder"));
+	const QString dir = QFileDialog::getExistingDirectory(
+		this, tr("Select Output Folder"), QString::fromStdString(vflow::output_dir()));
 	if (dir.isEmpty())
 		return;
 
-	vflow::set_output_dir_and_load(dir.toStdString());
+	if (!vflow::set_output_dir_and_load(dir.toStdString())) {
+		QMessageBox::warning(this, tr("Cannot use output folder"),
+			tr("Could not prepare the graphics in this folder. Check that OBS has read/write access "
+			   "to the folder and its files, then try again.\n\n%1").arg(dir));
+		if (vflow::output_dir() != dir.toStdString())
+			return;
+	}
 
 	nextOnMs_.clear();
 	offAtMs_.clear();

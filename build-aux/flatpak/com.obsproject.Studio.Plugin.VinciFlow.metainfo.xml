@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>com.obsproject.Studio.Plugin.VinciFlow</id>
+  <extends>com.obsproject.Studio</extends>
+  <name>VinciFlow</name>
+  <summary>Control animated lower thirds and graphics in OBS Studio</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-only</project_license>
+  <description>
+    <p>VinciFlow adds a dock for creating and controlling lower thirds, graphic
+    groups, and HTML overlays, with hotkeys and an OBS WebSocket vendor API.</p>
+  </description>
+  <url type="homepage">https://github.com/mmltools/vinci-flow</url>
+  <url type="bugtracker">https://github.com/mmltools/vinci-flow/issues</url>
+</component>

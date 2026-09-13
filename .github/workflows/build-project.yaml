@@ -175,6 +175,38 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ${{ runner.os }}-ccache-${{ needs.check-event.outputs.config }}
 
+  flatpak-build:
+    name: Build OBS Flatpak extension
+    runs-on: ubuntu-24.04
+    needs: check-event
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read package version
+        id: setup
+        shell: bash
+        run: |
+          echo "version=$(jq -r .version buildspec.json)" >> "$GITHUB_OUTPUT"
+      - name: Build extension bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb # v6.7
+        with:
+          manifest-path: build-aux/flatpak/com.obsproject.Studio.Plugin.VinciFlow.json
+          bundle: vinci-flow-${{ steps.setup.outputs.version }}-flatpak-x86_64.flatpak
+          branch: stable
+          build-dir: build_flatpak
+          repo-dir: flatpak-repo
+          upload-artifact: false
+      - name: Upload Flatpak bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: vinci-flow-${{ steps.setup.outputs.version }}-flatpak-x86_64-${{ needs.check-event.outputs.commitHash }}
+          path: vinci-flow-${{ steps.setup.outputs.version }}-flatpak-x86_64.flatpak
+          if-no-files-found: error
+
   ubuntu-build:
     name: Build for Ubuntu 🐧
     strategy:

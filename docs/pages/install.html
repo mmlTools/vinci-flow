@@ -43,6 +43,21 @@
   </li>
 </ol>
 
+<h2>OBS Flatpak on Linux</h2>
+<p>
+  Use the dedicated <code>vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code> bundle
+  with the stable OBS Flatpak. Install it with
+  <code>flatpak install --user ./vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code>,
+  using the same installation scope as OBS, then restart OBS.
+</p>
+<p>
+  On first use, VinciFlow creates a writable resources folder under its OBS configuration
+  directory. Existing output folders are preserved. If a selected folder cannot be written,
+  choose another folder using the dock's file chooser.
+  See the <a href="https://github.com/mmltools/vinci-flow/blob/main/build-aux/flatpak/README.md">Flatpak guide</a>
+  for build instructions, paths, and troubleshooting.
+</p>
+
 <h2>Troubleshooting</h2>
 <div class="grid2">
   <div class="callout">

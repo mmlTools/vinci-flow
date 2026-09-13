@@ -87,6 +87,14 @@ int main(int argc, char **argv)
 	// A blocked output path must leave the source and its CSS untouched.
 	const auto blocked = vflow::join_path(vflow::g_output_dir, "blocked");
 	vflow::write_text_file(blocked, "not a directory");
+	const auto previousOutput = vflow::output_dir();
+	require(!vflow::set_output_dir_and_load(blocked), "a file must not be accepted as an output directory");
+	require(vflow::output_dir() == previousOutput, "rejected directory changed the active output path");
+	require(vflow::g_items.size() == 1 && vflow::g_items[0].id == "lt_test", "rejected directory changed graphics");
+	require(!vflow::set_output_dir_and_load(""), "empty directory must be rejected");
+	require(vflow::prepare_output_dir(previousOutput), "writable directory was rejected");
+	require(QDir(QString::fromStdString(previousOutput)).entryList({".vflow-write-*"}, QDir::Files | QDir::Hidden).isEmpty(),
+		"output access probe left temporary files behind");
 	obs_data_set_string(settings, "css", "body { opacity: .9; }");
 	require(!vflow::swap_target_browser_source_to_file(blocked + "/lt.html"), "failed writes must abort binding");
 	require(std::string(obs_data_get_string(settings, "css")) == "body { opacity: .9; }", "failed write erased CSS");
