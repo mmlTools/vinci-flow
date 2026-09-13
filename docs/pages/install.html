@@ -1,87 +1,85 @@
+<h1>Install &amp; Setup</h1>
+<p class="lead">
+  Get vinci-flow installed into OBS Studio, point it at an output directory, and confirm your first lower third
+  appears on stream.
+</p>
+
 <h2>Requirements</h2>
 <ul>
   <li>OBS Studio installed and working.</li>
-  <li><code>vinci-flow</code> plugin installed (copy to your OBS plugins folder or install via your distribution
-    package).</li>
-  <li><b>obs-websocket</b> is optional unless you plan to automate the plugin externally. (Vendor requests/events
-    require obs-websocket v5 API.)</li>
+  <li>
+    <code>vinci-flow</code> plugin installed (copy to your OBS plugins folder or install via your distribution
+    package).
+  </li>
+  <li>
+    <b>obs-websocket</b> is optional unless you plan to automate the plugin externally. (Vendor requests/events
+    require obs-websocket v5 API.)
+  </li>
 </ul>
 
 <h2>First-time setup checklist</h2>
 
-<div class="callout warn">
-  <b>Important</b>
-  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
-    The plugin needs an <b>Output Directory</b> to write the generated overlay HTML files.
-    If no output directory is configured, actions like “Create Lower Third” can fail with
-    <code>No output dir configured</code>.
-  </div>
+<div class="warn">
+  <strong>Important:</strong> The plugin needs an <b>Output Directory</b> to write the generated overlay HTML files.
+  If no output directory is configured, actions like "Create Lower Third" can fail with
+  <code>No output dir configured</code>.
 </div>
 
 <ol>
   <li>
-    <b>Open the dock</b><br />
-    In OBS, enable the plugin dock (usually via <code>View → Docks</code>) and open <code>VinciFlow</code>.
+    <b>Open the dock</b> — in OBS, enable the plugin dock (usually via <code>View → Docks</code>) and open
+    <code>VinciFlow</code>.
   </li>
   <li>
-    <b>Set the Output Directory</b><br />
-    Choose a folder where the plugin will write overlay files (including <code>lt-*.html</code> and state/config files).
+    <b>Set the Output Directory</b> — choose a folder where the plugin will write overlay files (including
+    <code>lt-*.html</code> and state/config files).
   </li>
   <li>
-    <b>Ensure the Browser Source exists</b><br />
-    The plugin is designed to manage a Browser Source named <code>VinciFlow</code> with a 1920×1080 canvas.
-    If your workflow is manual, create a Browser Source and point it to the generated overlay file inside your Output
-    Directory.
+    <b>Ensure the Browser Source exists</b> — the plugin is designed to manage a Browser Source named
+    <code>VinciFlow</code> with a 1920×1080 canvas. If your workflow is manual, create a Browser Source and point it
+    to the generated overlay file inside your Output Directory.
   </li>
-  <li>
-    <b>Create your first lower third</b><br />
-    Use the dock action to create a default lower third, then edit title/subtitle and styling.
-  </li>
-  <li>
-    <b>Test show/hide</b><br />
-    Toggle visibility from the dock and confirm it appears in your scene.
-  </li>
+  <li><b>Create your first lower third</b> — use the dock action to create a default lower third, then edit title/subtitle and styling.</li>
+  <li><b>Test show/hide</b> — toggle visibility from the dock and confirm it appears in your scene.</li>
 </ol>
 
 <h2>OBS Flatpak on Linux</h2>
 <p>
-  Use the dedicated <code>vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code> bundle
-  with the stable OBS Flatpak. Install it with
-  <code>flatpak install --user ./vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code>,
-  using the same installation scope as OBS, then restart OBS.
+  Use the dedicated <code>vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code> bundle with the stable OBS
+  Flatpak. Install it with
+  <code>flatpak install --user ./vinci-flow-&lt;version&gt;-flatpak-x86_64.flatpak</code>, using the same
+  installation scope as OBS, then restart OBS.
 </p>
 <p>
-  On first use, VinciFlow creates a writable resources folder under its OBS configuration
-  directory. Existing output folders are preserved. If a selected folder cannot be written,
-  choose another folder using the dock's file chooser.
-  See the <a href="https://github.com/mmltools/vinci-flow/blob/main/build-aux/flatpak/README.md">Flatpak guide</a>
-  for build instructions, paths, and troubleshooting.
+  On first use, VinciFlow creates a writable resources folder under its OBS configuration directory. Existing output
+  folders are preserved. If a selected folder cannot be written, choose another folder using the dock's file
+  chooser. See the
+  <a href="https://github.com/mmltools/vinci-flow/blob/main/build-aux/flatpak/README.md">Flatpak guide</a> for build
+  instructions, paths, and troubleshooting.
 </p>
 
 <h2>Troubleshooting</h2>
-<div class="grid2">
-  <div class="callout">
-    <b>“No output dir configured”</b>
+<div class="card-grid">
+  <section class="card">
+    <h3>"No output dir configured"</h3>
     <p>Set the Output Directory in the dock/settings first.</p>
-  </div>
-  <div class="callout">
-    <b>Nothing appears on stream</b>
+  </section>
+  <section class="card">
+    <h3>Nothing appears on stream</h3>
     <p>
-      Verify the managed Browser Source is in your current scene and not hidden behind other sources.
-      Confirm it is sized to 1920×1080 and not cropped.
+      Verify the managed Browser Source is in your current scene and not hidden behind other sources. Confirm it is
+      sized to 1920×1080 and not cropped.
     </p>
-  </div>
-  <div class="callout">
-    <b>Old design still showing</b>
+  </section>
+  <section class="card">
+    <h3>Old design still showing</h3>
+    <p>If you're editing templates or assets, refresh the Browser Source (or disable/enable it) to force reload.</p>
+  </section>
+  <section class="card">
+    <h3>Animations not playing</h3>
     <p>
-      If you’re editing templates or assets, refresh the Browser Source (or disable/enable it) to force reload.
+      If you use custom handling, ensure your theme provides <code>root.__slt_show</code> /
+      <code>root.__slt_hide</code> and returns a Promise for hide.
     </p>
-  </div>
-  <div class="callout">
-    <b>Animations not playing</b>
-    <p>
-      If you use custom handling, ensure your theme provides <code>root.__slt_show</code> / <code>root.__slt_hide</code>
-      and returns a Promise for hide.
-    </p>
-  </div>
+  </section>
 </div>

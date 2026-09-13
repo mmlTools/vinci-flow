@@ -1,21 +1,16 @@
-<h2>Overview</h2>
-<p>
-  <code>vinci-flow</code> exposes a Vendor API via <b>obs-websocket</b>.
-  This allows external tools (bots, stream decks, custom apps) to list, create, clone, delete, and toggle lower thirds,
-  plus subscribe to plugin events.
+<h1>Setup WebSocket</h1>
+<p class="lead">
+  <code>vinci-flow</code> exposes a Vendor API via <b>obs-websocket</b>. This allows external tools (bots, stream
+  decks, custom apps) to list, create, clone, delete, and toggle lower thirds, plus subscribe to plugin events.
 </p>
 
-<div class="callout warn">
-  <b>Vendor name</b>
-  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
-    Vendor ID: <code>vinci-flow</code><br />
-    Requests and events are registered under this vendor.
-  </div>
+<div class="note">
+  <strong>Vendor name:</strong> Vendor ID <code>vinci-flow</code>. Requests and events are registered under this
+  vendor.
 </div>
 
 <h2>Requests</h2>
 <p>These vendor requests are implemented:</p>
-
 <pre><code>ListLowerThirds
 GetVisible
 SetVisible
@@ -95,17 +90,13 @@ ReloadFromDisk
 }
 </code></pre>
 
-<div class="callout">
-  <b>ID sanitization</b>
-  <p>
-    The plugin sanitizes IDs server-side to <code>[A-Za-z0-9_-]</code>. If you send an invalid ID, the request will fail
-    with <code>Invalid id</code>.
-  </p>
+<div class="note">
+  <strong>ID sanitization:</strong> the plugin sanitizes IDs server-side to <code>[A-Za-z0-9_-]</code>. If you send
+  an invalid ID, the request will fail with <code>Invalid id</code>.
 </div>
 
 <h2>Events</h2>
 <p>The vendor emits these events:</p>
-
 <pre><code>LowerThirdsVisibilityChanged
 LowerThirdsListChanged
 LowerThirdsReloaded
@@ -139,12 +130,7 @@ LowerThirdsReloaded
 
 <h2>Recommended automation patterns</h2>
 <ul>
-  <li><b>Synchronize UIs</b>: call <code>ListLowerThirds</code>, then subscribe to list/visibility events to keep your
-    UI updated.</li>
-  <li><b>One-button scenes</b>: use <code>SetVisible</code> with <code>visible: true</code> at scene start, and
-    <code>visible: false</code> at scene end.
-  </li>
-  <li><b>Resilience</b>: after file edits, call <code>ReloadFromDisk</code> and listen for
-    <code>LowerThirdsReloaded</code>.
-  </li>
+  <li><b>Synchronize UIs</b>: call <code>ListLowerThirds</code>, then subscribe to list/visibility events to keep your UI updated.</li>
+  <li><b>One-button scenes</b>: use <code>SetVisible</code> with <code>visible: true</code> at scene start, and <code>visible: false</code> at scene end.</li>
+  <li><b>Resilience</b>: after file edits, call <code>ReloadFromDisk</code> and listen for <code>LowerThirdsReloaded</code>.</li>
 </ul>

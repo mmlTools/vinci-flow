@@ -1,89 +1,116 @@
-<div class="callout ok">
-  <b>What this plugin does</b>
-  <div style="margin-top:6px; color: rgba(255,255,255,.82);">
-    <code>vinci-flow</code> (VinciFlow) generates and drives HTML-based lower thirds for OBS Studio.
-    It manages an OBS Browser Source, writes the live overlay HTML to disk, and lets you control visibility from the
-    dock UI, hotkeys, or obs-websocket vendor requests.
-  </div>
-</div>
+<h1>Overview</h1>
+<p class="lead">
+  <code>vinci-flow</code> (VinciFlow) is an OBS Studio plugin that generates and drives HTML-based lower thirds. It
+  manages an OBS Browser Source, writes the live overlay HTML to disk, and lets you control visibility from the dock
+  UI, hotkeys, or obs-websocket vendor requests.
+</p>
 
+<div class="card-grid">
+  <section class="card">
+    <h3>What you get</h3>
+    <ul>
+      <li>A dock UI to create, edit, and trigger lower thirds.</li>
+      <li>Groups that sequence multiple lower thirds over time.</li>
+      <li>Hotkeys for show/hide/toggle without touching the dock.</li>
+      <li>A small templating engine with placeholders like <code>{TITLE}</code> and <code>{PRIMARY_COLOR}</code>.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h3>How it works</h3>
+    <ol>
+      <li>The plugin composes an overlay from your HTML/CSS/JS templates and substitutes placeholders.</li>
+      <li>It writes the result as one active overlay file into your configured output directory.</li>
+      <li>An OBS Browser Source (typically named <code>VinciFlow</code>) points at that file and updates live.</li>
+    </ol>
+  </section>
+</div>
 
 <h2>Videos</h2>
-<div class="videoGrid">
-  <div class="videoCard featured">
-    <div class="videoFrame">
-      <iframe src="https://www.youtube.com/embed/JiEaTFrW-Nk" title="vinci-flow core walkthrough" loading="lazy"
+<div class="video-grid">
+  <div class="video-card featured">
+    <div class="video-embed">
+      <iframe
+        src="https://www.youtube.com/embed/JiEaTFrW-Nk"
+        title="vinci-flow core walkthrough"
+        loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen></iframe>
+        allowfullscreen
+      ></iframe>
     </div>
-    <div class="videoMeta">
+    <div class="video-card__meta">
       <b>Core walkthrough</b>
-      <div class="small">Start here for the full overview: setup, usage, and how the plugin manages the overlay file and
-        Browser Source.</div>
+      <p>
+        Start here for the full overview: setup, usage, and how the plugin manages the overlay file and Browser
+        Source.
+      </p>
     </div>
   </div>
 
-  <div class="videoCard">
-    <div class="videoFrame">
-      <iframe src="https://www.youtube.com/embed/Tsq2CrZGgRY" title="vinci-flow tutorial video 2" loading="lazy"
+  <div class="video-card">
+    <div class="video-embed">
+      <iframe
+        src="https://www.youtube.com/embed/Tsq2CrZGgRY"
+        title="vinci-flow tutorial video 2"
+        loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen></iframe>
+        allowfullscreen
+      ></iframe>
     </div>
-    <div class="videoMeta">
+    <div class="video-card__meta">
       <b>Usage &amp; workflow</b>
-      <div class="small">Practical dock UI workflow: triggering lower thirds, groups, and keeping your scene clean.
-      </div>
+      <p>Practical dock UI workflow: triggering lower thirds, groups, and keeping your scene clean.</p>
     </div>
   </div>
 
-  <div class="videoCard">
-    <div class="videoFrame">
-      <iframe src="https://www.youtube.com/embed/79Qh2hg9Z_o" title="vinci-flow tutorial video 3" loading="lazy"
+  <div class="video-card">
+    <div class="video-embed">
+      <iframe
+        src="https://www.youtube.com/embed/79Qh2hg9Z_o"
+        title="vinci-flow tutorial video 3"
+        loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen></iframe>
+        allowfullscreen
+      ></iframe>
     </div>
-    <div class="videoMeta">
+    <div class="video-card__meta">
       <b>Themes &amp; customization</b>
-      <div class="small">Theme authoring tips: placeholders, layout, and animation patterns you can reuse across
-        templates.</div>
+      <p>Theme authoring tips: placeholders, layout, and animation patterns you can reuse across templates.</p>
     </div>
   </div>
 </div>
 
-
 <h2>Key concepts</h2>
-<div class="grid2">
-  <div class="callout">
-    <b>Lower thirds</b>
+<div class="card-grid">
+  <section class="card">
+    <h3>Lower thirds</h3>
     <p>
       Each lower third is a configurable unit with an <code>id</code>, content (<code>title</code>,
-      <code>subtitle</code>, optional avatar), styling (colors, radius, opacity),
-      animation in/out, and optional sound cues. Internally, the overlay is composed from HTML/CSS/JS templates and
-      placeholder substitution.
+      <code>subtitle</code>, optional avatar), styling (colors, radius, opacity), animation in/out, and optional
+      sound cues. Internally, the overlay is composed from HTML/CSS/JS templates and placeholder substitution.
     </p>
-  </div>
-  <div class="callout">
-    <b>Groups</b>
+  </section>
+  <section class="card">
+    <h3>Groups</h3>
     <p>
       Groups orchestrate a list of lower thirds over time (linear or randomized), with timing controls and optional
-      exclusivity.
-      This is useful for sponsor rotators, team lineups, event speakers, or “now playing” style cycles.
+      exclusivity. Useful for sponsor rotators, team lineups, event speakers, or "now playing" style cycles.
     </p>
-  </div>
+  </section>
 </div>
 
 <h2>Overlay output</h2>
 <ul>
   <li>The plugin writes one active HTML overlay file into your configured output directory.</li>
   <li>Old overlay files matching <code>lt-*.html</code> are periodically cleaned up (only the current one is kept).</li>
-  <li>The Browser Source (typically named <code>VinciFlow</code>) points to the current overlay and is updated by the
-    plugin.</li>
+  <li>
+    The Browser Source (typically named <code>VinciFlow</code>) points to the current overlay and is updated by the
+    plugin.
+  </li>
 </ul>
 
 <h2>Placeholders available to theme authors</h2>
-<p>
-  These placeholders are substituted into your templates at render time:
-</p>
+<p>These placeholders are substituted into your templates at render time:</p>
 <pre><code>{ID}
 {TITLE}          {TITLE_SIZE}        {TITLE_COLOR}
 {SUBTITLE}       {SUBTITLE_SIZE}     {SUBTITLE_COLOR}

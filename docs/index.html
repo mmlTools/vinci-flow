@@ -14,8 +14,8 @@
       content="Official VinciFlow documentation for OBS Studio: install, setup, dock workflow, templates/placeholders, automation, API bridge, troubleshooting, and best practices."
     />
 
-    <meta name="theme-color" content="#0b1220" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#172033" />
+    <meta name="color-scheme" content="light" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="VinciFlow" />
@@ -49,6 +49,16 @@
 
     <link rel="icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap"
+    />
     <link rel="stylesheet" href="assets/css/style.css" />
 
     <script
@@ -88,138 +98,114 @@
   </head>
 
   <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
     <div class="layout">
-      <aside class="sidebar" aria-label="Documentation sidebar">
+      <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
         <div class="brand">
-          <div class="title">
-            <span aria-hidden="true">🧩</span>
-            <span>vinci-flow</span>
-            <span class="badge">OBS Studio Plugin</span>
-          </div>
-          <div class="subtitle">
-            VinciFlow plugin documentation: install, theme authoring, and
-            obs-websocket integration.
-          </div>
-          <a
-            class="brandDlBtn"
-            href="https://streamrsc.com/streaming-resource/vinci-flow"
-            target="_blank"
-            rel="noopener"
+          <a class="brand__title" href="index.html">vinci-flow</a>
+          <div class="brand__tag">OBS Studio lower-thirds &amp; graphics plugin documentation</div>
+
+          <button
+            class="sidebar-toggle"
+            id="sidebarToggle"
+            type="button"
+            aria-label="Toggle navigation"
+            aria-expanded="false"
           >
-            <span class="brandDlBtn__ico" aria-hidden="true">⬇️</span>
-            <span class="brandDlBtn__txt">
-              <b>Download</b>
-              <span class="brandDlBtn__sub">VinciFlow resource page</span>
-            </span>
-            <span class="brandDlBtn__ext" aria-hidden="true">↗</span>
-          </a>
+            <span aria-hidden="true">☰</span>
+          </button>
         </div>
 
-        <nav class="nav" aria-label="Pages">
-          <a data-nav href="#home"
-            ><span class="ico" aria-hidden="true">🏠</span
-            ><span class="lbl">Home</span><span class="hint">Overview</span></a
-          >
-          <a data-nav href="#install"
-            ><span class="ico" aria-hidden="true">⚙️</span
-            ><span class="lbl">Install &amp; Setup</span
-            ><span class="hint">OBS</span></a
-          >
-          <a data-nav href="#themes"
-            ><span class="ico" aria-hidden="true">🎨</span
-            ><span class="lbl">Building Your Own Themes</span
-            ><span class="hint">HTML/CSS/JS</span></a
-          >
-          <a data-nav href="#runtime-params"
-            ><span class="ico" aria-hidden="true">🧠</span
-            ><span class="lbl">Runtime Parameters</span
-            ><span class="hint">API Template</span></a
-          >
-          <a data-nav href="#websocket"
-            ><span class="ico" aria-hidden="true">🔌</span
-            ><span class="lbl">Setup WebSocket</span
-            ><span class="hint">Automation</span></a
-          >
+        <div class="sidebar-search">
+          <label class="sr-only" for="navSearch">Search documentation navigation</label>
+          <input
+            id="navSearch"
+            class="sidebar-search__input"
+            type="search"
+            placeholder="Search docs…"
+            autocomplete="off"
+          />
+        </div>
+
+        <nav class="nav" aria-label="Documentation">
+          <a class="nav__link" href="#overview" data-nav="overview">Overview</a>
+          <div class="nav__section">Getting Started</div>
+          <a class="nav__link" href="#install" data-nav="install">Install &amp; Setup</a>
+          <div class="nav__section">Customization</div>
+          <a class="nav__link" href="#themes" data-nav="themes">Building Your Own Themes</a>
+          <a class="nav__link" href="#runtime-params" data-nav="runtime-params">Runtime Parameters</a>
+          <div class="nav__section">Automation</div>
+          <a class="nav__link" href="#websocket" data-nav="websocket">Setup WebSocket</a>
         </nav>
 
-        <div class="sidebarFooter">
-          <div class="small">Community &amp; support</div>
-          <div class="social" role="list">
-            <a
-              role="listitem"
-              href="https://discord.gg/2yD6B2PTuQ"
-              target="_blank"
-              rel="noopener"
-              ><span>Discord</span><span aria-hidden="true">↗</span></a
-            >
-            <a
-              role="listitem"
-              href="https://www.facebook.com/groups/freestreamerspromotion"
-              target="_blank"
-              rel="noopener"
-              ><span>Facebook Group</span><span aria-hidden="true">↗</span></a
-            >
-            <a
-              role="listitem"
-              href="https://mastodon.social/@streamrsc"
-              target="_blank"
-              rel="noopener"
-              ><span>Mastodon</span><span aria-hidden="true">↗</span></a
-            >
-            <a
-              role="listitem"
-              href="https://x.com/mmltechYT"
-              target="_blank"
-              rel="noopener"
-              ><span>X (Twitter)</span><span aria-hidden="true">↗</span></a
-            >
-            <a
-              role="listitem"
-              href="https://ko-fi.com/mmltech"
-              target="_blank"
-              rel="noopener"
-              ><span>Ko-fi Donation</span><span aria-hidden="true">♥</span></a
-            >
+        <div class="sidebar-footer">
+          <div class="sidebar-footer__section">
+            <div class="sidebar-footer__title">Community</div>
+            <ul class="sidebar-links">
+              <li><a href="https://discord.gg/2yD6B2PTuQ" target="_blank" rel="noopener">Discord</a></li>
+              <li>
+                <a
+                  href="https://www.facebook.com/groups/freestreamerspromotion"
+                  target="_blank"
+                  rel="noopener"
+                  >Facebook Group</a
+                >
+              </li>
+              <li><a href="https://mastodon.social/@streamrsc" target="_blank" rel="me noopener">Mastodon</a></li>
+              <li><a href="https://x.com/mmltechYT" target="_blank" rel="noopener">X</a></li>
+            </ul>
           </div>
-          <div
-            class="small"
-            style="margin-top: 10px; color: rgba(255, 255, 255, 0.5)"
-          >
-            Powered by streamrsc.com
+          <div class="sidebar-footer__section">
+            <div class="sidebar-footer__title">Support</div>
+            <ul class="sidebar-links">
+              <li><a href="https://ko-fi.com/mmltech" target="_blank" rel="noopener">Ko-fi</a></li>
+            </ul>
+          </div>
+          <div class="sidebar-footer__meta">
+            <span class="muted">Powered by streamrsc.com</span>
           </div>
         </div>
       </aside>
 
-      <main class="main" aria-label="Documentation content">
-        <div class="shell">
-          <section class="contentCard">
-            <header>
-              <div class="meta">
-                <h1 data-page-title>Loading…</h1>
-                <p data-page-subtitle></p>
-              </div>
-              <div class="pillRow" id="docPills" aria-label="Topic tags"></div>
-            </header>
+      <main class="content" id="content" tabindex="-1">
+        <header class="content-header">
+          <div>
+            <div class="content-header__title" data-page-title>Loading…</div>
+            <div class="muted" data-page-subtitle></div>
+          </div>
+          <div class="content-header__actions">
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/mmltools/vinci-flow"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+            <a
+              class="btn btn--primary"
+              href="https://streamrsc.com/streaming-resource/vinci-flow"
+              target="_blank"
+              rel="noopener"
+              >Download</a
+            >
+          </div>
+        </header>
 
-            <hr class="sep" />
+        <div class="pillRow" id="docPills" role="list" aria-label="Topic tags"></div>
 
-            <div class="ocAd ocAd--h" aria-label="Advertisement">
-              <ins
-                class="adsbygoogle"
-                style="display: block"
-                data-ad-client="ca-pub-8021810602774098"
-                data-ad-slot="7434839058"
-                data-ad-format="auto"
-                data-full-width-responsive="true"
-              ></ins>
-              <script>
-                (adsbygoogle = window.adsbygoogle || []).push({});
-              </script>
+        <article id="docContent" class="doc" aria-live="polite"></article>
+
+        <footer class="footer">
+          <div class="footer__inner">
+            <div class="footer__left">
+              <span class="muted">© 2026 • vinci-flow documentation</span>
             </div>
-
-            <article id="docContent" aria-live="polite"></article>
-          </section>
-        </div>
+            <div class="footer__right">
+              <a href="https://streamrsc.com" target="_blank" rel="noopener">streamrsc.com</a>
+            </div>
+          </div>
+        </footer>
       </main>
     </div>
 
