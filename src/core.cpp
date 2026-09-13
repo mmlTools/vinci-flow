@@ -113,7 +113,6 @@ static bool write_text_file(const std::string &path, const std::string &data)
 static bool write_text_file_atomic(const std::string &path, const std::string &data)
 {
 	QSaveFile f(QString::fromStdString(path));
-	f.setDirectWriteFallback(true);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 		LOGW("Failed opening '%s' for atomic write (err=%d '%s')", path.c_str(), (int)f.error(),
 		     f.errorString().toUtf8().constData());
@@ -840,6 +839,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   const __paramsText = Object.create(null); // url -> raw text snapshot
   const __paramsData = Object.create(null); // url -> parsed object
   let __paramsBusy = false;
+  let __visibleBusy = false;
 
   function isSafeParamKey(k) {
     return /^[A-Za-z0-9_\-]+$/.test(String(k));
@@ -1083,6 +1083,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   }
 
   async function tick() {
+    if (__visibleBusy) return;
+    __visibleBusy = true;
     let visibleIds;
     try {
       const r = await fetch(VISIBLE_URL + "?t=" + Date.now(), { cache: "no-store" });
@@ -1090,6 +1092,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       if (!Array.isArray(visibleIds)) return;
     } catch (e) {
       return;
+    } finally {
+      __visibleBusy = false;
     }
 
     const visibleSet = new Set(visibleIds.map(String));
@@ -1121,13 +1125,11 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     }
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    tick();
-    setInterval(tick, 350);
+  tick();
+  setInterval(tick, 350);
 
-    pollParameters();
-    setInterval(pollParameters, PARAMS_POLL_MS);
-  });
+  pollParameters();
+  setInterval(pollParameters, PARAMS_POLL_MS);
 })();
 )JS");
 }
@@ -1166,6 +1168,9 @@ static std::string build_full_html(const std::string &ts, const std::string &css
 		html += "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css\"/>\n";
 	}
 
+	// Keep source-level CSS last, matching OBS's custom CSS precedence without
+	// its OnLoadEnd JavaScript injection (which redeclares the global obsCSS).
+	html += "<link rel=\"stylesheet\" href=\"./lt-browser.css?v=" + ts + "\"/>\n";
 	html += "</head>\n<body>\n<ul id=\"slt-root\">\n";
 
 	for (const auto &c : g_items) {
@@ -1498,6 +1503,9 @@ bool ensure_output_artifacts_exist()
 	if (!QFile::exists(QString::fromStdString(path_scripts_js()))) {
 		write_text_file(path_scripts_js(), "/* generated */\n");
 	}
+	const std::string browserCssPath = join_path(output_dir(), "lt-browser.css");
+	if (!file_exists(browserCssPath) && !write_text_file_atomic(browserCssPath, "/* Browser Source CSS */\n"))
+		return false;
 
 	return true;
 }
@@ -2171,19 +2179,35 @@ static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssF
 	}
 
 	const std::string cssPath = bundle_styles_path(ts);
-	if (cssPath.empty() || !write_text_file(cssPath, css)) {
+	if (cssPath.empty() || !write_text_file_atomic(cssPath, css)) {
 		LOGW("Failed writing %s", cssPath.empty() ? "<empty css path>" : cssPath.c_str());
 		return false;
 	}
 
-	std::string js;
+	// Reserve initialization before waiting for the DOM so repeated script
+	// execution cannot register duplicate listeners, timers, or template hooks.
+	std::string js = R"JS(
+(() => {
+  if (window.__vflowInitialized) return;
+  window.__vflowInitialized = true;
+  function initialize() {
+)JS";
 	js += build_base_script(g_items);
 	js += "\n\n/* Per-LT scripts */\n";
 	for (const auto &c : g_items)
 		js += build_item_script(c);
+	js += R"JS(
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize, { once: true });
+  } else {
+    initialize();
+  }
+})();
+)JS";
 
 	const std::string jsPath = bundle_scripts_path(ts);
-	if (jsPath.empty() || !write_text_file(jsPath, js)) {
+	if (jsPath.empty() || !write_text_file_atomic(jsPath, js)) {
 		LOGW("Failed writing %s", jsPath.empty() ? "<empty js path>" : jsPath.c_str());
 		return false;
 	}
@@ -2202,7 +2226,7 @@ static std::string generate_bundle_html(const std::string &ts, const std::string
 
 	const std::string html = build_full_html(ts, cssFile, jsFile);
 
-	if (!write_text_file(absCur, html))
+	if (!write_text_file_atomic(absCur, html))
 		return {};
 
 	return absCur;
@@ -2319,14 +2343,10 @@ bool target_browser_source_exists()
 	return ok;
 }
 
-static void refreshSourceSettings(obs_source_t *s)
+static void refresh_browser_source(obs_source_t *s)
 {
 	if (!s)
 		return;
-
-	obs_data_t *data = obs_source_get_settings(s);
-	obs_source_update(s, data);
-	obs_data_release(data);
 
 	if (strcmp(obs_source_get_id(s), "browser_source") == 0) {
 		obs_properties_t *sourceProperties = obs_source_properties(s);
@@ -2359,15 +2379,37 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	}
 
 	obs_data_t *s = obs_source_get_settings(src);
-	const char *prevPathC = obs_data_get_string(s, "local_file");
-	const std::string prevPath = prevPathC ? std::string(prevPathC) : std::string();
 
-	if (!prevPath.empty() && prevPath == absoluteHtmlPath) {
-		obs_data_set_string(s, "local_file", "");
-		obs_source_update(src, s);
+	// OBS injects non-empty custom CSS with a global `const obsCSS` on every
+	// OnLoadEnd. Serve it as a stylesheet instead, retaining a per-source copy
+	// across rebuilds and scene collection changes. Do not clear it on failure.
+	std::string browserCss = obs_data_get_string(s, "css");
+	if (browserCss.empty())
+		browserCss = obs_data_get_string(s, "vflow_custom_css");
+	const std::string browserCssPath =
+		QFileInfo(QString::fromStdString(absoluteHtmlPath)).dir().filePath("lt-browser.css").toStdString();
+	if (!write_text_file_atomic(browserCssPath, browserCss)) {
+		obs_data_release(s);
+		obs_source_release(src);
+		return false;
 	}
+
+	// These changes recreate the browser in obs-browser's deferred Update.
+	// An unchanged source only needs one explicit refresh to read new files.
+	const bool recreatesBrowser = !obs_data_get_bool(s, "is_local_file") ||
+		absoluteHtmlPath != obs_data_get_string(s, "local_file") ||
+		obs_data_get_bool(s, "shutdown") || obs_data_get_bool(s, "restart_when_active") ||
+		!std::string(obs_data_get_string(s, "css")).empty() || !obs_data_get_bool(s, "reroute_audio");
+	const bool needsUpdate = recreatesBrowser ||
+		obs_data_get_int(s, "width") != g_target_browser_width ||
+		obs_data_get_int(s, "height") != g_target_browser_height;
+
 	obs_data_set_bool(s, "is_local_file", true);
 	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
+	obs_data_set_string(s, "vflow_custom_css", browserCss.c_str());
+	obs_data_set_string(s, "css", "");
+	obs_data_set_bool(s, "shutdown", false);
+	obs_data_set_bool(s, "restart_when_active", false);
 
 	obs_data_set_bool(s, "is_control_audio", true);
 	obs_data_set_bool(s, "control_audio", true);
@@ -2376,11 +2418,14 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 	obs_data_set_bool(s, "vflow_managed", true);
 	obs_data_set_int(s, "width", (int64_t)g_target_browser_width);
 	obs_data_set_int(s, "height", (int64_t)g_target_browser_height);
-	obs_source_update(src, s);
+	if (needsUpdate)
+		obs_source_update(src, s);
 
 	obs_data_release(s);
 
-	refreshSourceSettings(src);
+	// Resizing alone does not reload the document.
+	if (!recreatesBrowser)
+		refresh_browser_source(src);
 	obs_source_release(src);
 	return true;
 }
@@ -2390,7 +2435,8 @@ bool rebuild_and_swap()
 	if (!has_output_dir())
 		return false;
 
-	ensure_output_artifacts_exist();
+	if (!ensure_output_artifacts_exist())
+		return false;
 	ensure_parameters_files_from_api_templates();
 
 	const std::string ts = now_timestamp_string();
@@ -2404,7 +2450,8 @@ bool rebuild_and_swap()
 
 
 	if (target_browser_source_exists()) {
-		swap_target_browser_source_to_file(newHtml);
+		if (!swap_target_browser_source_to_file(newHtml))
+			return false;
 	} else {
 		if (g_target_browser_source.empty()) {
 			LOGW("Rebuilt artifacts but did not swap: no target Browser Source selected.");
@@ -2497,16 +2544,8 @@ void init_from_disk()
 
 	g_last_html_path = bundle_html_current_path();
 
-	if (!g_last_html_path.empty() && file_exists(g_last_html_path)) {
-		if (target_browser_source_exists()) {
-			swap_target_browser_source_to_file(g_last_html_path);
-		} else {
-			if (!g_target_browser_source.empty()) {
-				LOGW("Saved target Browser Source '%s' not found (startup swap skipped).",
-				     g_target_browser_source.c_str());
-			}
-		}
-	}
+	// Bind and regenerate after OBS finishes loading its sources. This also
+	// upgrades existing lt.html/lt.js before applying managed browser settings.
 }
 
 std::string add_default_group()
