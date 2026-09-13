@@ -54,12 +54,18 @@ static const char *reason_to_str(vflow::list_change_reason r)
 {
 	using R = vflow::list_change_reason;
 	switch (r) {
-	case R::Create: return "create";
-	case R::Clone:  return "clone";
-	case R::Delete: return "delete";
-	case R::Reload: return "reload";
-	case R::Update: return "update";
-	default:        return "unknown";
+	case R::Create:
+		return "create";
+	case R::Clone:
+		return "clone";
+	case R::Delete:
+		return "delete";
+	case R::Reload:
+		return "reload";
+	case R::Update:
+		return "update";
+	default:
+		return "unknown";
 	}
 }
 

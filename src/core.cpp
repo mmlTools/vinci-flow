@@ -393,7 +393,8 @@ static void load_global_config()
 				g_target_browser_source_by_collection[k.toStdString()] = v.toStdString();
 		}
 		if (!g_target_browser_source_by_collection.empty())
-			LOGI("Loaded scene_collection_browser_sources: %zu entries", g_target_browser_source_by_collection.size());
+			LOGI("Loaded scene_collection_browser_sources: %zu entries",
+			     g_target_browser_source_by_collection.size());
 	}
 
 	const int w = root.value("target_browser_width").toInt(sltBrowserWidth);
@@ -698,17 +699,13 @@ html,body{ margin:0; padding:0; background:transparent; overflow:hidden; }
 
 static inline std::string ltrim_copy(std::string s)
 {
-	s.erase(s.begin(), std::find_if(s.begin(), s.end(),
-				       [](unsigned char ch) { return !std::isspace(ch); }));
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
 	return s;
 }
 
 static inline std::string rtrim_copy(std::string s)
 {
-	s.erase(std::find_if(s.rbegin(), s.rend(),
-			     [](unsigned char ch) { return !std::isspace(ch); })
-			.base(),
-		s.end());
+	s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
 	return s;
 }
 
@@ -776,7 +773,7 @@ static std::string scope_css_best_effort(const lower_third_cfg &c)
 			bool first = true;
 
 			while (std::getline(ss, part, ',')) {
-				part = rtrim_copy(part); 
+				part = rtrim_copy(part);
 				part = scope_selector_part_best_effort(part, c.id);
 
 				if (!first)
@@ -1591,7 +1588,8 @@ static bool ensure_parameters_files_from_api_templates()
 		}
 
 		if (perDirty) {
-			write_text_file_atomic(perPath, QJsonDocument(perObj).toJson(QJsonDocument::Indented).toStdString());
+			write_text_file_atomic(perPath,
+					       QJsonDocument(perObj).toJson(QJsonDocument::Indented).toStdString());
 		}
 
 		// Optional combined parameters.json (kept only for tooling convenience).
@@ -1616,12 +1614,12 @@ static bool ensure_parameters_files_from_api_templates()
 	}
 
 	if (allowCombinedWrite && (combinedDirty || !combinedExists)) {
-		write_text_file_atomic(combinedPath, QJsonDocument(combinedRoot).toJson(QJsonDocument::Indented).toStdString());
+		write_text_file_atomic(combinedPath,
+				       QJsonDocument(combinedRoot).toJson(QJsonDocument::Indented).toStdString());
 	}
 
 	return true;
 }
-
 
 bool load_state_json()
 {
@@ -1657,7 +1655,8 @@ bool load_state_json()
 	const QJsonObject hkGroups = hkRoot.value("groups").toObject();
 
 	const QJsonArray items = root.value("items").toArray();
-	const QJsonArray cars = root.contains("groups") ? root.value("groups").toArray() : root.value("carousels").toArray();
+	const QJsonArray cars = root.contains("groups") ? root.value("groups").toArray()
+							: root.value("carousels").toArray();
 
 	std::vector<lower_third_cfg> out;
 	out.reserve((size_t)items.size());
@@ -1728,7 +1727,6 @@ bool load_state_json()
 			if (!QString::fromStdString(c.api_template).trimmed().isEmpty())
 				c.api_bridge_enabled = true;
 		}
-
 
 		c.hotkey = o.value("hotkey").toString().toStdString();
 		if (c.hotkey.empty()) {
@@ -2412,13 +2410,12 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 
 	// These changes recreate the browser in obs-browser's deferred Update.
 	// An unchanged source only needs one explicit refresh to read new files.
-	const bool recreatesBrowser = !obs_data_get_bool(s, "is_local_file") ||
-		absoluteHtmlPath != obs_data_get_string(s, "local_file") ||
+	const bool recreatesBrowser =
+		!obs_data_get_bool(s, "is_local_file") || absoluteHtmlPath != obs_data_get_string(s, "local_file") ||
 		obs_data_get_bool(s, "shutdown") || obs_data_get_bool(s, "restart_when_active") ||
 		!std::string(obs_data_get_string(s, "css")).empty() || !obs_data_get_bool(s, "reroute_audio");
-	const bool needsUpdate = recreatesBrowser ||
-		obs_data_get_int(s, "width") != g_target_browser_width ||
-		obs_data_get_int(s, "height") != g_target_browser_height;
+	const bool needsUpdate = recreatesBrowser || obs_data_get_int(s, "width") != g_target_browser_width ||
+				 obs_data_get_int(s, "height") != g_target_browser_height;
 
 	obs_data_set_bool(s, "is_local_file", true);
 	obs_data_set_string(s, "local_file", absoluteHtmlPath.c_str());
@@ -2463,7 +2460,6 @@ bool rebuild_and_swap()
 	const std::string newHtml = generate_bundle_html(ts, cssFile, jsFile);
 	if (newHtml.empty())
 		return false;
-
 
 	if (target_browser_source_exists()) {
 		if (!swap_target_browser_source_to_file(newHtml))
@@ -2672,8 +2668,8 @@ bool remove_group(const std::string &group_id)
 	const auto before = g_groups.size();
 
 	g_groups.erase(std::remove_if(g_groups.begin(), g_groups.end(),
-					 [&](const group_cfg &c) { return c.id == sid; }),
-			  g_groups.end());
+				      [&](const group_cfg &c) { return c.id == sid; }),
+		       g_groups.end());
 
 	const bool removed = (g_groups.size() != before);
 	if (!removed)
@@ -3054,7 +3050,7 @@ bool sort_lower_thirds_by_group()
 		lower_third_cfg cfg;
 		int original_index = 0;
 		bool grouped = false;
-		int group_order = INT_MAX / 2; 
+		int group_order = INT_MAX / 2;
 	};
 
 	std::vector<item_sort> tmp;
@@ -3077,7 +3073,7 @@ bool sort_lower_thirds_by_group()
 
 	std::stable_sort(tmp.begin(), tmp.end(), [](const item_sort &a, const item_sort &b) {
 		if (a.grouped != b.grouped)
-			return a.grouped > b.grouped; 
+			return a.grouped > b.grouped;
 
 		if (a.grouped && b.grouped) {
 			if (a.group_order != b.group_order)
@@ -3106,4 +3102,3 @@ bool sort_lower_thirds_by_group()
 }
 
 } // namespace vflow
-

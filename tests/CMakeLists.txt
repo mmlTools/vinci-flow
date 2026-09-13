@@ -13,7 +13,10 @@ endif()
 enable_testing()
 add_test(NAME browser_lifecycle COMMAND browser_lifecycle ${CMAKE_CURRENT_BINARY_DIR}/overlay)
 find_program(NODE_EXECUTABLE node REQUIRED)
-add_test(NAME overlay_runtime COMMAND ${NODE_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/overlay-runtime.test.cjs ${CMAKE_CURRENT_BINARY_DIR}/overlay/lt.js)
+add_test(
+  NAME overlay_runtime
+  COMMAND
+    ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/overlay-runtime.test.cjs ${CMAKE_CURRENT_BINARY_DIR}/overlay/lt.js
+)
 set_tests_properties(browser_lifecycle PROPERTIES FIXTURES_SETUP generated_overlay)
 set_tests_properties(overlay_runtime PROPERTIES FIXTURES_REQUIRED generated_overlay)

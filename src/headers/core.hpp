@@ -69,7 +69,7 @@ struct lower_third_cfg {
 	std::string title_color;
 	std::string subtitle_color;
 	int opacity = 85; // 0..100
-	int radius  = 5;  // 0..100
+	int radius = 5;   // 0..100
 
 	std::string html_template; // inner HTML for <li id="{{ID}}">
 	std::string css_template;  // should be scoped to #{{ID}} (we also do best-effort)
@@ -85,10 +85,9 @@ struct lower_third_cfg {
 
 	std::string hotkey;
 
-	int repeat_every_sec   = 0; // 0 = disabled
+	int repeat_every_sec = 0;   // 0 = disabled
 	int repeat_visible_sec = 0; // how long to keep visible when auto-shown
 };
-
 
 struct group_cfg {
 	std::string id;
@@ -110,12 +109,11 @@ struct group_cfg {
 	// - toggle_hotkey: start/stop the group run
 	std::string toggle_hotkey;
 
-
 	// Timing controls (milliseconds)
 	// Defaults:
 	//  - visible_ms:  15000 (how long a lower third stays visible)
 	//  - interval_ms: 5000  (time between activating the next lower third)
-	int visible_ms  = 15000;
+	int visible_ms = 15000;
 	int interval_ms = 5000;
 
 	// Dock-only color for marking items in this group (e.g. "#2EA043")
@@ -130,17 +128,17 @@ struct group_cfg {
 // -------------------------
 enum class event_type : uint32_t {
 	VisibilityChanged = 1,
-	ListChanged       = 2,
-	Reloaded          = 3,
+	ListChanged = 2,
+	Reloaded = 3,
 };
 
 enum class list_change_reason : uint32_t {
 	Unknown = 0,
-	Create  = 1,
-	Clone   = 2,
-	Delete  = 3,
-	Reload  = 4,
-	Update  = 5,
+	Create = 1,
+	Clone = 2,
+	Delete = 3,
+	Reload = 4,
+	Update = 5,
 };
 
 struct core_event {
@@ -196,7 +194,6 @@ std::string add_default_group();
 bool update_group(const group_cfg &c);
 bool remove_group(const std::string &group_id);
 bool set_group_members(const std::string &group_id, const std::vector<std::string> &members);
-
 
 // -------------------------
 // Visible set

@@ -4,8 +4,14 @@
 #include <QCoreApplication>
 #include <stdexcept>
 
-obs_module_t *obs_current_module(void) { return nullptr; }
-char *obs_frontend_get_current_scene_collection(void) { return bstrdup("Regression"); }
+obs_module_t *obs_current_module(void)
+{
+	return nullptr;
+}
+char *obs_frontend_get_current_scene_collection(void)
+{
+	return bstrdup("Regression");
+}
 
 static int updates = 0;
 static int refreshes = 0;
@@ -24,16 +30,24 @@ int main(int argc, char **argv)
 	obs_source_info info{};
 	info.id = "browser_source";
 	info.type = OBS_SOURCE_TYPE_INPUT;
-	info.get_name = [](void *) { return "Test browser"; };
-	info.create = [](obs_data_t *, obs_source_t *source) -> void * { return source; };
-	info.destroy = [](void *) {};
-	info.update = [](void *, obs_data_t *) { ++updates; };
+	info.get_name = [](void *) {
+		return "Test browser";
+	};
+	info.create = [](obs_data_t *, obs_source_t *source) -> void * {
+		return source;
+	};
+	info.destroy = [](void *) {
+	};
+	info.update = [](void *, obs_data_t *) {
+		++updates;
+	};
 	info.get_properties = [](void *) {
 		auto *props = obs_properties_create();
-		obs_properties_add_button(props, "refreshnocache", "Refresh", [](obs_properties_t *, obs_property_t *, void *) {
-			++refreshes;
-			return true;
-		});
+		obs_properties_add_button(props, "refreshnocache", "Refresh",
+					  [](obs_properties_t *, obs_property_t *, void *) {
+						  ++refreshes;
+						  return true;
+					  });
 		return props;
 	};
 	obs_register_source(&info);
@@ -68,21 +82,25 @@ int main(int argc, char **argv)
 	require(!obs_data_get_bool(settings, "restart_when_active"), "activation must not reload");
 	require(std::string(obs_data_get_string(settings, "css")).empty(), "OBS CSS injection must be disabled");
 	require(css == obs_data_get_string(settings, "vflow_custom_css"), "custom CSS backup lost");
-	require(css == vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")), "custom CSS lost");
+	require(css == vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")),
+		"custom CSS lost");
 	const auto html = vflow::read_text_file(htmlPath);
 	const auto cssLink = html.find("lt-browser.css?v=");
 	require(cssLink != std::string::npos && cssLink > html.find("animate.min.css") &&
-		cssLink < html.find("</head>"), "custom CSS link missing or precedence changed");
+			cssLink < html.find("</head>"),
+		"custom CSS link missing or precedence changed");
 
 	for (int i = 0; i < 20; ++i)
 		require(vflow::rebuild_and_swap(), "repeated rebuild failed");
 	require(updates == 1 && refreshes == 20, "unchanged binding must refresh once per rebuild");
-	require(css == vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")), "rebuild lost CSS");
+	require(css == vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")),
+		"rebuild lost CSS");
 
 	obs_data_set_string(settings, "css", "body { opacity: .5; }");
 	require(vflow::rebuild_and_swap(), "new custom CSS rebuild failed");
 	require(updates == 2 && refreshes == 20, "CSS migration caused multiple reloads");
-	require(std::string(obs_data_get_string(settings, "vflow_custom_css")) == "body { opacity: .5; }", "new CSS lost");
+	require(std::string(obs_data_get_string(settings, "vflow_custom_css")) == "body { opacity: .5; }",
+		"new CSS lost");
 
 	// A blocked output path must leave the source and its CSS untouched.
 	const auto blocked = vflow::join_path(vflow::g_output_dir, "blocked");
@@ -93,11 +111,14 @@ int main(int argc, char **argv)
 	require(vflow::g_items.size() == 1 && vflow::g_items[0].id == "lt_test", "rejected directory changed graphics");
 	require(!vflow::set_output_dir_and_load(""), "empty directory must be rejected");
 	require(vflow::prepare_output_dir(previousOutput), "writable directory was rejected");
-	require(QDir(QString::fromStdString(previousOutput)).entryList({".vflow-write-*"}, QDir::Files | QDir::Hidden).isEmpty(),
+	require(QDir(QString::fromStdString(previousOutput))
+			.entryList({".vflow-write-*"}, QDir::Files | QDir::Hidden)
+			.isEmpty(),
 		"output access probe left temporary files behind");
 	obs_data_set_string(settings, "css", "body { opacity: .9; }");
 	require(!vflow::swap_target_browser_source_to_file(blocked + "/lt.html"), "failed writes must abort binding");
-	require(std::string(obs_data_get_string(settings, "css")) == "body { opacity: .9; }", "failed write erased CSS");
+	require(std::string(obs_data_get_string(settings, "css")) == "body { opacity: .9; }",
+		"failed write erased CSS");
 	require(updates == 2 && refreshes == 20, "failed write touched the browser");
 	require(htmlPath == obs_data_get_string(settings, "local_file"), "failed write changed the source path");
 	obs_data_set_string(settings, "css", "");
@@ -116,11 +137,13 @@ int main(int argc, char **argv)
 	vflow::g_target_browser_source = "Other graphics";
 	require(vflow::rebuild_and_swap(), "second source rebuild failed");
 	require(vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")) ==
-		"body { opacity: .3; }", "second source CSS lost");
+			"body { opacity: .3; }",
+		"second source CSS lost");
 	vflow::g_target_browser_source = "Shared graphics";
 	require(vflow::rebuild_and_swap(), "original source rebind failed");
 	require(vflow::read_text_file(vflow::join_path(vflow::g_output_dir, "lt-browser.css")) ==
-		"body { opacity: .5; }", "original source CSS not restored");
+			"body { opacity: .5; }",
+		"original source CSS not restored");
 	obs_source_release(other);
 	obs_data_release(settings);
 	obs_source_release(source);
