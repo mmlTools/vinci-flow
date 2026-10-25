@@ -23,4 +23,9 @@ export CCACHE_SLOPPINESS
 if [[ "${CI}" ]]; then
     export CCACHE_NOHASHDIR=true
 fi
+# Xcode exports a default deployment target for every platform (iOS, tvOS,
+# watchOS, visionOS, DriverKit) to scripts. Xcode 26's clang rejects the
+# conflicting values, so only the macOS one may reach the compiler.
+unset IPHONEOS_DEPLOYMENT_TARGET TVOS_DEPLOYMENT_TARGET WATCHOS_DEPLOYMENT_TARGET XROS_DEPLOYMENT_TARGET DRIVERKIT_DEPLOYMENT_TARGET
+
 exec "${CMAKE_C_COMPILER_LAUNCHER}" "${CMAKE_C_COMPILER}" "$@"
