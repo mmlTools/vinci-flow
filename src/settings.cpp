@@ -438,7 +438,9 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		hkRow->setSpacing(4);
 
 		hotkeyEdit = new QKeySequenceEdit(this);
-		hotkeyEdit->setMaximumSequenceLength(1);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+		hotkeyEdit->setMaximumSequenceLength(1); // Qt 6.5+; Ubuntu 24.04 ships Qt 6.4
+#endif
 		hotkeyEdit->setToolTip(
 			tr("Shows/hides this lower third. Works while OBS is in the background and can also "
 			   "be changed in OBS Settings > Hotkeys."));

@@ -22,10 +22,10 @@
         "-DENABLE_QT=ON"
       ],
       "post-install": [
-        "install -Dm644 ${FLATPAK_BUILDER_BUILDDIR}/build-aux/flatpak/com.obsproject.Studio.Plugin.VinciFlow.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml",
-        "test -f ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so",
-        "test -f ${FLATPAK_DEST}/share/obs/obs-plugins/vinci-flow/locale/en-US.ini",
-        "ldd ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so > vinciflow-dependencies.txt && ! grep -q 'not found' vinciflow-dependencies.txt"
+        "echo 'post-install: metainfo' && install -Dm644 /run/build/vinci-flow/build-aux/flatpak/com.obsproject.Studio.Plugin.VinciFlow.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml",
+        "echo 'post-install: plugin binary' && test -f ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so",
+        "echo 'post-install: locale' && test -f ${FLATPAK_DEST}/share/obs/obs-plugins/vinci-flow/locale/en-US.ini",
+        "echo 'post-install: shared library dependencies' && ldd ${FLATPAK_DEST}/lib/obs-plugins/vinci-flow.so | tee vinciflow-dependencies.txt && ! grep -q 'not found' vinciflow-dependencies.txt"
       ],
       "sources": [
         {

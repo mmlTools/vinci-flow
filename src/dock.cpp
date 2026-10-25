@@ -1328,7 +1328,9 @@ void LowerThirdDock::onManageGroups()
 	auto *titleEd = new QLineEdit(tabGeneral);
 
 	auto *toggleHkEdit = new QKeySequenceEdit(tabGeneral);
-	toggleHkEdit->setMaximumSequenceLength(1);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+	toggleHkEdit->setMaximumSequenceLength(1); // Qt 6.5+; Ubuntu 24.04 ships Qt 6.4
+#endif
 	toggleHkEdit->setToolTip(tr("Starts/stops this group. Works while OBS is in the background and can also be "
 				    "changed in OBS Settings > Hotkeys."));
 	QKeySequence loadedToggleSeq;
