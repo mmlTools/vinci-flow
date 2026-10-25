@@ -118,6 +118,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::
 set_target_properties(
   ${CMAKE_PROJECT_NAME}
   PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
+             # No compiler probe for predefined macros: on Xcode 26 that probe runs in a
+             # script phase whose environment carries every platform's deployment target,
+             # which clang rejects. moc does not need those macros for this plugin.
+             AUTOMOC_COMPILER_PREDEFINES OFF
 )
 
 # Define macro for your #ifdefs (even if you don't currently use it)
