@@ -482,7 +482,7 @@ pre code {
 /* Video showcase grid (Overview page) */
 .video-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
   margin: 16px 0 22px;
 }
@@ -507,6 +507,11 @@ pre code {
   margin: 0;
   color: var(--muted);
   font-size: 12.5px;
+}
+@media (max-width: 1000px) {
+  .video-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 @media (max-width: 720px) {
   .video-grid {
