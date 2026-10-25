@@ -41,9 +41,6 @@ if(MSVC)
   add_compile_options(/WX- /utf-8)
 endif()
 
-# OBS 32+: use dock-by-id API
-add_compile_definitions(HAVE_OBS_DOCK_BY_ID=1)
-
 if(APPLE)
   add_compile_options(
     $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-error=newline-eof>
@@ -114,13 +111,9 @@ endif()
 # ---------------------------------------------------------------------------
 # Qt (dock & dialogs) – REQUIRED
 # ---------------------------------------------------------------------------
-find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
-if(Qt6_FOUND)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
-else()
-  find_package(Qt5 COMPONENTS Core Widgets Network REQUIRED)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt5::Core Qt5::Widgets Qt5::Network)
-endif()
+# OBS Studio 32+ is built with Qt 6 only.
+find_package(Qt6 COMPONENTS Core Widgets Network REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
 
 set_target_properties(
   ${CMAKE_PROJECT_NAME}
@@ -156,8 +149,8 @@ list(
   ${SLT_HDR_DIR}/dock.hpp
   ${SLT_SRC_DIR}/settings.cpp
   ${SLT_HDR_DIR}/settings.hpp
-  ${SLT_SRC_DIR}/api.cpp
-  ${SLT_HDR_DIR}/api.hpp
+  ${SLT_SRC_DIR}/hotkeys.cpp
+  ${SLT_HDR_DIR}/hotkeys.hpp
 )
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${SLT_SRC})

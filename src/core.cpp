@@ -6,6 +6,7 @@
 #include <sstream>
 #include <random>
 #include <cctype>
+#include <cstdio>
 #include <mutex>
 #include <unordered_set>
 #include <unordered_map>
@@ -40,6 +41,9 @@ static std::vector<lower_third_cfg> g_items;
 static std::vector<group_cfg> g_groups;
 static std::vector<std::string> g_visible;
 static std::string g_last_html_path;
+static void (*g_before_save_hook)() = nullptr;
+
+static void push_browser_event(const char *eventName, const std::string &json);
 
 struct listener {
 	uint64_t token = 0;
@@ -130,6 +134,55 @@ static bool write_text_file_atomic(const std::string &path, const std::string &d
 		LOGW("Commit failed for '%s' (err=%d '%s')", path.c_str(), (int)f.error(),
 		     f.errorString().toUtf8().constData());
 		return false;
+	}
+	return true;
+}
+
+// Atomic write that degrades to a plain write when the replace is refused (e.g. on
+// Windows while another process holds the target open without delete sharing).
+static bool write_text_file_safe(const std::string &path, const std::string &data)
+{
+	if (write_text_file_atomic(path, data))
+		return true;
+	LOGW("Falling back to direct write for '%s'", path.c_str());
+	return write_text_file(path, data);
+}
+
+// Encodes a string as a JavaScript/JSON string literal (including quotes).
+static std::string js_string(const std::string &s)
+{
+	// Written with character codes: 0x22 = quote, 0x5C = backslash.
+	static const char hex[] = "0123456789abcdef";
+	const char bs = (char)0x5C;
+	std::string out;
+	out.reserve(s.size() + 2);
+	out.push_back((char)0x22);
+	for (unsigned char c : s) {
+		if (c == 0x22 || c == 0x5C) {
+			out.push_back(bs);
+			out.push_back((char)c);
+		} else if (c < 0x20 || c == '<') {
+			// Control characters and '<' (avoids closing tags) as unicode escapes.
+			out.push_back(bs);
+			out.push_back('u');
+			out.push_back('0');
+			out.push_back('0');
+			out.push_back(hex[(c >> 4) & 0xF]);
+			out.push_back(hex[c & 0xF]);
+		} else {
+			out.push_back((char)c);
+		}
+	}
+	out.push_back((char)0x22);
+	return out;
+}
+
+// Animation values become CSS class names; keep only class-name characters.
+static bool is_safe_class_list(const std::string &s)
+{
+	for (unsigned char c : s) {
+		if (!(std::isalnum(c) || c == '_' || c == '-' || c == ' '))
+			return false;
 	}
 	return true;
 }
@@ -430,7 +483,20 @@ bool save_global_config()
 	root["target_browser_height"] = g_target_browser_height;
 
 	const QJsonDocument doc(root);
-	return write_text_file(pathS, doc.toJson(QJsonDocument::Compact).toStdString());
+	return write_text_file_safe(pathS, doc.toJson(QJsonDocument::Indented).toStdString());
+}
+
+void set_before_save_hook(void (*hook)())
+{
+	g_before_save_hook = hook;
+}
+
+std::string default_output_dir()
+{
+	const std::string configPath = module_config_path_cached();
+	if (configPath.empty())
+		return {};
+	return QFileInfo(QString::fromStdString(configPath)).dir().filePath("resources").toStdString();
 }
 
 static std::string bundle_styles_name(const std::string &)
@@ -466,10 +532,10 @@ static lower_third_cfg default_cfg()
 {
 	lower_third_cfg c;
 	c.id = new_id();
-	c.label = "Lower Third Label";
+	c.label.clear();
 	c.order = 0;
-	c.title = "New Lower Third";
-	c.subtitle = "Subtitle";
+	c.title = "Your Name";
+	c.subtitle = "Your title or @handle";
 	c.profile_picture.clear();
 	c.anim_in_sound.clear();
 	c.anim_out_sound.clear();
@@ -798,8 +864,8 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 		const bool inCustom = (c.anim_in == "custom_handled_in");
 		const bool outCustom = (c.anim_out == "custom_handled_out");
 
-		const std::string inCls = inCustom ? std::string() : c.anim_in;
-		const std::string outCls = outCustom ? std::string() : c.anim_out;
+		const std::string inCls = (inCustom || !is_safe_class_list(c.anim_in)) ? std::string() : c.anim_in;
+		const std::string outCls = (outCustom || !is_safe_class_list(c.anim_out)) ? std::string() : c.anim_out;
 
 		const std::string inSound = c.anim_in_sound.empty() ? std::string() : ("./" + c.anim_in_sound);
 		const std::string outSound = c.anim_out_sound.empty() ? std::string() : ("./" + c.anim_out_sound);
@@ -808,31 +874,15 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
 
 		int delay = 0;
 
-		map += "  \"" + c.id +
-		       "\": { "
-		       "inCustom: " +
-		       std::string(inCustom ? "true" : "false") +
-		       ", "
-		       "outCustom: " +
-		       std::string(outCustom ? "true" : "false") +
-		       ", "
-		       "inCls: " +
-		       (inCls.empty() ? "null" : ("\"" + inCls + "\"")) +
-		       ", "
-		       "outCls: " +
-		       (outCls.empty() ? "null" : ("\"" + outCls + "\"")) +
-		       ", "
-		       "inSound: " +
-		       (inSound.empty() ? "null" : ("\"" + inSound + "\"")) +
-		       ", "
-		       "outSound: " +
-		       (outSound.empty() ? "null" : ("\"" + outSound + "\"")) +
-		       ", "
-		       "paramsFile: " +
-		       (paramsFile.empty() ? "null" : ("\"" + paramsFile + "\"")) +
-		       ", "
-		       "delay: " +
-		       std::to_string(delay) + " },\n";
+		auto str_or_null = [](const std::string &v) {
+			return v.empty() ? std::string("null") : js_string(v);
+		};
+
+		map += "  " + js_string(c.id) + ": { inCustom: " + (inCustom ? "true" : "false") +
+		       ", outCustom: " + (outCustom ? "true" : "false") + ", inCls: " + str_or_null(inCls) +
+		       ", outCls: " + str_or_null(outCls) + ", inSound: " + str_or_null(inSound) +
+		       ", outSound: " + str_or_null(outSound) + ", paramsFile: " + str_or_null(paramsFile) +
+		       ", delay: " + std::to_string(delay) + " },\n";
 	}
 	map += "};\n";
 
@@ -847,7 +897,10 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   const MAX_CUSTOM_WAIT_MS = 8000;
   const MAX_ANIM_WAIT_MS   = 2000;
 
-  // Parameters polling
+  // The plugin pushes changes instantly through obs-browser's javascript_event
+  // ("vflow:visible", "vflow:params"); file polling is the fallback for external
+  // tools that edit the JSON files directly.
+  const VISIBLE_POLL_MS = 500;
   const PARAMS_POLL_MS = 500;
   const __paramsText = Object.create(null); // url -> raw text snapshot
   const __paramsData = Object.create(null); // url -> parsed object
@@ -864,17 +917,46 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     return await r.text();
   }
 
+  function applyParams(el, obj) {
+    if (!el || !obj || typeof obj !== 'object') return;
+
+    el.__slt_param_cache = (el.__slt_param_cache && typeof el.__slt_param_cache === 'object')
+      ? el.__slt_param_cache
+      : Object.create(null);
+
+    for (const key in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+      if (!isSafeParamKey(key)) continue;
+      const val = obj[key];
+      const sval = (val === null || val === undefined) ? "" : String(val);
+      if (el.__slt_param_cache[key] === sval) continue;
+
+      const nodes = el.querySelectorAll(`[data-${key}]`);
+      if (nodes && nodes.length) nodes.forEach(n => { try { n.innerHTML = sval; } catch (e) {} });
+      el.__slt_param_cache[key] = sval;
+    }
+  }
+
+  // Lower thirds with the API Bridge enabled have parameter files to watch
+  // continuously; everything else gets pushed updates after one initial read.
+  const __bridgeUrls = (() => {
+    const urls = new Set();
+    for (const k in animMap) {
+      const cfg = animMap[k] || {};
+      if (cfg && cfg.paramsFile) urls.add(cfg.paramsFile);
+    }
+    return Array.from(urls);
+  })();
+  const __paramUrls = __bridgeUrls.length ? [PARAMS_URL, ...__bridgeUrls] : [PARAMS_URL];
+
+  // Bumped by every pushed visibility update; a poll that started earlier is stale.
+  let __pushSeq = 0;
+
   async function pollParameters() {
     if (__paramsBusy) return;
     __paramsBusy = true;
     try {
-      const urls = new Set([PARAMS_URL]);
-      for (const k in animMap) {
-        const cfg = animMap[k] || {};
-        if (cfg && cfg.paramsFile) urls.add(cfg.paramsFile);
-      }
-
-      const arr = Array.from(urls);
+      const arr = __paramUrls;
       const results = await Promise.allSettled(arr.map(u => fetchJsonText(u)));
       for (let i = 0; i < arr.length; i++) {
         const url = arr[i];
@@ -901,27 +983,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
         const data = __paramsData[url];
         if (!data || typeof data !== 'object') continue;
         const obj = (url === PARAMS_URL) ? (data[el.id] || null) : data;
-        if (!obj || typeof obj !== 'object') continue;
-
-        el.__slt_param_cache = (el.__slt_param_cache && typeof el.__slt_param_cache === 'object')
-          ? el.__slt_param_cache
-          : Object.create(null);
-
-        for (const key in obj) {
-          if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-          if (!isSafeParamKey(key)) continue;
-          const val = obj[key];
-          const sval = (val === null || val === undefined) ? "" : String(val);
-          if (el.__slt_param_cache[key] === sval) continue;
-
-          const nodes = el.querySelectorAll(`[data-${key}]`);
-          if (!nodes || nodes.length === 0) {
-            el.__slt_param_cache[key] = sval;
-            continue;
-          }
-          nodes.forEach(n => { try { n.innerHTML = sval; } catch (e) {} });
-          el.__slt_param_cache[key] = sval;
-        }
+        applyParams(el, obj);
       }
     } finally {
       __paramsBusy = false;
@@ -995,6 +1057,16 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   function waitOwnAnimationEnd(rootEl, timeoutMs) {
     const el = getAnimTarget(rootEl);
     if (!el) return Promise.resolve();
+
+    // No running animation (unknown class, stylesheet not loaded): animationend would
+    // never fire, so don't stall the show/hide queue until the timeout.
+    try {
+      if (typeof getComputedStyle === "function") {
+        const st = getComputedStyle(el);
+        if (!st.animationName || st.animationName === "none" || parseFloat(st.animationDuration) === 0)
+          return Promise.resolve();
+      }
+    } catch (e) {}
 
     return new Promise((resolve) => {
       let done = false;
@@ -1098,6 +1170,7 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
   async function tick() {
     if (__visibleBusy) return;
     __visibleBusy = true;
+    const seq = __pushSeq;
     let visibleIds;
     try {
       const r = await fetch(VISIBLE_URL + "?t=" + Date.now(), { cache: "no-store" });
@@ -1109,6 +1182,12 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
       __visibleBusy = false;
     }
 
+    if (seq !== __pushSeq) return; // a newer pushed state already applied
+    applyVisible(visibleIds);
+  }
+
+  function applyVisible(visibleIds) {
+    if (!Array.isArray(visibleIds)) return;
     const visibleSet = new Set(visibleIds.map(String));
     const els = Array.from(document.querySelectorAll("#slt-root > li[id]"));
 
@@ -1138,11 +1217,25 @@ static std::string build_base_script(const std::vector<lower_third_cfg> &items)
     }
   }
 
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("vflow:visible", (ev) => {
+      __pushSeq++;
+      try { applyVisible(ev.detail); } catch (e) {}
+    });
+
+    window.addEventListener("vflow:params", (ev) => {
+      try {
+        const d = ev.detail || {};
+        applyParams(document.getElementById(String(d.id || "")), d.data);
+      } catch (e) {}
+    });
+  }
+
   tick();
-  setInterval(tick, 350);
+  setInterval(tick, VISIBLE_POLL_MS);
 
   pollParameters();
-  setInterval(pollParameters, PARAMS_POLL_MS);
+  if (__bridgeUrls.length) setInterval(pollParameters, PARAMS_POLL_MS);
 })();
 )JS");
 }
@@ -1261,6 +1354,13 @@ bool set_template_parameters(const std::string &id, const QJsonObject &data)
 	const std::string perPath = path_parameters_lt_json(sid);
 	if (!write_text_file_atomic(perPath, QJsonDocument(data).toJson(QJsonDocument::Indented).toStdString()))
 		return false;
+
+	{
+		QJsonObject ev;
+		ev["id"] = QString::fromStdString(sid);
+		ev["data"] = data;
+		push_browser_event("vflow:params", QJsonDocument(ev).toJson(QJsonDocument::Compact).toStdString());
+	}
 
 	const std::string combinedPath = path_parameters_json();
 	if (!combinedPath.empty()) {
@@ -1502,20 +1602,27 @@ bool ensure_output_artifacts_exist()
 
 	ensure_dir(output_dir());
 
-	if (!QFile::exists(QString::fromStdString(path_state_json()))) {
-		g_items.clear();
+	// Recreate missing files from the in-memory state (never discard it here).
+	if (!QFile::exists(QString::fromStdString(path_state_json())))
 		save_state_json();
-	}
-	if (!QFile::exists(QString::fromStdString(path_visible_json()))) {
-		g_visible.clear();
+	if (!QFile::exists(QString::fromStdString(path_visible_json())))
 		save_visible_json();
-	}
 	if (!QFile::exists(QString::fromStdString(path_styles_css()))) {
 		write_text_file(path_styles_css(), "/* generated */\n");
 	}
 	if (!QFile::exists(QString::fromStdString(path_scripts_js()))) {
 		write_text_file(path_scripts_js(), "/* generated */\n");
 	}
+	// Ship animations with the plugin: loading animate.css from a CDN delays (or, offline,
+	// breaks) the first show/hide after OBS starts.
+	if (!file_exists(path_animate_css())) {
+		if (char *bundled = obs_module_file("animate.min.css")) {
+			if (!QFile::copy(QString::fromUtf8(bundled), QString::fromStdString(path_animate_css())))
+				LOGW("Could not copy bundled animate.min.css to '%s'", path_animate_css().c_str());
+			bfree(bundled);
+		}
+	}
+
 	const std::string browserCssPath = join_path(output_dir(), "lt-browser.css");
 	if (!file_exists(browserCssPath) && !write_text_file_atomic(browserCssPath, "/* Browser Source CSS */\n"))
 		return false;
@@ -1643,7 +1750,11 @@ bool load_state_json()
 	QJsonParseError err{};
 	const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(txt), &err);
 	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-		LOGW("Invalid lt-state.json; reset");
+		// Keep a copy so a damaged file never silently costs the user their graphics.
+		const QString backup =
+			QString::fromStdString(p) + ".broken-" + QString::fromStdString(now_timestamp_string());
+		QFile::copy(QString::fromStdString(p), backup);
+		LOGW("Invalid lt-state.json; reset (backup: '%s')", backup.toUtf8().constData());
 		g_items.clear();
 		g_groups.clear();
 		return false;
@@ -1739,6 +1850,8 @@ bool load_state_json()
 			if (!fallback.isEmpty())
 				c.hotkey = fallback.toStdString();
 		}
+		if (const QJsonValue b = o.value("obs_hotkey"); b.isObject())
+			c.hotkey_bindings = QJsonDocument(b.toObject()).toJson(QJsonDocument::Compact).toStdString();
 		c.repeat_every_sec = o.value("repeat_every_sec").toInt(0);
 		c.repeat_visible_sec = o.value("repeat_visible_sec").toInt(0);
 
@@ -1822,6 +1935,10 @@ bool load_state_json()
 				c.toggle_hotkey = fallback.toStdString();
 		}
 
+		if (const QJsonValue b = o.value("obs_hotkey"); b.isObject())
+			c.toggle_hotkey_bindings =
+				QJsonDocument(b.toObject()).toJson(QJsonDocument::Compact).toStdString();
+
 		c.visible_ms = o.value("visible_ms").toInt(15000);
 		c.interval_ms = o.value("interval_ms").toInt(5000);
 		c.dock_color = o.value("dock_color").toString().toStdString();
@@ -1898,8 +2015,18 @@ bool save_state_json()
 	if (!has_output_dir())
 		return false;
 
+	if (g_before_save_hook)
+		g_before_save_hook();
+
+	auto bindings_json = [](const std::string &txt) -> QJsonValue {
+		QJsonObject o;
+		if (!txt.empty() && parse_json_object_text(txt, o))
+			return o;
+		return QJsonValue();
+	};
+
 	QJsonObject root;
-	root["version"] = 4;
+	root["version"] = 5;
 
 	QJsonArray items;
 	for (const auto &c : g_items) {
@@ -1941,6 +2068,8 @@ bool save_state_json()
 		o["api_template"] = QString::fromStdString(c.api_template);
 
 		o["hotkey"] = QString::fromStdString(c.hotkey);
+		if (const QJsonValue b = bindings_json(c.hotkey_bindings); b.isObject())
+			o["obs_hotkey"] = b;
 		o["repeat_every_sec"] = c.repeat_every_sec;
 		o["repeat_visible_sec"] = c.repeat_visible_sec;
 
@@ -1957,6 +2086,8 @@ bool save_state_json()
 		o["loop"] = c.loop;
 		o["exclusive"] = c.exclusive;
 		o["toggle_hotkey"] = QString::fromStdString(c.toggle_hotkey);
+		if (const QJsonValue b = bindings_json(c.toggle_hotkey_bindings); b.isObject())
+			o["obs_hotkey"] = b;
 		o["visible_ms"] = c.visible_ms;
 		o["interval_ms"] = c.interval_ms;
 		o["dock_color"] = QString::fromStdString(c.dock_color);
@@ -1988,7 +2119,7 @@ bool save_state_json()
 	root["hotkeys"] = hkRoot;
 
 	const QJsonDocument doc(root);
-	return write_text_file(path_state_json(), doc.toJson(QJsonDocument::Indented).toStdString());
+	return write_text_file_safe(path_state_json(), doc.toJson(QJsonDocument::Indented).toStdString());
 }
 
 bool load_visible_json()
@@ -2050,7 +2181,13 @@ bool save_visible_json()
 		a.append(QString::fromStdString(id));
 
 	const QJsonDocument doc(a);
-	return write_text_file(path_visible_json(), doc.toJson(QJsonDocument::Indented).toStdString());
+	// Plain write on purpose: the overlay polls this file several times a second and
+	// tolerates a torn read, while an atomic replace can be refused while it is open.
+	const bool ok = write_text_file(path_visible_json(), doc.toJson(QJsonDocument::Indented).toStdString());
+
+	// Instant update; the overlay's file polling remains as fallback.
+	push_browser_event("vflow:visible", doc.toJson(QJsonDocument::Compact).toStdString());
+	return ok;
 }
 
 static bool regenerate_merged_css_js(const std::string &ts, std::string &outCssFile, std::string &outJsFile)
@@ -2255,6 +2392,24 @@ static obs_source_t *get_target_browser_source()
 	return obs_get_source_by_name(name.c_str());
 }
 
+// Dispatches a DOM CustomEvent inside the target browser source (obs-browser's
+// "javascript_event" procedure). Silently does nothing when no browser is bound.
+static void push_browser_event(const char *eventName, const std::string &json)
+{
+	obs_source_t *src = get_target_browser_source();
+	if (!src)
+		return;
+
+	if (proc_handler_t *ph = obs_source_get_proc_handler(src)) {
+		calldata_t cd = {0};
+		calldata_set_string(&cd, "eventName", eventName);
+		calldata_set_string(&cd, "jsonString", json.c_str());
+		proc_handler_call(ph, "javascript_event", &cd);
+		calldata_free(&cd);
+	}
+	obs_source_release(src);
+}
+
 std::vector<std::string> list_browser_source_names()
 {
 	std::vector<std::string> out;
@@ -2378,16 +2533,17 @@ bool swap_target_browser_source_to_file(const std::string &absoluteHtmlPath)
 
 	obs_source_t *src = get_target_browser_source();
 	if (!src) {
-		if (g_target_browser_source.empty())
+		const std::string target = target_browser_source_name();
+		if (target.empty())
 			LOGW("No target Browser Source selected.");
 		else
-			LOGW("Target Browser Source '%s' not found.", g_target_browser_source.c_str());
+			LOGW("Target Browser Source '%s' not found.", target.c_str());
 		return false;
 	}
 
 	const char *id = obs_source_get_id(src);
 	if (!id || std::string(id) != sltBrowserSourceId) {
-		LOGW("Target source '%s' is not a Browser Source.", g_target_browser_source.c_str());
+		LOGW("Target source '%s' is not a Browser Source.", target_browser_source_name().c_str());
 		obs_source_release(src);
 		return false;
 	}
@@ -2465,11 +2621,12 @@ bool rebuild_and_swap()
 		if (!swap_target_browser_source_to_file(newHtml))
 			return false;
 	} else {
-		if (g_target_browser_source.empty()) {
-			LOGW("Rebuilt artifacts but did not swap: no target Browser Source selected.");
+		const std::string target = target_browser_source_name();
+		if (target.empty()) {
+			LOGI("Rebuilt artifacts; no Browser Source selected yet.");
 		} else {
 			LOGW("Rebuilt artifacts but did not swap: target Browser Source '%s' missing or not a Browser Source.",
-			     g_target_browser_source.c_str());
+			     target.c_str());
 		}
 	}
 
@@ -2492,10 +2649,9 @@ bool reload_from_disk_and_rebuild()
 	if (!has_output_dir())
 		return false;
 
-	ensure_output_artifacts_exist();
-
 	const bool okState = load_state_json();
 	const bool okVis = load_visible_json();
+	ensure_output_artifacts_exist();
 	const bool okReb = rebuild_and_swap();
 	const bool ok = okState && okVis && okReb;
 
@@ -2520,17 +2676,21 @@ bool set_output_dir_and_load(const std::string &dir)
 	if (!prepare_output_dir(dir))
 		return false;
 
+	// Persist the current folder (incl. live hotkey bindings) before leaving it.
+	if (has_output_dir())
+		save_state_json();
+
 	g_output_dir = dir;
 	ensure_dir(output_dir());
 
 	save_global_config();
 
-	ensure_output_artifacts_exist();
+	// Load the folder's own graphics first; a fresh folder starts empty. Do not
+	// save here: the before-save hook would write the previous folder's live
+	// hotkey bindings over the ones stored in this folder.
 	load_state_json();
 	load_visible_json();
-
-	save_state_json();
-	save_visible_json();
+	ensure_output_artifacts_exist();
 
 	const bool ok = rebuild_and_swap();
 
@@ -2547,29 +2707,24 @@ void init_from_disk()
 {
 	load_global_config();
 
-#if defined(__linux__)
-	// Flatpak's /app is read-only. OBS resolves its module config path under
-	// the application's writable XDG_CONFIG_HOME inside the sandbox.
-	if (g_output_dir.empty() && (QFile::exists("/.flatpak-info") || !qgetenv("FLATPAK_ID").isEmpty())) {
-		const std::string configPath = module_config_path_cached();
-		if (!configPath.empty()) {
-			const std::string resources =
-				QFileInfo(QString::fromStdString(configPath)).dir().filePath("resources").toStdString();
-			if (prepare_output_dir(resources)) {
-				g_output_dir = resources;
-				save_global_config();
-			}
+	// Zero-setup: without a configured folder, use a writable folder inside OBS's
+	// plugin config directory (also the only writable choice inside Flatpak).
+	if (g_output_dir.empty()) {
+		const std::string resources = default_output_dir();
+		if (!resources.empty() && prepare_output_dir(resources)) {
+			g_output_dir = resources;
+			save_global_config();
+			LOGI("Using default resources folder: '%s'", resources.c_str());
 		}
 	}
-#endif
 
 	if (g_output_dir.empty())
 		return;
 
 	ensure_dir(output_dir());
-	ensure_output_artifacts_exist();
 	load_state_json();
 	load_visible_json();
+	ensure_output_artifacts_exist();
 
 	g_last_html_path = bundle_html_current_path();
 
@@ -2583,7 +2738,6 @@ std::string add_default_group()
 		return {};
 
 	ensure_output_artifacts_exist();
-	load_state_json();
 
 	group_cfg c;
 	c.id = new_id();
@@ -2628,7 +2782,6 @@ bool update_group(const group_cfg &c)
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
 
 	group_cfg *dst = get_group_by_id(c.id);
 	if (!dst)
@@ -2662,7 +2815,6 @@ bool remove_group(const std::string &group_id)
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
 
 	const std::string sid = sanitize_id(group_id);
 	const auto before = g_groups.size();
@@ -2693,7 +2845,6 @@ bool set_group_members(const std::string &group_id, const std::vector<std::strin
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
 
 	group_cfg *c = get_group_by_id(group_id);
 	if (!c)
@@ -2738,14 +2889,12 @@ bool set_group_members(const std::string &group_id, const std::vector<std::strin
 	return true;
 }
 
-std::string add_default_lower_third()
+std::string add_default_lower_third(bool visible)
 {
 	if (!has_output_dir())
 		return {};
 
 	ensure_output_artifacts_exist();
-	load_state_json();
-	load_visible_json();
 
 	lower_third_cfg c = default_cfg();
 	while (get_by_id(c.id))
@@ -2756,7 +2905,7 @@ std::string add_default_lower_third()
 		maxOrder = std::max(maxOrder, it.order);
 	c.order = maxOrder + 1;
 	if (c.label.empty())
-		c.label = c.title.empty() ? c.id : c.title;
+		c.label = "Lower Third " + std::to_string(g_items.size() + 1);
 
 	g_items.push_back(c);
 	std::sort(g_items.begin(), g_items.end(), [](const lower_third_cfg &a, const lower_third_cfg &b) {
@@ -2764,7 +2913,8 @@ std::string add_default_lower_third()
 			return a.order < b.order;
 		return a.id < b.id;
 	});
-	set_visible_nosave(c.id, true);
+	if (visible)
+		set_visible_nosave(c.id, true);
 
 	if (!save_state_json())
 		return {};
@@ -2781,25 +2931,25 @@ std::string add_default_lower_third()
 		l.count = (int64_t)g_items.size();
 		emit_event(l);
 
-		core_event v;
-		v.type = event_type::VisibilityChanged;
-		v.id = c.id;
-		v.visible = true;
-		v.visible_ids = visible_ids();
-		emit_event(v);
+		if (visible) {
+			core_event v;
+			v.type = event_type::VisibilityChanged;
+			v.id = c.id;
+			v.visible = true;
+			v.visible_ids = visible_ids();
+			emit_event(v);
+		}
 	}
 
 	return c.id;
 }
 
-std::string clone_lower_third(const std::string &id)
+std::string clone_lower_third(const std::string &id, bool visible)
 {
 	if (!has_output_dir())
 		return {};
 
 	ensure_output_artifacts_exist();
-	load_state_json();
-	load_visible_json();
 
 	const std::string sid = sanitize_id(id);
 	lower_third_cfg *src = get_by_id(sid);
@@ -2808,6 +2958,9 @@ std::string clone_lower_third(const std::string &id)
 
 	lower_third_cfg c = *src;
 	c.id = new_id();
+	// A copy must not fire on the original's shortcut.
+	c.hotkey.clear();
+	c.hotkey_bindings.clear();
 	while (get_by_id(c.id))
 		c.id = new_id();
 
@@ -2821,8 +2974,12 @@ std::string clone_lower_third(const std::string &id)
 	else
 		c.label += " (Copy)";
 
-	if (!c.profile_picture.empty()) {
-		const std::string srcRel = c.profile_picture;
+	// Give the copy its own media files so editing or deleting one never affects the other.
+	auto copy_asset = [&](std::string &field, const char *tag) {
+		if (field.empty())
+			return;
+
+		const std::string srcRel = field;
 		const std::string srcPath = output_dir() + "/" + srcRel;
 
 		std::string ext;
@@ -2830,32 +2987,27 @@ std::string clone_lower_third(const std::string &id)
 		if (dot != std::string::npos && dot + 1 < srcRel.size())
 			ext = srcRel.substr(dot + 1);
 
-		using namespace std::chrono;
-		const auto ts = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-		std::string newName = c.id + "_" + std::to_string((long long)ts);
+		std::string newName = c.id + tag + now_timestamp_string();
 		if (!ext.empty())
 			newName += "." + ext;
-
 		const std::string dstPath = output_dir() + "/" + newName;
 
 		std::error_code ec;
 		if (std::filesystem::exists(std::filesystem::path(srcPath), ec) && !ec) {
-			ec.clear();
 			std::filesystem::copy_file(std::filesystem::path(srcPath), std::filesystem::path(dstPath),
 						   std::filesystem::copy_options::overwrite_existing, ec);
 			if (!ec) {
-				c.profile_picture = newName;
-			} else {
-				LOGW("clone_lower_third: failed to copy profile picture '%s' -> '%s' (%d)",
-				     srcPath.c_str(), dstPath.c_str(), (int)ec.value());
-
-				c.profile_picture.clear();
+				field = newName;
+				return;
 			}
-		} else {
-
-			c.profile_picture.clear();
+			LOGW("clone_lower_third: failed to copy '%s' -> '%s' (%d)", srcPath.c_str(), dstPath.c_str(),
+			     (int)ec.value());
 		}
-	}
+		field.clear();
+	};
+	copy_asset(c.profile_picture, "_");
+	copy_asset(c.anim_in_sound, "_in_");
+	copy_asset(c.anim_out_sound, "_out_");
 
 	int maxOrder = -1;
 	for (const auto &it : g_items)
@@ -2870,7 +3022,8 @@ std::string clone_lower_third(const std::string &id)
 			return a.order < b.order;
 		return a.id < b.id;
 	});
-	set_visible_nosave(newId, true);
+	if (visible)
+		set_visible_nosave(newId, true);
 
 	if (!save_state_json())
 		return {};
@@ -2888,12 +3041,14 @@ std::string clone_lower_third(const std::string &id)
 		l.count = (int64_t)g_items.size();
 		emit_event(l);
 
-		core_event v;
-		v.type = event_type::VisibilityChanged;
-		v.id = newId;
-		v.visible = true;
-		v.visible_ids = visible_ids();
-		emit_event(v);
+		if (visible) {
+			core_event v;
+			v.type = event_type::VisibilityChanged;
+			v.id = newId;
+			v.visible = true;
+			v.visible_ids = visible_ids();
+			emit_event(v);
+		}
 	}
 
 	return newId;
@@ -2905,8 +3060,6 @@ bool remove_lower_third(const std::string &id)
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
-	load_visible_json();
 
 	const std::string sid = sanitize_id(id);
 	const auto before = g_items.size();
@@ -2988,8 +3141,6 @@ bool move_lower_third(const std::string &id, int delta)
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
-	load_visible_json();
 
 	const std::string sid = sanitize_id(id);
 	if (sid.empty())
@@ -3035,8 +3186,6 @@ bool sort_lower_thirds_by_group()
 		return false;
 
 	ensure_output_artifacts_exist();
-	load_state_json();
-	load_visible_json();
 
 	if (g_items.size() < 2)
 		return true;

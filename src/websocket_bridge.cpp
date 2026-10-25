@@ -3,8 +3,11 @@
 
 #include "core.hpp"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
+#include <QThread>
 
 // vendored header
 #include "thirdparty/obs-websocket-api.h"
@@ -13,6 +16,11 @@
 #include <obs.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -21,6 +29,7 @@ namespace vflow::ws {
 static obs_websocket_vendor g_vendor = nullptr;
 static const char *kVendorName = "vinci-flow";
 static uint64_t g_core_listener_token = 0;
+static std::atomic_bool g_accepting{false};
 
 // -------------------------
 // Local helpers
@@ -250,8 +259,10 @@ static void req_SetTemplateParameters(obs_data_t *request, obs_data_t *response,
 	obs_data_set_string(response, "id", sid.c_str());
 	obs_data_t *dataObj = obs_data_create_from_json(
 		QJsonDocument(dataValue.toObject()).toJson(QJsonDocument::Compact).constData());
-	if (dataObj)
+	if (dataObj) {
 		obs_data_set_obj(response, "data", dataObj);
+		obs_data_release(dataObj);
+	}
 }
 
 static void req_GetTemplateParameters(obs_data_t *request, obs_data_t *response, void *priv)
@@ -279,8 +290,10 @@ static void req_GetTemplateParameters(obs_data_t *request, obs_data_t *response,
 	set_ok(response, true);
 	obs_data_set_string(response, "id", sid.c_str());
 	obs_data_t *data = obs_data_create_from_json(QJsonDocument(dataObj).toJson(QJsonDocument::Compact).constData());
-	if (data)
+	if (data) {
 		obs_data_set_obj(response, "data", data);
+		obs_data_release(data);
+	}
 }
 
 static void req_ToggleVisible(obs_data_t *request, obs_data_t *response, void *priv)
@@ -315,7 +328,7 @@ static void req_CreateLowerThird(obs_data_t *request, obs_data_t *response, void
 		return;
 	}
 
-	const std::string id = vflow::add_default_lower_third();
+	const std::string id = vflow::add_default_lower_third(true);
 	if (id.empty()) {
 		set_error(response, "Failed to create lower third");
 		return;
@@ -343,7 +356,7 @@ static void req_CloneLowerThird(obs_data_t *request, obs_data_t *response, void 
 		return;
 	}
 
-	const std::string newId = vflow::clone_lower_third(sid);
+	const std::string newId = vflow::clone_lower_third(sid, true);
 	if (newId.empty()) {
 		set_error(response, "Failed to clone lower third");
 		return;
@@ -397,6 +410,96 @@ static void req_ReloadFromDisk(obs_data_t *request, obs_data_t *response, void *
 }
 
 // -------------------------
+// UI-thread dispatch
+// -------------------------
+// obs-websocket invokes vendor requests on its own thread, while all plugin state
+// is owned by the UI thread. Every request therefore runs on the UI thread; the
+// websocket thread waits for the result with a timeout so a busy or exiting UI can
+// never deadlock obs-websocket.
+using request_fn = void (*)(obs_data_t *request, obs_data_t *response, void *priv);
+
+struct pending_call {
+	std::mutex mx;
+	std::condition_variable cv;
+	bool done = false;
+	bool cancelled = false; // the caller gave up waiting: do not run the request
+	obs_data_t *result = nullptr;
+
+	~pending_call() { obs_data_release(result); }
+};
+
+static void dispatch(obs_data_t *request, obs_data_t *response, request_fn fn)
+{
+	if (!g_accepting) {
+		set_error(response, "VinciFlow is not ready");
+		return;
+	}
+
+	QCoreApplication *app = QCoreApplication::instance();
+	if (!app || QThread::currentThread() == app->thread()) {
+		fn(request, response, nullptr);
+		return;
+	}
+
+	auto call = std::make_shared<pending_call>();
+	obs_data_t *req = obs_data_create();
+	obs_data_apply(req, request);
+
+	QMetaObject::invokeMethod(
+		app,
+		[call, req, fn]() {
+			bool cancelled;
+			{
+				std::lock_guard<std::mutex> lk(call->mx);
+				cancelled = call->cancelled;
+			}
+
+			obs_data_t *res = obs_data_create();
+			if (g_accepting && !cancelled)
+				fn(req, res, nullptr);
+			else
+				set_error(res, "VinciFlow is shutting down");
+			obs_data_release(req);
+
+			std::lock_guard<std::mutex> lk(call->mx);
+			call->result = res;
+			call->done = true;
+			call->cv.notify_all();
+		},
+		Qt::QueuedConnection);
+
+	std::unique_lock<std::mutex> lk(call->mx);
+	if (!call->cv.wait_for(lk, std::chrono::seconds(5), [&]() { return call->done; })) {
+		// Never apply a request the client was told failed (avoids duplicates on retry).
+		call->cancelled = true;
+		set_error(response, "Timed out waiting for OBS");
+		return;
+	}
+	obs_data_apply(response, call->result);
+}
+
+template<request_fn Fn> static void ui_request(obs_data_t *request, obs_data_t *response, void *)
+{
+	dispatch(request, response, Fn);
+}
+
+static const struct {
+	const char *name;
+	obs_websocket_request_callback_function fn;
+} kRequests[] = {
+	{"ListLowerThirds", ui_request<req_ListLowerThirds>},
+	{"GetVisible", ui_request<req_GetVisible>},
+	{"SetVisible", ui_request<req_SetVisible>},
+	{"ToggleVisible", ui_request<req_ToggleVisible>},
+	{"SetTemplateParameters", ui_request<req_SetTemplateParameters>},
+	{"GetTemplateParameters", ui_request<req_GetTemplateParameters>},
+	{"CreateLowerThird", ui_request<req_CreateLowerThird>},
+	{"CloneLowerThird", ui_request<req_CloneLowerThird>},
+	{"DeleteLowerThird", ui_request<req_DeleteLowerThird>},
+	{"ReloadFromDisk", ui_request<req_ReloadFromDisk>},
+};
+
+// -------------------------
 // Public init/shutdown
 // -------------------------
 bool init()
@@ -419,20 +522,9 @@ bool init()
 	}
 
 	bool ok = true;
-
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "ListLowerThirds", req_ListLowerThirds, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "GetVisible", req_GetVisible, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "SetVisible", req_SetVisible, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "ToggleVisible", req_ToggleVisible, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "SetTemplateParameters", req_SetTemplateParameters,
-							 nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "GetTemplateParameters", req_GetTemplateParameters,
-							 nullptr);
-
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "CreateLowerThird", req_CreateLowerThird, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "CloneLowerThird", req_CloneLowerThird, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "DeleteLowerThird", req_DeleteLowerThird, nullptr);
-	ok = ok && obs_websocket_vendor_register_request(g_vendor, "ReloadFromDisk", req_ReloadFromDisk, nullptr);
+	for (const auto &r : kRequests)
+		ok = obs_websocket_vendor_register_request(g_vendor, r.name, r.fn, nullptr) && ok;
+	g_accepting = true;
 
 	// Subscribe to core events AFTER vendor is ready
 	g_core_listener_token = vflow::add_event_listener(on_core_event, nullptr);
@@ -443,6 +535,12 @@ bool init()
 
 void shutdown()
 {
+	g_accepting = false;
+	if (g_vendor) {
+		for (const auto &r : kRequests)
+			obs_websocket_vendor_unregister_request(g_vendor, r.name);
+	}
+
 	if (g_core_listener_token) {
 		vflow::remove_event_listener(g_core_listener_token);
 		g_core_listener_token = 0;

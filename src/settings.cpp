@@ -1,9 +1,8 @@
 #define LOG_TAG "[" PLUGIN_NAME "][settings]"
 #include "settings.hpp"
 
-#include "headers/api.hpp"
-
 #include "core.hpp"
+#include "hotkeys.hpp"
 
 #include <obs.h>
 
@@ -65,6 +64,52 @@
 
 namespace vflow::ui {
 
+struct StylePreset {
+	const char *name;
+	const char *primary;
+	const char *secondary;
+	const char *title;
+	const char *subtitle;
+	const char *animIn;
+	const char *animOut;
+	int radius;
+	int opacity;
+};
+
+static const std::vector<StylePreset> kStylePresets = {
+	{"Midnight", "#111827", "#1F2937", "#F9FAFB", "#D1D5DB", "animate__fadeInUp", "animate__fadeOutDown", 5, 85},
+	{"Ocean", "#0EA5E9", "#1E3A8A", "#FFFFFF", "#E0F2FE", "animate__slideInLeft", "animate__slideOutLeft", 12, 90},
+	{"Sunset", "#F97316", "#DB2777", "#FFFFFF", "#FFE4E6", "animate__backInLeft", "animate__backOutLeft", 16, 92},
+	{"Emerald", "#059669", "#064E3B", "#ECFDF5", "#A7F3D0", "animate__fadeInLeft", "animate__fadeOutLeft", 8, 90},
+	{"Esports Red", "#DC2626", "#111111", "#FFFFFF", "#FCA5A5", "animate__lightSpeedInLeft",
+	 "animate__lightSpeedOutLeft", 0, 95},
+	{"Royal Purple", "#7C3AED", "#312E81", "#FFFFFF", "#DDD6FE", "animate__zoomIn", "animate__zoomOut", 14, 90},
+	{"Clean Light", "#FFFFFF", "#E5E7EB", "#111827", "#4B5563", "animate__fadeInUp", "animate__fadeOutDown", 10,
+	 95},
+	{"Gold", "#B45309", "#1C1917", "#FEF3C7", "#FCD34D", "animate__flipInX", "animate__flipOutX", 6, 92},
+};
+
+// Rejects archive entries that would escape the extraction folder ("zip slip").
+static bool is_safe_zip_entry(const QString &name)
+{
+	if (name.isEmpty() || QDir::isAbsolutePath(name) || name.contains(QLatin1Char(':')))
+		return false;
+	const QString cleaned = QDir::cleanPath(name);
+	return cleaned != QStringLiteral("..") && !cleaned.startsWith(QStringLiteral("../")) &&
+	       !cleaned.contains(QStringLiteral("/../"));
+}
+
+// Imported templates may only use animations the editor offers.
+static std::string known_anim_or(const std::vector<CbxOption> &opts, const std::string &value,
+				 const std::string &fallback)
+{
+	for (const auto &o : opts) {
+		if (value == o.value)
+			return value;
+	}
+	return fallback;
+}
+
 static bool unzip_to_dir(const QString &zipPath, const QString &destDir, QString &htmlPath, QString &cssPath,
 			 QString &jsPath, QString &jsonPath, QString &profilePath, QString &soundInPath,
 			 QString &soundOutPath)
@@ -93,7 +138,9 @@ static bool unzip_to_dir(const QString &zipPath, const QString &destDir, QString
 		if (unzGetCurrentFileInfo(zip, &info, filename, sizeof(filename), nullptr, 0, nullptr, 0) != UNZ_OK)
 			break;
 
-		const QString name = QString::fromUtf8(filename);
+		const QString name = QString::fromUtf8(filename).replace(QLatin1Char(0x5C), QLatin1Char('/'));
+		if (!is_safe_zip_entry(name) || name.endsWith(QLatin1Char('/')))
+			continue;
 		const QString outPath = destDir + "/" + name;
 
 		const QFileInfo fi(outPath);
@@ -166,8 +213,8 @@ static bool zip_write_file(zipFile zf, const char *internalName, const QByteArra
 
 LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(parent)
 {
-	setWindowTitle(tr("Lower Third Settings"));
-	resize(820, 720);
+	setWindowTitle(tr("Edit Lower Third"));
+	resize(860, 680);
 
 	setWindowModality(Qt::NonModal);
 	setModal(false);
@@ -199,12 +246,12 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		return it;
 	};
 
-	addNavItem(tr("Content & Media"));
-	addNavItem(tr("Style & Anim"));
-	addNavItem(tr("Color"));
-	addNavItem(tr("Layout"));
-	addNavItem(tr("API Bridge"));
-	addNavItem(tr("Templates Gallery"));
+	addNavItem(tr("Text & Media"));
+	addNavItem(tr("Look & Animation"));
+	addNavItem(tr("Colors"));
+	addNavItem(tr("Advanced: Template"));
+	addNavItem(tr("Live Data (API)"));
+	addNavItem(tr("Style Presets"));
 
 	auto *stack = new QStackedWidget(this);
 	stack->setObjectName("ltSettingsStack");
@@ -271,9 +318,10 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		int row = 0;
 
-		g->addWidget(new QLabel(tr("Dock Label:"), this), row, 0);
+		g->addWidget(new QLabel(tr("Name in dock:"), this), row, 0);
 		labelEdit = new QLineEdit(this);
-		labelEdit->setToolTip(tr("Display-only label used in the dock list"));
+		labelEdit->setPlaceholderText(tr("e.g. Host intro, Sponsor, Twitter handle"));
+		labelEdit->setToolTip(tr("Only shown in the VinciFlow dock and hotkey list, never on stream"));
 		g->addWidget(labelEdit, row, 1, 1, 3);
 
 		row++;
@@ -390,6 +438,10 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		hkRow->setSpacing(4);
 
 		hotkeyEdit = new QKeySequenceEdit(this);
+		hotkeyEdit->setMaximumSequenceLength(1);
+		hotkeyEdit->setToolTip(
+			tr("Shows/hides this lower third. Works while OBS is in the background and can also "
+			   "be changed in OBS Settings > Hotkeys."));
 
 		clearHotkeyBtn = new QPushButton(this);
 		clearHotkeyBtn->setToolTip(tr("Clear hotkey"));
@@ -404,18 +456,24 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		g->addLayout(hkRow, row, 1, 1, 3);
 
 		row++;
-		g->addWidget(new QLabel(tr("Repeat every (sec):"), this), row, 0);
+		g->addWidget(new QLabel(tr("Auto-show every:"), this), row, 0);
 
 		repeatEverySpin = new QSpinBox(this);
 		repeatEverySpin->setRange(0, 24 * 60 * 60);
-		repeatEverySpin->setToolTip(tr("0 disables auto-repeat"));
+		repeatEverySpin->setSuffix(tr(" s"));
+		repeatEverySpin->setSpecialValueText(tr("Off"));
+		repeatEverySpin->setToolTip(
+			tr("Show this lower third automatically at this interval (Off = only manually)"));
 		g->addWidget(repeatEverySpin, row, 1);
 
-		g->addWidget(new QLabel(tr("Keep visible (sec):"), this), row, 2);
+		g->addWidget(new QLabel(tr("Auto-hide after:"), this), row, 2);
 
 		repeatVisibleSpin = new QSpinBox(this);
 		repeatVisibleSpin->setRange(0, 24 * 60 * 60);
-		repeatVisibleSpin->setToolTip(tr("0 uses default (recommended: 3-8 sec)"));
+		repeatVisibleSpin->setSuffix(tr(" s"));
+		repeatVisibleSpin->setSpecialValueText(tr("Off"));
+		repeatVisibleSpin->setToolTip(tr(
+			"Hide automatically after this many seconds (Off = stays until you hide it; auto-show uses 3 s)"));
 		g->addWidget(repeatVisibleSpin, row, 3);
 
 		g->setColumnStretch(0, 0);
@@ -521,7 +579,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		opacitySlider->setRange(0, 100);
 		opacitySlider->setSingleStep(5);
 		opacitySlider->setPageStep(10);
-		opacitySlider->setToolTip(tr("0 = transparent, 100 = opaque"));
+		opacitySlider->setToolTip(tr("Background opacity: 0% = transparent, 100% = solid"));
 		g->addWidget(opacitySlider, row, 1);
 
 		opacityValue = new QLabel(this);
@@ -534,7 +592,7 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		radiusSlider->setRange(0, 100);
 		radiusSlider->setSingleStep(1);
 		radiusSlider->setPageStep(5);
-		radiusSlider->setToolTip(tr("Border radius percentage (0-100)"));
+		radiusSlider->setToolTip(tr("Corner roundness in pixels (0 = square corners)"));
 		g->addWidget(radiusSlider, row, 1);
 
 		radiusValue = new QLabel(this);
@@ -554,13 +612,13 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		auto updateOpacityLabel = [this]() {
 			const int val = opacitySlider ? opacitySlider->value() : 0;
 			if (opacityValue)
-				opacityValue->setText(QString("%1 Units").arg(val));
+				opacityValue->setText(QString("%1%").arg(val));
 		};
 
 		auto updateRadiusLabel = [this]() {
 			const int val = radiusSlider ? radiusSlider->value() : 0;
 			if (radiusValue)
-				radiusValue->setText(QString("%1 Units").arg(val));
+				radiusValue->setText(QString("%1 px").arg(val));
 		};
 
 		connect(opacitySlider, &QSlider::valueChanged, this,
@@ -825,94 +883,45 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 	}
 
 	{
-		auto *marketBox = new QGroupBox(tr("Lower Thirds Gallery"), this);
-		marketBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+		auto *presetBox = new QGroupBox(tr("Style Presets"), this);
+		presetBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
-		auto *mv = new QVBoxLayout(marketBox);
-		mv->setSpacing(8);
-		mv->setContentsMargins(8, 8, 8, 8);
+		auto *pv = new QVBoxLayout(presetBox);
+		pv->setSpacing(10);
+		pv->setContentsMargins(8, 8, 8, 8);
 
-		auto *hero = new QFrame(marketBox);
-		hero->setObjectName(QStringLiteral("oc_marketHero"));
-		hero->setFrameShape(QFrame::NoFrame);
-		hero->setStyleSheet(QStringLiteral("#oc_marketHero {"
-						   "  border: 1px solid rgba(255,255,255,0.10);"
-						   "  border-radius: 10px;"
-						   "  background: rgba(255,255,255,0.04);"
-						   "  padding: 10px;"
-						   "}"
-						   "#oc_marketHero QLabel { background: transparent; }"));
+		auto *intro =
+			new QLabel(tr("Pick a look to start from. Presets change colors, corners, transparency and "
+				      "animations; your text, images and template stay as they are. Click "
+				      "\"Apply\" to see it on stream."),
+				   presetBox);
+		intro->setWordWrap(true);
+		pv->addWidget(intro);
 
-		auto *heroRow = new QHBoxLayout(hero);
-		heroRow->setContentsMargins(8, 8, 8, 8);
-		heroRow->setSpacing(10);
+		auto *grid = new QGridLayout();
+		grid->setSpacing(8);
 
-		auto *heroIcon = new QLabel(hero);
-		heroIcon->setFixedSize(40, 40);
-		heroIcon->setPixmap(style()->standardIcon(QStyle::SP_DirOpenIcon).pixmap(36, 36));
-		heroIcon->setAlignment(Qt::AlignCenter);
-		heroRow->addWidget(heroIcon);
+		for (int i = 0; i < (int)kStylePresets.size(); ++i) {
+			const auto &p = kStylePresets[(size_t)i];
+			auto *btn = new QPushButton(tr(p.name), presetBox);
+			btn->setCursor(Qt::PointingHandCursor);
+			btn->setMinimumHeight(44);
+			btn->setStyleSheet(
+				QStringLiteral(
+					"QPushButton { color: %3; font-weight: 700; border-radius: 6px;"
+					" border: 1px solid rgba(0,0,0,0.25);"
+					" background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 %1, stop:1 %2); }"
+					"QPushButton:hover { border: 2px solid palette(highlight); }")
+					.arg(QString::fromLatin1(p.primary), QString::fromLatin1(p.secondary),
+					     QString::fromLatin1(p.title)));
+			connect(btn, &QPushButton::clicked, this, [this, i]() { applyStylePreset(i); });
+			grid->addWidget(btn, i / 2, i % 2);
+		}
 
-		auto *heroTextCol = new QVBoxLayout();
-		heroTextCol->setContentsMargins(0, 0, 0, 0);
-		heroTextCol->setSpacing(2);
+		pv->addLayout(grid);
+		pv->addStretch(1);
 
-		auto *heroTitle = new QLabel(tr("Get new Lower Thirds instantly"), hero);
-		heroTitle->setTextFormat(Qt::PlainText);
-		heroTitle->setStyleSheet(QStringLiteral("font-weight: 700;"));
-		heroTextCol->addWidget(heroTitle);
-
-		marketStatus = new QLabel(tr("Browse lower third templates."), hero);
-		marketStatus->setWordWrap(true);
-		marketStatus->setStyleSheet(QStringLiteral("color: rgba(255,255,255,0.85);"));
-		heroTextCol->addWidget(marketStatus);
-
-		heroRow->addLayout(heroTextCol, 1);
-
-		seeAllLowerThirdsBtn = new QPushButton(tr("See all lower thirds"), hero);
-		seeAllLowerThirdsBtn->setCursor(Qt::PointingHandCursor);
-		seeAllLowerThirdsBtn->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
-		seeAllLowerThirdsBtn->setToolTip(tr("Open the Lower Thirds marketplace in your browser"));
-		seeAllLowerThirdsBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-		heroRow->addWidget(seeAllLowerThirdsBtn);
-
-		mv->addWidget(hero);
-
-		marketList = new QListWidget(marketBox);
-		marketList->setObjectName(QStringLiteral("oc_marketList"));
-		marketList->setSelectionMode(QAbstractItemView::SingleSelection);
-		marketList->setUniformItemSizes(false);
-		marketList->setMinimumHeight(280);
-		marketList->setSpacing(6);
-
-		marketList->setFrameShape(QFrame::NoFrame);
-		marketList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-		marketList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-
-		marketList->setStyleSheet(QStringLiteral(
-			"#oc_marketList { border: none; background: transparent; }"
-			"#oc_marketList::item { border: none; padding: 0px; margin: 0px; background: transparent; }"
-			"#oc_marketList::item:selected { background: transparent; }"
-			"#oc_marketList::item:hover { background: transparent; }"));
-
-		mv->addWidget(marketList, 1);
-
-		templatesGalleryLayout->addWidget(marketBox);
-
-		connect(marketList, &QListWidget::itemActivated, this, [](QListWidgetItem *it) {
-			if (!it)
-				return;
-			const QString url = it->data(Qt::UserRole).toString();
-			if (!url.isEmpty())
-				QDesktopServices::openUrl(QUrl(url));
-		});
-
-		connect(seeAllLowerThirdsBtn, &QPushButton::clicked, this, []() {
-			QDesktopServices::openUrl(QUrl(QStringLiteral("https://streamrsc.com/search?q=lower+third")));
-		});
-		marketList->viewport()->installEventFilter(this);
-
-		rebuildMarketplaceList();
+		templatesGalleryLayout->addWidget(presetBox);
 	}
 
 	{
@@ -939,10 +948,15 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 
 		buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
 
-		auto *applyBtn = buttonBox->addButton(tr("Save & Apply"), QDialogButtonBox::ApplyRole);
+		auto *applyBtn = buttonBox->addButton(tr("Apply"), QDialogButtonBox::ApplyRole);
 		applyBtn->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+		applyBtn->setToolTip(tr("Save and update the overlay, keep this window open"));
 		applyBtn->setAutoDefault(false);
 		applyBtn->setDefault(false);
+
+		auto *saveBtn = buttonBox->addButton(tr("Save && Close"), QDialogButtonBox::AcceptRole);
+		saveBtn->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+		saveBtn->setAutoDefault(false);
 
 		if (auto *cancelBtn = buttonBox->button(QDialogButtonBox::Cancel)) {
 			cancelBtn->setIcon(style()->standardIcon(QStyle::SP_DialogCancelButton));
@@ -956,7 +970,9 @@ LowerThirdSettingsDialog::LowerThirdSettingsDialog(QWidget *parent) : QDialog(pa
 		connect(exportBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onExportTemplateClicked);
 		connect(buttonBox, &QDialogButtonBox::rejected, this, &LowerThirdSettingsDialog::reject,
 			Qt::UniqueConnection);
-		connect(applyBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onSaveAndApply,
+		connect(applyBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onApply,
+			Qt::UniqueConnection);
+		connect(saveBtn, &QPushButton::clicked, this, &LowerThirdSettingsDialog::onSaveAndClose,
 			Qt::UniqueConnection);
 	}
 
@@ -1050,7 +1066,8 @@ void LowerThirdSettingsDialog::loadFromState()
 
 	setCombo(posCombo, QString::fromStdString(cfg->lt_position));
 
-	hotkeyEdit->setKeySequence(QKeySequence(QString::fromStdString(cfg->hotkey)));
+	loadedHotkey = vflow::hotkeys::item_sequence(currentId);
+	hotkeyEdit->setKeySequence(loadedHotkey);
 	repeatEverySpin->setValue(cfg->repeat_every_sec);
 	repeatVisibleSpin->setValue(cfg->repeat_visible_sec);
 
@@ -1126,13 +1143,18 @@ void LowerThirdSettingsDialog::loadFromState()
 		radiusSlider->setValue(rad);
 
 	if (opacityValue) {
-		opacityValue->setText(QString("%1 Units").arg(op));
+		opacityValue->setText(QString("%1%").arg(op));
 	}
 	if (radiusValue) {
-		radiusValue->setText(QString("%1 Units").arg(rad));
+		radiusValue->setText(QString("%1 px").arg(rad));
 	}
 
 	pendingProfilePicturePath.clear();
+	pendingAnimInSoundPath.clear();
+	pendingAnimOutSoundPath.clear();
+	pendingRemoveProfilePicture = false;
+	pendingRemoveAnimInSound = false;
+	pendingRemoveAnimOutSound = false;
 }
 
 void LowerThirdSettingsDialog::saveToState()
@@ -1178,33 +1200,11 @@ void LowerThirdSettingsDialog::saveToState()
 	}
 
 	{
-		auto normalize = [](const QString &s) -> QString {
-			return QKeySequence(s).toString(QKeySequence::PortableText).trimmed();
-		};
-
-		const QString seq = normalize(hotkeyEdit->keySequence().toString(QKeySequence::PortableText));
-		if (!seq.isEmpty()) {
-			for (auto &it : vflow::all()) {
-				if (it.id == cfg->id)
-					continue;
-				const QString other = normalize(QString::fromStdString(it.hotkey));
-				if (!other.isEmpty() && other == seq) {
-					it.hotkey.clear();
-					vflow::notify_list_updated(it.id);
-				}
-			}
-			bool clearedAnyGroup = false;
-			for (auto &g : vflow::groups()) {
-				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
-				if (!other.isEmpty() && other == seq) {
-					g.toggle_hotkey.clear();
-					clearedAnyGroup = true;
-				}
-			}
-			if (clearedAnyGroup)
-				vflow::notify_list_updated();
-		}
-		cfg->hotkey = seq.toStdString();
+		// Only touch the OBS bindings when the field was edited, so bindings made in
+		// OBS Settings > Hotkeys (e.g. mouse buttons) are not cleared by accident.
+		const QKeySequence seq = hotkeyEdit->keySequence();
+		if (seq != loadedHotkey && vflow::hotkeys::set_item_sequence(currentId, seq))
+			loadedHotkey = seq;
 	}
 	cfg->repeat_every_sec = repeatEverySpin->value();
 	cfg->repeat_visible_sec = repeatVisibleSpin->value();
@@ -1223,6 +1223,23 @@ void LowerThirdSettingsDialog::saveToState()
 	cfg->js_template = jsEdit->toPlainText().toStdString();
 	if (apiBridgeEnable)
 		cfg->api_bridge_enabled = apiBridgeEnable->isChecked();
+
+	// Removals chosen in the dialog are applied only on save, so Cancel undoes them.
+	auto removeAsset = [](std::string &field) {
+		if (!field.empty() && vflow::has_output_dir()) {
+			const QString path = QDir(QString::fromStdString(vflow::output_dir()))
+						     .filePath(QString::fromStdString(field));
+			QFile::remove(path);
+		}
+		field.clear();
+	};
+	if (pendingRemoveProfilePicture && pendingProfilePicturePath.isEmpty())
+		removeAsset(cfg->profile_picture);
+	if (pendingRemoveAnimInSound && pendingAnimInSoundPath.isEmpty())
+		removeAsset(cfg->anim_in_sound);
+	if (pendingRemoveAnimOutSound && pendingAnimOutSoundPath.isEmpty())
+		removeAsset(cfg->anim_out_sound);
+	pendingRemoveProfilePicture = pendingRemoveAnimInSound = pendingRemoveAnimOutSound = false;
 
 	if (!pendingProfilePicturePath.isEmpty() && vflow::has_output_dir()) {
 		const QString outDir = QString::fromStdString(vflow::output_dir());
@@ -1323,15 +1340,62 @@ void LowerThirdSettingsDialog::saveToState()
 	vflow::save_state_json();
 }
 
-void LowerThirdSettingsDialog::onSaveAndApply()
+bool LowerThirdSettingsDialog::onApply()
 {
-	saveToState();
-
-	if (vflow::rebuild_and_swap()) {
-		vflow::notify_list_updated(currentId.toStdString());
+	if (!vflow::hotkeys::is_supported(hotkeyEdit->keySequence())) {
+		QMessageBox::warning(
+			this, tr("Unsupported hotkey"),
+			tr("This key cannot be used as an OBS hotkey. Please pick another one, or assign it "
+			   "in OBS Settings > Hotkeys."));
+		return false;
 	}
-	close();
+
+	saveToState(); // persists the state
+	vflow::rebuild_and_swap();
+	// Refresh the dock even when no overlay source is bound yet.
+	vflow::notify_list_updated(currentId.toStdString());
+	return true;
 }
+
+void LowerThirdSettingsDialog::onSaveAndClose()
+{
+	if (onApply())
+		accept();
+}
+
+void LowerThirdSettingsDialog::applyStylePreset(int index)
+{
+	if (index < 0 || index >= (int)kStylePresets.size())
+		return;
+	const auto &p = kStylePresets[(size_t)index];
+
+	auto setColor = [this](QColor *&slot, QPushButton *btn, const char *hex) {
+		const QColor c(QString::fromLatin1(hex));
+		if (!slot)
+			slot = new QColor(c);
+		else
+			*slot = c;
+		updateColorButton(btn, c);
+	};
+	setColor(currentPrimaryColor, primaryColorBtn, p.primary);
+	setColor(currentSecondaryColor, secondaryColorBtn, p.secondary);
+	setColor(currentTitleColor, titleColorBtn, p.title);
+	setColor(currentSubtitleColor, subtitleColorBtn, p.subtitle);
+
+	auto setCombo = [](QComboBox *cb, const char *value) {
+		const int idx = cb->findData(QString::fromLatin1(value));
+		if (idx >= 0)
+			cb->setCurrentIndex(idx);
+	};
+	setCombo(animInCombo, p.animIn);
+	setCombo(animOutCombo, p.animOut);
+
+	if (radiusSlider)
+		radiusSlider->setValue(p.radius);
+	if (opacitySlider)
+		opacitySlider->setValue(p.opacity);
+}
+
 void LowerThirdSettingsDialog::onBrowseProfilePicture()
 {
 	const QString filter = tr("Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)");
@@ -1340,113 +1404,54 @@ void LowerThirdSettingsDialog::onBrowseProfilePicture()
 		return;
 
 	pendingProfilePicturePath = file;
+	pendingRemoveProfilePicture = false;
 	profilePictureEdit->setText(file);
 }
 
 void LowerThirdSettingsDialog::onDeleteProfilePicture()
 {
-	if (currentId.isEmpty())
-		return;
-
-	auto *cfg = vflow::get_by_id(currentId.toStdString());
-	if (!cfg)
-		return;
-
-	if (cfg->profile_picture.empty() && pendingProfilePicturePath.isEmpty()) {
-		profilePictureEdit->clear();
-		return;
-	}
-
-	const QMessageBox::StandardButton btn =
-		QMessageBox::question(this, tr("Remove profile picture"), tr("Delete the current profile picture?"),
-				      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-
-	if (btn != QMessageBox::Yes)
-		return;
-
-	if (!cfg->profile_picture.empty() && vflow::has_output_dir()) {
-		QDir dir(QString::fromStdString(vflow::output_dir()));
-		const QString oldPath = dir.filePath(QString::fromStdString(cfg->profile_picture));
-		if (QFile::exists(oldPath))
-			QFile::remove(oldPath);
-	}
-
-	cfg->profile_picture.clear();
 	pendingProfilePicturePath.clear();
+	pendingRemoveProfilePicture = true;
 	profilePictureEdit->clear();
-
-	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onBrowseAnimInSound()
 {
-	const QString filter = tr("Audio (*.mp3 *.wav);;All Files (*.*)");
+	const QString filter = tr("Audio (*.mp3 *.wav *.ogg);;All Files (*.*)");
 	const QString file = QFileDialog::getOpenFileName(this, tr("Select sound for animation in"), QString(), filter);
 	if (file.isEmpty())
 		return;
 
 	pendingAnimInSoundPath = file;
+	pendingRemoveAnimInSound = false;
 	animInSoundEdit->setText(file);
 }
 
 void LowerThirdSettingsDialog::onDeleteAnimInSound()
 {
-	if (currentId.isEmpty())
-		return;
-
-	auto *cfg = vflow::get_by_id(currentId.toStdString());
-	if (!cfg)
-		return;
-
-	if (!cfg->anim_in_sound.empty() && vflow::has_output_dir()) {
-		const QString outDir = QString::fromStdString(vflow::output_dir());
-		QDir dir(outDir);
-		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_in_sound));
-		if (QFile::exists(oldPath))
-			QFile::remove(oldPath);
-	}
-
-	cfg->anim_in_sound.clear();
 	pendingAnimInSoundPath.clear();
+	pendingRemoveAnimInSound = true;
 	animInSoundEdit->clear();
-
-	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onBrowseAnimOutSound()
 {
-	const QString filter = tr("Audio (*.mp3 *.wav);;All Files (*.*)");
+	const QString filter = tr("Audio (*.mp3 *.wav *.ogg);;All Files (*.*)");
 	const QString file =
 		QFileDialog::getOpenFileName(this, tr("Select sound for animation out"), QString(), filter);
 	if (file.isEmpty())
 		return;
 
 	pendingAnimOutSoundPath = file;
+	pendingRemoveAnimOutSound = false;
 	animOutSoundEdit->setText(file);
 }
 
 void LowerThirdSettingsDialog::onDeleteAnimOutSound()
 {
-	if (currentId.isEmpty())
-		return;
-
-	auto *cfg = vflow::get_by_id(currentId.toStdString());
-	if (!cfg)
-		return;
-
-	if (!cfg->anim_out_sound.empty() && vflow::has_output_dir()) {
-		const QString outDir = QString::fromStdString(vflow::output_dir());
-		QDir dir(outDir);
-		const QString oldPath = dir.filePath(QString::fromStdString(cfg->anim_out_sound));
-		if (QFile::exists(oldPath))
-			QFile::remove(oldPath);
-	}
-
-	cfg->anim_out_sound.clear();
 	pendingAnimOutSoundPath.clear();
+	pendingRemoveAnimOutSound = true;
 	animOutSoundEdit->clear();
-
-	vflow::save_state_json();
 }
 
 void LowerThirdSettingsDialog::onPickPrimaryColor()
@@ -1512,63 +1517,14 @@ void LowerThirdSettingsDialog::onPickSubtitleColor()
 void LowerThirdSettingsDialog::onAnimInChanged(int) {}
 void LowerThirdSettingsDialog::onAnimOutChanged(int) {}
 
-void LowerThirdSettingsDialog::onMarketplaceUpdated()
-{
-	rebuildMarketplaceList();
-}
-
-void LowerThirdSettingsDialog::onMarketplaceFailed(const QString &err)
-{
-	if (marketStatus) {
-		QString msg = err.trimmed();
-		if (msg.isEmpty())
-			msg = tr("Could not load recommendations.");
-		marketStatus->setText(tr("Recommendations unavailable: %1").arg(msg));
-	}
-
-	rebuildMarketplaceList();
-}
-
-void LowerThirdSettingsDialog::onMarketplaceImageReady(const QString &url, const QPixmap &pm)
-{
-	const QString u = url.trimmed();
-	if (u.isEmpty())
-		return;
-
-	auto range = marketIconByUrl.equal_range(u);
-	for (auto it = range.first; it != range.second; ++it) {
-		QLabel *lab = it.value();
-		if (!lab)
-			continue;
-		lab->setPixmap(pm);
-	}
-}
-
-void LowerThirdSettingsDialog::onMarketplaceImageFailed(const QString &url, const QString &err)
-{
-	Q_UNUSED(url);
-	Q_UNUSED(err);
-}
-
-void LowerThirdSettingsDialog::rebuildMarketplaceList()
-{
-	if (!marketList)
-		return;
-
-	marketList->clear();
-	marketIconByUrl.clear();
-
-	if (marketStatus) {
-		marketStatus->setText(tr("Browse lower third templates."));
-	}
-}
-
 void LowerThirdSettingsDialog::updateColorButton(QPushButton *btn, const QColor &c)
 {
 	const QString hex = c.name(QColor::HexRgb);
-	btn->setStyleSheet(
-		QString("background-color:%1;border:1px solid rgba(255,255,255,0.20);border-radius:8px;padding:6px 10px;min-width:90px;")
-			.arg(hex));
+	// Pick black or white text so the hex value stays readable on any color.
+	const double luma = 0.299 * c.redF() + 0.587 * c.greenF() + 0.114 * c.blueF();
+	btn->setStyleSheet(QString("background-color:%1;color:%2;border:1px solid palette(mid);border-radius:6px;"
+				   "padding:6px 10px;min-width:90px;")
+				   .arg(hex, luma > 0.6 ? QStringLiteral("#000000") : QStringLiteral("#ffffff")));
 	btn->setText(hex);
 }
 
@@ -2046,8 +2002,8 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->avatar_height = obj.value("avatar_height").toInt(cfg->avatar_height);
 	cfg->avatar_width = std::max(16, std::min(512, cfg->avatar_width));
 	cfg->avatar_height = std::max(16, std::min(512, cfg->avatar_height));
-	cfg->anim_in = obj.value("anim_in").toString().toStdString();
-	cfg->anim_out = obj.value("anim_out").toString().toStdString();
+	cfg->anim_in = known_anim_or(AnimInOptions, obj.value("anim_in").toString().toStdString(), cfg->anim_in);
+	cfg->anim_out = known_anim_or(AnimOutOptions, obj.value("anim_out").toString().toStdString(), cfg->anim_out);
 	{
 		const QString sin = obj.value("sound_in").toString();
 		const QString sout = obj.value("sound_out").toString();
@@ -2082,7 +2038,7 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 	cfg->opacity = (cfg->opacity / 5) * 5;
 	cfg->radius = std::max(0, std::min(100, cfg->radius));
 
-	cfg->hotkey = obj.value("hotkey").toString().toStdString();
+	// Hotkeys stay with the lower third; templates do not carry them over.
 	cfg->repeat_every_sec = obj.value("repeat_every_sec").toInt(0);
 	cfg->repeat_visible_sec = obj.value("repeat_visible_sec").toInt(0);
 	cfg->api_template = obj.value("api_template").toString().toStdString();
@@ -2109,78 +2065,38 @@ void LowerThirdSettingsDialog::onImportTemplateClicked()
 		}
 	}
 
-	if (!profilePicPath.isEmpty() && vflow::has_output_dir()) {
-		const QString outDir = QString::fromStdString(vflow::output_dir());
-		if (!outDir.isEmpty()) {
-			QDir dir(outDir);
+	// Copy the template's media into the resources folder (each one independently).
+	if (vflow::has_output_dir()) {
+		QDir dir(QString::fromStdString(vflow::output_dir()));
+		const QString id = QString::fromStdString(cfg->id);
 
-			if (!cfg->profile_picture.empty()) {
-				const QString oldPath = dir.filePath(QString::fromStdString(cfg->profile_picture));
-				if (QFile::exists(oldPath))
-					QFile::remove(oldPath);
-			}
+		auto importAsset = [&](const QString &srcPath, std::string &field, const QString &base) {
+			if (srcPath.isEmpty())
+				return;
 
-			const QString ext = QFileInfo(profilePicPath).suffix().toLower();
-			const QString newName =
-				ext.isEmpty() ? QString("%1_profile").arg(QString::fromStdString(cfg->id))
-					      : QString("%1_profile.%2").arg(QString::fromStdString(cfg->id)).arg(ext);
+			if (!field.empty())
+				QFile::remove(dir.filePath(QString::fromStdString(field)));
+			field.clear();
 
+			const QString ext = QFileInfo(srcPath).suffix().toLower();
+			const QString newName = ext.isEmpty() ? QString("%1_%2").arg(id, base)
+							      : QString("%1_%2.%3").arg(id, base, ext);
 			const QString dest = dir.filePath(newName);
 			QFile::remove(dest);
+			if (QFile::copy(srcPath, dest))
+				field = newName.toStdString();
+		};
 
-			if (QFile::copy(profilePicPath, dest)) {
-				cfg->profile_picture = newName.toStdString();
-			}
-
-			if (vflow::has_output_dir()) {
-				const QString outDir = QString::fromStdString(vflow::output_dir());
-				if (!outDir.isEmpty()) {
-					QDir dir(outDir);
-
-					auto importSound = [&](const QString &srcPath, bool isIn) {
-						if (srcPath.isEmpty())
-							return;
-
-						std::string &field = isIn ? cfg->anim_in_sound : cfg->anim_out_sound;
-						if (!field.empty()) {
-							const QString oldPath =
-								dir.filePath(QString::fromStdString(field));
-							if (QFile::exists(oldPath))
-								QFile::remove(oldPath);
-							field.clear();
-						}
-
-						const QString ext = QFileInfo(srcPath).suffix().toLower();
-						const QString base = isIn ? "soundIn" : "soundOut";
-						const QString newName =
-							ext.isEmpty() ? QString("%1_%2")
-										.arg(QString::fromStdString(cfg->id))
-										.arg(base)
-								      : QString("%1_%2.%3")
-										.arg(QString::fromStdString(cfg->id))
-										.arg(base)
-										.arg(ext);
-
-						const QString dest = dir.filePath(newName);
-						QFile::remove(dest);
-						if (QFile::copy(srcPath, dest)) {
-							field = newName.toStdString();
-						}
-					};
-
-					importSound(soundInFilePath, true);
-					importSound(soundOutFilePath, false);
-				}
-			}
-		}
+		importAsset(profilePicPath, cfg->profile_picture, QStringLiteral("profile"));
+		importAsset(soundInFilePath, cfg->anim_in_sound, QStringLiteral("soundIn"));
+		importAsset(soundOutFilePath, cfg->anim_out_sound, QStringLiteral("soundOut"));
 	}
 
 	vflow::save_state_json();
 
 	loadFromState();
 
-	QMessageBox::information(this, tr("Imported"),
-				 tr("Template imported successfully. Click 'Save & Apply' to rebuild files."));
+	QMessageBox::information(this, tr("Imported"), tr("Template imported. Click \"Apply\" to see it on stream."));
 }
 
 } // namespace vflow::ui

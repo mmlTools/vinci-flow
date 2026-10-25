@@ -1,8 +1,8 @@
 # VinciFlow -- Lower Thirds Orchestration for OBS Studio
 
 ![Version](https://img.shields.io/github/v/release/mmltools/vinci-flow)
-![OBS](https://img.shields.io/badge/OBS-Studio%2029%2B-informational)
-![Platform](https://img.shields.io/badge/Platform-Windows%2064--bit-blue)
+![OBS](https://img.shields.io/badge/OBS-Studio%2032%2B-informational)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/License-GPLv2-green)
 ![WebSocket](https://img.shields.io/badge/obs--websocket-Vendor%20API-orange)
 ![HTML](https://img.shields.io/badge/Overlay-HTML%2FCSS%2FJS-purple)
@@ -19,6 +19,31 @@ motion, and live information.
 
 📘 **Full Documentation:**\
 https://vinciflow.streamrsc.com/
+
+------------------------------------------------------------------------
+
+## Requirements
+
+-   OBS Studio **32.0 or newer** (built against 32.2.2). For older OBS
+    versions use VinciFlow 3.8.x.
+-   The OBS Browser Source (included with OBS on Windows and macOS).
+
+## Quick Start (5 minutes)
+
+1.  Install the plugin and restart OBS. The **VinciFlow Controller** dock
+    appears (if not: *Docks > VinciFlow Controller*).
+2.  Click **Add overlay to current scene**. VinciFlow creates a Browser
+    Source sized to your canvas. No folder or file setup is needed.
+3.  Click **New**, type your name and title, choose a **Style Preset**
+    and click **Apply**.
+4.  Click the lower third in the dock to show it on stream. Click it
+    again to hide it. A red **LIVE** badge marks what is on screen.
+5.  Optional: set a **hotkey** in the editor. Hotkeys are regular OBS
+    hotkeys, so they work while you are in a game and also appear in
+    *Settings > Hotkeys*.
+
+To show the overlay in other scenes, add the same source there with
+*Add Existing Source*.
 
 ------------------------------------------------------------------------
 

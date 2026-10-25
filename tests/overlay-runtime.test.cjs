@@ -10,6 +10,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 function page(readyState = 'loading') {
   const intervals = [];
   const listeners = [];
+  const windowListeners = [];
   const requests = [];
   const classes = new Set();
   const root = {
@@ -36,8 +37,11 @@ function page(readyState = 'loading') {
     fetch: url => new Promise((resolve, reject) => requests.push({ url, resolve, reject })),
   });
   context.window = context;
+  context.addEventListener = (name, callback) => windowListeners.push({ name, callback });
   return {
     root, intervals, listeners, requests,
+    // Simulates obs-browser's javascript_event (a CustomEvent with JSON detail).
+    dispatch: (name, detail) => windowListeners.filter(l => l.name === name).forEach(l => l.callback({ detail })),
     run: () => vm.runInContext(script, context),
     ready: () => {
       document.readyState = 'interactive';
@@ -47,7 +51,7 @@ function page(readyState = 'loading') {
         listener.callback();
       }
     },
-    tick: () => intervals.find(interval => interval.ms === 350).callback(),
+    tick: () => intervals.find(interval => interval.ms === 500).callback(),
   };
 }
 
@@ -60,7 +64,8 @@ test('repeated execution before and after DOM readiness initializes once', () =>
   p.ready();
   for (let i = 0; i < 100; ++i) p.run();
   assert.equal(p.root.initializations, 1);
-  assert.equal(p.intervals.length, 2);
+  // Without API Bridge items only the visibility file is polled; parameters are read once.
+  assert.equal(p.intervals.length, 1);
   assert.equal(p.requests.length, 2);
 });
 
@@ -70,7 +75,7 @@ for (const state of ['interactive', 'complete']) {
     p.run();
     p.run();
     assert.equal(p.root.initializations, 1);
-    assert.equal(p.intervals.length, 2);
+    assert.equal(p.intervals.length, 1);
     assert.equal(p.listeners.length, 0);
   });
 }
@@ -103,6 +108,33 @@ test('failed and malformed visibility reads release the polling lock', async () 
   p.tick();
   assert.equal(p.requests.length, 4);
   p.requests[3].resolve({ json: async () => ['lt_test'] });
+  await flush();
+  assert.equal(p.root.style.display, 'block');
+});
+
+test('pushed visibility events show and hide without polling', async () => {
+  const p = page('complete');
+  p.run();
+  p.dispatch('vflow:visible', ['lt_test']);
+  await flush();
+  assert.equal(p.root.style.display, 'block');
+  p.dispatch('vflow:visible', []);
+  await flush();
+  assert.equal(p.root.style.display, 'none');
+  // Malformed payloads are ignored.
+  p.dispatch('vflow:visible', { invalid: true });
+  await flush();
+  assert.equal(p.root.style.display, 'none');
+});
+
+test('a poll that started before a pushed update cannot undo it', async () => {
+  const p = page('complete');
+  p.run();
+  // requests[0] is the initial visibility poll, still in flight.
+  p.dispatch('vflow:visible', ['lt_test']);
+  await flush();
+  assert.equal(p.root.style.display, 'block');
+  p.requests[0].resolve({ json: async () => [] }); // stale file contents
   await flush();
   assert.equal(p.root.style.display, 'block');
 });

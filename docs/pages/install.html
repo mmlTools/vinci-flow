@@ -1,15 +1,15 @@
 <h1>Install &amp; Setup</h1>
 <p class="lead">
-  Get vinci-flow installed into OBS Studio, point it at an output directory, and confirm your first lower third
-  appears on stream.
+  Get VinciFlow installed into OBS Studio and your first lower third on stream in about five minutes. No folders or
+  files to configure.
 </p>
 
 <h2>Requirements</h2>
 <ul>
-  <li>OBS Studio installed and working.</li>
+  <li>OBS Studio <b>32.0 or newer</b>. For older OBS versions use VinciFlow 3.8.x.</li>
   <li>
-    <code>vinci-flow</code> plugin installed (copy to your OBS plugins folder or install via your distribution
-    package).
+    <code>vinci-flow</code> plugin installed (Windows installer, macOS package, Linux <code>.deb</code> or the
+    Flatpak bundle).
   </li>
   <li>
     <b>obs-websocket</b> is optional unless you plan to automate the plugin externally. (Vendor requests/events
@@ -17,31 +17,36 @@
   </li>
 </ul>
 
-<h2>First-time setup checklist</h2>
-
-<div class="warn">
-  <strong>Important:</strong> The plugin needs an <b>Output Directory</b> to write the generated overlay HTML files.
-  If no output directory is configured, actions like "Create Lower Third" can fail with
-  <code>No output dir configured</code>.
-</div>
+<h2>First-time setup</h2>
 
 <ol>
   <li>
-    <b>Open the dock</b> — in OBS, enable the plugin dock (usually via <code>View → Docks</code>) and open
-    <code>VinciFlow</code>.
+    <b>Open the dock</b>: it appears automatically after installing. If not, use <code>Docks → VinciFlow
+    Controller</code>.
   </li>
   <li>
-    <b>Set the Output Directory</b> — choose a folder where the plugin will write overlay files (including
-    <code>lt-*.html</code> and state/config files).
+    <b>Add the overlay</b>: click <b>Add overlay to current scene</b>. VinciFlow creates a Browser Source sized to
+    your canvas and connects to it. To use it in other scenes, add the same source with
+    <i>Add Existing Source</i>.
   </li>
   <li>
-    <b>Ensure the Browser Source exists</b> — the plugin is designed to manage a Browser Source named
-    <code>VinciFlow</code> with a 1920×1080 canvas. If your workflow is manual, create a Browser Source and point it
-    to the generated overlay file inside your Output Directory.
+    <b>Create your first lower third</b>: click <b>New</b>, enter a title and subtitle, pick a
+    <b>Style Preset</b> and click <b>Apply</b>.
   </li>
-  <li><b>Create your first lower third</b> — use the dock action to create a default lower third, then edit title/subtitle and styling.</li>
-  <li><b>Test show/hide</b> — toggle visibility from the dock and confirm it appears in your scene.</li>
+  <li>
+    <b>Show / hide</b>: click the lower third in the dock. A red <b>LIVE</b> badge shows what is on stream.
+  </li>
+  <li>
+    <b>Hotkeys</b> (optional): set one in the editor or in <code>Settings → Hotkeys</code>. They are regular OBS
+    hotkeys and work while OBS is in the background.
+  </li>
 </ol>
+
+<p>
+  VinciFlow keeps its files in a resources folder inside the OBS configuration directory. To use another folder
+  (for example a synced one), open <b>Setup</b> in the dock and choose <b>Resources folder</b>.
+</p>
+
 
 <h2>OBS Flatpak on Linux</h2>
 <p>

@@ -20,12 +20,13 @@ class QLineEdit;
 class QPushButton;
 class QFrame;
 class QLabel;
-class QCheckBox;
+class QToolButton;
 class QShortcut;
 class QEvent;
 class QTimer;
 class QComboBox;
 class QSpinBox;
+class QNetworkAccessManager;
 
 namespace vflow {
 struct core_event;
@@ -39,12 +40,13 @@ struct LowerThirdRowUi {
 	QLabel *labelLbl = nullptr;
 	QLabel *subLbl = nullptr;
 	QLabel *thumbnailLbl = nullptr;
-	QCheckBox *visibleCheck = nullptr;
-	QPushButton *upBtn = nullptr;
-	QPushButton *downBtn = nullptr;
-	QPushButton *cloneBtn = nullptr;
-	QPushButton *settingsBtn = nullptr;
-	QPushButton *removeBtn = nullptr;
+	QLabel *liveLbl = nullptr;
+	QString hotkeyText;
+	QToolButton *upBtn = nullptr;
+	QToolButton *downBtn = nullptr;
+	QToolButton *cloneBtn = nullptr;
+	QToolButton *settingsBtn = nullptr;
+	QToolButton *removeBtn = nullptr;
 };
 
 class LowerThirdDock : public QWidget {
@@ -56,7 +58,14 @@ public:
 	bool init();
 	void onSceneCollectionChanged();
 	void refreshBrowserSources();
-	void setUpdateAvailable(const QString &remoteVersion, const QString &localVersion);
+	void setUpdateAvailable(const QString &remoteVersion, const QString &localVersion, const QString &url);
+
+	// Hotkey / automation entry points (UI thread)
+	void toggleLowerThird(const QString &id);
+	void toggleGroup(const QString &id);
+
+	// Stops timers and group runs (OBS is exiting).
+	void stopAll();
 
 signals:
 	void requestSave();
@@ -65,6 +74,7 @@ private slots:
 	void onBrowseOutputFolder();
 	void onAddLowerThird();
 	void onManageGroups();
+	void onCreateOverlaySource();
 
 private:
 	QFrame *updateFrame_ = nullptr;
@@ -72,8 +82,20 @@ private:
 	QPushButton *updateBtn_ = nullptr;
 	QString updateRemote_;
 	QString updateLocal_;
+	QString updateUrl_;
+	QNetworkAccessManager *net_ = nullptr;
 
-	QPushButton *manageGroupsBtn_ = nullptr;
+	QFrame *statusFrame_ = nullptr;
+	QLabel *statusLabel_ = nullptr;
+	QPushButton *statusBtn_ = nullptr;
+	QLabel *emptyStateLbl_ = nullptr;
+	QWidget *setupPanel_ = nullptr;
+	QToolButton *setupToggleBtn_ = nullptr;
+	QPushButton *createSourceBtn_ = nullptr;
+	QPushButton *matchCanvasBtn_ = nullptr;
+	QPushButton *openFolderBtn_ = nullptr;
+
+	QToolButton *manageGroupsBtn_ = nullptr;
 
 	static QString formatCountdownMs(qint64 ms);
 	void updateRowCountdowns();
@@ -81,9 +103,11 @@ private:
 
 	void rebuildList();
 	void updateRowActiveStyles();
-
-	void clearShortcuts();
-	void rebuildShortcuts();
+	void updateSetupState();
+	void applySceneCollection();
+	void setSetupExpanded(bool expanded);
+	void checkForUpdates();
+	void applyDockStyle();
 
 	void handleToggleVisible(const QString &id);
 	void handleClone(const QString &id);
@@ -106,6 +130,7 @@ private:
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
+	void changeEvent(QEvent *event) override;
 
 private:
 	QLineEdit *outputPathEdit = nullptr;
@@ -116,20 +141,15 @@ private:
 
 	QSpinBox *browserWidthSpin = nullptr;
 	QSpinBox *browserHeightSpin = nullptr;
-	QPushButton *applyBrowserSizeBtn = nullptr;
 
-	QPushButton *infoBtn = nullptr;
-	QPushButton *toggleCarouselBtn_ = nullptr;
-
-	QPushButton *addBtn = nullptr;
+	QToolButton *infoBtn = nullptr;
+	QToolButton *addBtn = nullptr;
 
 	QScrollArea *scrollArea = nullptr;
 	QWidget *listContainer = nullptr;
 	QVBoxLayout *listLayout = nullptr;
-	QWidget *widgetCarousel_ = nullptr;
 
 	QVector<LowerThirdRowUi> rows;
-	QVector<QShortcut *> shortcuts_;
 
 	QTimer *repeatTimer_ = nullptr;
 	QHash<QString, qint64> nextOnMs_;
@@ -137,10 +157,15 @@ private:
 	QHash<QString, qint64> reShowAtMs_;
 
 	bool populatingSources_ = false;
+	bool collectionRefreshPending_ = false;
 	signal_handler_t *obsSignalHandler_ = nullptr;
 	bool obsSignalsConnected_ = false;
 
 	uint64_t coreListenerToken_ = 0;
+
+	// Theme handling (see applyDockStyle / changeEvent)
+	bool applyingStyle_ = false;
+	qint64 paletteKey_ = 0;
 };
 
 } // namespace vflow::ui

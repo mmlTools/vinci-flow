@@ -3,8 +3,7 @@
 
 #include <QDialog>
 #include <QString>
-#include <QMultiHash>
-#include <QPointer>
+#include <QKeySequence>
 #include <vector>
 
 class QLineEdit;
@@ -101,7 +100,7 @@ inline const std::vector<CbxOption> AnimInOptions = {
 	{"Jello", "animate__jello"},
 	{"Heart Beat", "animate__heartBeat"},
 
-	{"Custom Handled In", "custom_handled_in"},
+	{"Custom (template JS)", "custom_handled_in"},
 };
 
 inline const std::vector<CbxOption> AnimOutOptions = {
@@ -161,14 +160,14 @@ inline const std::vector<CbxOption> AnimOutOptions = {
 	{"Hinge", "animate__hinge"},
 	{"Roll Out", "animate__rollOut"},
 
-	{"Custom Handled Out", "custom_handled_out"},
+	{"Custom (template JS)", "custom_handled_out"},
 };
 
 inline const std::vector<CbxOption> LtPositionOptions = {
 	{"Bottom Left", "lt-pos-bottom-left"},   {"Bottom Center", "lt-pos-bottom-center"},
 	{"Bottom Right", "lt-pos-bottom-right"}, {"Top Left", "lt-pos-top-left"},
 	{"Top Center", "lt-pos-top-center"},     {"Top Right", "lt-pos-top-right"},
-	{"Screen Center", "lt-pos-center"},      {"Custom Position", "lt-parent-styles"},
+	{"Screen Center", "lt-pos-center"},      {"Custom (template CSS)", "lt-parent-styles"},
 };
 
 class LowerThirdSettingsDialog : public QDialog {
@@ -180,7 +179,8 @@ public:
 	void setLowerThirdId(const QString &id);
 
 private slots:
-	void onSaveAndApply();
+	bool onApply();
+	void onSaveAndClose();
 	void onBrowseProfilePicture();
 	void onDeleteProfilePicture();
 	void onBrowseAnimInSound();
@@ -203,25 +203,24 @@ private slots:
 	void onAnimInChanged(int);
 	void onAnimOutChanged(int);
 
-	void onMarketplaceUpdated();
-	void onMarketplaceFailed(const QString &err);
-	void onMarketplaceImageReady(const QString &url, const QPixmap &pm);
-	void onMarketplaceImageFailed(const QString &url, const QString &err);
-
 private:
 	void loadFromState();
 	void saveToState();
 
 	void openTemplateEditorDialog(const QString &title, QPlainTextEdit *sourceEdit);
 	void updateColorButton(QPushButton *btn, const QColor &c);
-	void rebuildMarketplaceList();
 	void updateApiBridgeUi();
+	void applyStylePreset(int index);
 
 private:
 	QString currentId;
 	QString pendingProfilePicturePath;
 	QString pendingAnimInSoundPath;
 	QString pendingAnimOutSoundPath;
+	bool pendingRemoveProfilePicture = false;
+	bool pendingRemoveAnimInSound = false;
+	bool pendingRemoveAnimOutSound = false;
+	QKeySequence loadedHotkey;
 
 	QLineEdit *titleEdit = nullptr;
 	QLineEdit *labelEdit = nullptr;
@@ -285,12 +284,6 @@ private:
 
 	QSpinBox *repeatEverySpin = nullptr;
 	QSpinBox *repeatVisibleSpin = nullptr;
-
-	QListWidget *marketList = nullptr;
-	QLabel *marketStatus = nullptr;
-
-	QPushButton *seeAllLowerThirdsBtn = nullptr;
-	QMultiHash<QString, QPointer<QLabel>> marketIconByUrl;
 };
 
 } // namespace vflow::ui

@@ -1,6 +1,11 @@
 name: Build Project
 on:
   workflow_call:
+    inputs:
+      release:
+        description: Release build (Release config, packaging, signing and notarization)
+        type: boolean
+        default: false
     outputs:
       pluginName:
         description: Project name detected by parsing build spec file
@@ -27,10 +32,14 @@ jobs:
         id: setup
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_BUILD: ${{ inputs.release }}
         run: |
           : Check Event Data ☑️
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
 
+          if [[ "${RELEASE_BUILD}" == "true" ]]; then
+            config_data=('codesign:true' 'notarize:true' 'package:true' 'config:Release')
+          else
           case "${GITHUB_EVENT_NAME}" in
             pull_request)
               config_data=('codesign:false' 'notarize:false' 'package:false' 'config:RelWithDebInfo')
@@ -55,6 +64,7 @@ jobs:
               ;;
             *) ;;
           esac
+          fi
 
           for config in "${config_data[@]}"; do
             IFS=':' read -r key value <<< "${config}"

@@ -26,7 +26,7 @@
 #endif
 
 inline constexpr const char *sltBrowserSourceId = "browser_source";
-inline constexpr const char *sltBrowserSourceName = "VinciFlow Source";
+inline constexpr const char *sltBrowserSourceName = "VinciFlow Overlay";
 inline constexpr int sltBrowserWidth = 1920;
 inline constexpr int sltBrowserHeight = 1080;
 
@@ -83,7 +83,11 @@ struct lower_third_cfg {
 	// Backward compatibility: legacy API template schema (no longer edited in the UI).
 	std::string api_template;
 
+	// Human-readable shortcut (QKeySequence portable text) of the first OBS binding.
+	// Kept for display, the websocket API and migration of pre-4.0 Qt shortcuts.
 	std::string hotkey;
+	// OBS hotkey bindings as produced by obs_hotkey_save(), stored as JSON text.
+	std::string hotkey_bindings;
 
 	int repeat_every_sec = 0;   // 0 = disabled
 	int repeat_visible_sec = 0; // how long to keep visible when auto-shown
@@ -108,6 +112,8 @@ struct group_cfg {
 	// Optional group control hotkey (dock-only; stored for convenience)
 	// - toggle_hotkey: start/stop the group run
 	std::string toggle_hotkey;
+	// OBS hotkey bindings for the toggle hotkey (see lower_third_cfg::hotkey_bindings)
+	std::string toggle_hotkey_bindings;
 
 	// Timing controls (milliseconds)
 	// Defaults:
@@ -168,11 +174,20 @@ bool has_output_dir();
 std::string output_dir();
 bool set_output_dir_and_load(const std::string &dir);
 
+// Default output folder used when the user has not picked one:
+// <OBS config>/plugin_config/vinci-flow/resources
+std::string default_output_dir();
+
 // Reads OBS module config: obs_module_config_path("config.json")
+// Falls back to default_output_dir() so the plugin works without any setup.
 void init_from_disk();
 
 // Save OBS module config: obs_module_config_path("config.json")
 bool save_global_config();
+
+// Called at the start of save_state_json() so other modules (e.g. hotkeys) can
+// write their live state into the configs before they are persisted.
+void set_before_save_hook(void (*hook)());
 
 // -------------------------
 // State access
@@ -231,6 +246,7 @@ std::string path_parameters_lt_json(const std::string &id);
 
 // Set or get runtime template parameters for a lower third.
 // These are persisted to the same per-LT JSON files used by the API bridge.
+// Setting also pushes the values to the overlay immediately.
 bool set_template_parameters(const std::string &id, const QJsonObject &data);
 bool get_template_parameters(const std::string &id, QJsonObject &out);
 
@@ -274,8 +290,9 @@ std::string new_id();
 // -------------------------
 // CRUD helpers for dock actions (persist + notify)
 // -------------------------
-std::string add_default_lower_third();
-std::string clone_lower_third(const std::string &id);
+// visible: show the new item immediately (kept for the websocket API).
+std::string add_default_lower_third(bool visible = true);
+std::string clone_lower_third(const std::string &id, bool visible = true);
 bool remove_lower_third(const std::string &id);
 
 // Reorder helpers (persist + notify). delta: -1 (up), +1 (down)

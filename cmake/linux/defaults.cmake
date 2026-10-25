@@ -17,7 +17,17 @@ set(CPACK_PACKAGE_VERSION "${CMAKE_PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_C_LIBRARY_ARCHITECTURE}")
 
 set(CPACK_GENERATOR "DEB")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# dpkg-shlibdeps records the exact package names of the build host. Packages built on
+# Ubuntu 24.04 then depend on its time64 names (libqt6gui6t64, ...), which do not exist
+# on Ubuntu 25.10+ or Debian, making the .deb uninstallable there (issue #38).
+# Declare the runtime dependencies explicitly, accepting either package name.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+set(
+  CPACK_DEBIAN_PACKAGE_DEPENDS
+  "obs-studio (>= 32.0.0), libc6 (>= 2.35), zlib1g, libqt6core6t64 (>= 6.4.0) | libqt6core6 (>= 6.4.0), libqt6gui6t64 (>= 6.4.0) | libqt6gui6 (>= 6.4.0), libqt6widgets6t64 (>= 6.4.0) | libqt6widgets6 (>= 6.4.0), libqt6network6t64 (>= 6.4.0) | libqt6network6 (>= 6.4.0)"
+)
+set(CPACK_DEBIAN_PACKAGE_SECTION "video")
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Lower thirds controller dock and overlay for OBS Studio")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${PLUGIN_EMAIL}")
 set(CPACK_SET_DESTDIR ON)
 

@@ -3,6 +3,7 @@
 #include "dock.hpp"
 
 #include "core.hpp"
+#include "hotkeys.hpp"
 #include "settings.hpp"
 #include "widget.hpp"
 
@@ -13,6 +14,7 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QAbstractItemView>
 #include <QColorDialog>
 #include <QDialog>
@@ -29,7 +31,6 @@
 #include <QStyle>
 #include <QFrame>
 #include <QEvent>
-#include <QShortcut>
 #include <QMouseEvent>
 #include <QDir>
 #include <QPixmap>
@@ -46,12 +47,28 @@
 #include <QMessageBox>
 #include <QRandomGenerator>
 #include <QKeySequenceEdit>
-#include <QSettings>
+#include <QTabWidget>
+#include <QToolButton>
+#include <QToolBar>
+#include <QApplication>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
+#include <QFont>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QVersionNumber>
 
 static QWidget *g_dockWidget = nullptr;
 
 struct GroupRuntime {
 	bool running = false;
+	// Incremented on every start/stop; pending timers from an older run see a
+	// different value and do nothing (prevents double-firing after stop/start).
+	quint64 generation = 0;
 	int index = 0;
 	bool phaseShow = true;
 	QString currentId;
@@ -62,24 +79,119 @@ struct GroupRuntime {
 static QHash<QString, GroupRuntime> g_groupRuns;
 static QHash<QString, qint64> g_groupHideAtMs;
 
-static constexpr const char *kDockUiSettingsGroup = "LowerThirdDock";
-static constexpr const char *kDockUiCarouselVisibleKey = "widgetCarouselVisible";
+static constexpr const char *kReleasesApiUrl = "https://api.github.com/repos/mmlTools/vinci-flow/releases/latest";
 
-static bool loadWidgetCarouselVisibleState()
+// Thumbnail size in the list. The row height follows it, so every row is the
+// same height whether or not it has a picture, a countdown or the LIVE badge.
+static constexpr int kRowThumbSize = 32;
+static constexpr int kRowThumbRadius = 6;
+
+static QString rgba(const QColor &c, double alpha)
 {
-	QSettings s;
-	s.beginGroup(QString::fromLatin1(kDockUiSettingsGroup));
-	const bool visible = s.value(QString::fromLatin1(kDockUiCarouselVisibleKey), true).toBool();
-	s.endGroup();
-	return visible;
+	return QStringLiteral("rgba(%1,%2,%3,%4)").arg(c.red()).arg(c.green()).arg(c.blue()).arg(alpha, 0, 'f', 2);
 }
 
-static void saveWidgetCarouselVisibleState(bool visible)
+// Flat single-colour icons for actions the OBS theme has no icon for. They are
+// drawn in the palette text colour so they match the theme's own SVG icons in
+// dark and light themes alike. kind: "groups", "clone" or "help".
+static QIcon glyphIcon(const char *kind, const QColor &color)
 {
-	QSettings s;
-	s.beginGroup(QString::fromLatin1(kDockUiSettingsGroup));
-	s.setValue(QString::fromLatin1(kDockUiCarouselVisibleKey), visible);
-	s.endGroup();
+	QIcon icon;
+	for (const qreal dpr : {1.0, 2.0}) {
+		QPixmap pm(int(16 * dpr), int(16 * dpr));
+		pm.setDevicePixelRatio(dpr);
+		pm.fill(Qt::transparent);
+
+		QPainter p(&pm);
+		p.setRenderHint(QPainter::Antialiasing, true);
+		p.setPen(QPen(color, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+		p.setBrush(Qt::NoBrush);
+
+		if (std::strcmp(kind, "groups") == 0) {
+			// Playlist: three bars and a play triangle.
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawRoundedRect(QRectF(1.5, 2.0, 13.0, 2.0), 1.0, 1.0);
+			p.drawRoundedRect(QRectF(1.5, 7.0, 7.5, 2.0), 1.0, 1.0);
+			p.drawRoundedRect(QRectF(1.5, 12.0, 7.5, 2.0), 1.0, 1.0);
+			QPainterPath tri;
+			tri.moveTo(10.5, 6.5);
+			tri.lineTo(15.0, 10.5);
+			tri.lineTo(10.5, 14.5);
+			tri.closeSubpath();
+			p.drawPath(tri);
+		} else if (std::strcmp(kind, "clone") == 0) {
+			// Two overlapping sheets; the front one punches out the back one.
+			p.drawRoundedRect(QRectF(5.5, 1.5, 9.0, 9.0), 1.5, 1.5);
+			p.setCompositionMode(QPainter::CompositionMode_Source);
+			p.setBrush(Qt::transparent);
+			p.drawRoundedRect(QRectF(1.5, 5.5, 9.0, 9.0), 1.5, 1.5);
+		} else {
+			// Question mark in a circle.
+			p.drawEllipse(QRectF(1.5, 1.5, 13.0, 13.0));
+			QFont f = p.font();
+			f.setBold(true);
+			f.setPixelSize(10);
+			p.setFont(f);
+			p.drawText(QRectF(0, 0, 16, 16), Qt::AlignCenter, QStringLiteral("?"));
+		}
+		p.end();
+		icon.addPixmap(pm);
+	}
+	return icon;
+}
+
+// Centre-crops a picture into a rounded square (QSS border-radius does not clip pixmaps).
+static QPixmap roundedThumbnail(const QPixmap &src, int size, int radius, qreal dpr)
+{
+	const int px = int(size * dpr);
+	QPixmap out(px, px);
+	out.setDevicePixelRatio(dpr);
+	out.fill(Qt::transparent);
+
+	QPainter p(&out);
+	p.setRenderHint(QPainter::Antialiasing, true);
+	p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+	QPainterPath clip;
+	clip.addRoundedRect(QRectF(0, 0, size, size), radius, radius);
+	p.setClipPath(clip);
+
+	const QPixmap scaled = src.scaled(px, px, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+	const QRectF source((scaled.width() - px) / 2.0, (scaled.height() - px) / 2.0, px, px);
+	p.drawPixmap(QRectF(0, 0, size, size), scaled, source);
+	return out;
+}
+
+// Stand-in for lower thirds without a picture: the first letter on a tinted tile.
+static QPixmap initialsThumbnail(const QString &name, int size, int radius, const QColor &bg, const QColor &fg,
+				 qreal dpr)
+{
+	QPixmap out(int(size * dpr), int(size * dpr));
+	out.setDevicePixelRatio(dpr);
+	out.fill(Qt::transparent);
+
+	QPainter p(&out);
+	p.setRenderHint(QPainter::Antialiasing, true);
+	p.setPen(Qt::NoPen);
+	p.setBrush(bg);
+	p.drawRoundedRect(QRectF(0, 0, size, size), radius, radius);
+
+	QString initial = QStringLiteral("#");
+	for (const QChar ch : name.trimmed()) {
+		if (ch.isLetterOrNumber()) {
+			initial = QString(ch).toUpper();
+			break;
+		}
+	}
+
+	QFont f = p.font();
+	f.setBold(true);
+	f.setPixelSize(int(size * 0.45));
+	p.setFont(f);
+	p.setPen(fg);
+	p.drawText(QRectF(0, 0, size, size), Qt::AlignCenter, initial);
+	return out;
 }
 
 static void applyGroupRowStyle(QFrame *rowFrame)
@@ -107,27 +219,10 @@ static void applyGroupRowStyle(QFrame *rowFrame)
 	rowFrame->setStyleSheet(QString());
 }
 
-static void updateWidgetCarouselToggleUi(QPushButton *btn, QWidget *carousel, QStyle *st)
+static QIcon themeIcon(const char *name, QStyle *st, QStyle::StandardPixmap fallback)
 {
-	if (!btn || !carousel || !st)
-		return;
-
-	const bool visible = carousel->isVisible();
-
-	btn->blockSignals(true);
-	btn->setChecked(visible);
-	btn->setText(visible ? QObject::tr("Hide Carousel") : QObject::tr("Show Carousel"));
-	btn->setToolTip(visible ? QObject::tr("Hide widget carousel") : QObject::tr("Show widget carousel"));
-
-	QIcon ico = visible ? QIcon::fromTheme(QStringLiteral("pan-down-symbolic"))
-			    : QIcon::fromTheme(QStringLiteral("pan-end-symbolic"));
-
-	if (ico.isNull()) {
-		ico = st->standardIcon(visible ? QStyle::SP_TitleBarShadeButton : QStyle::SP_TitleBarUnshadeButton);
-	}
-
-	btn->setIcon(ico);
-	btn->blockSignals(false);
+	QIcon ico = QIcon::fromTheme(QString::fromLatin1(name));
+	return ico.isNull() ? st->standardIcon(fallback) : ico;
 }
 
 static void stopGroupRun(const QString &groupId)
@@ -142,6 +237,7 @@ static void stopGroupRun(const QString &groupId)
 	}
 
 	it->running = false;
+	it->generation++;
 	it->index = 0;
 	it->phaseShow = true;
 	it->currentId.clear();
@@ -149,7 +245,22 @@ static void stopGroupRun(const QString &groupId)
 	it->seq.clear();
 }
 
-static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId);
+static bool isGroupRunning(const QString &groupId)
+{
+	auto it = g_groupRuns.find(groupId);
+	return it != g_groupRuns.end() && it->running;
+}
+
+static void shuffleSeq(QVector<int> &seq)
+{
+	auto *rng = QRandomGenerator::global();
+	for (int i = (int)seq.size() - 1; i > 0; --i) {
+		const int j = (int)rng->bounded((quint32)(i + 1));
+		std::swap(seq[i], seq[j]);
+	}
+}
+
+static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId, quint64 generation);
 
 static void startGroupRun(vflow::ui::LowerThirdDock *dock, const QString &groupId)
 {
@@ -162,22 +273,23 @@ static void startGroupRun(vflow::ui::LowerThirdDock *dock, const QString &groupI
 
 	auto &rt = g_groupRuns[groupId];
 	rt.running = true;
+	rt.generation++;
 	rt.index = 0;
 	rt.phaseShow = true;
 	rt.currentId.clear();
 	rt.hideAtMs = 0;
 	rt.seq.clear();
 
-	scheduleGroupStep(dock, groupId);
+	scheduleGroupStep(dock, groupId, rt.generation);
 }
 
-static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId)
+static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &groupId, quint64 generation)
 {
 	if (!dock)
 		return;
 
 	auto it = g_groupRuns.find(groupId);
-	if (it == g_groupRuns.end() || !it->running)
+	if (it == g_groupRuns.end() || !it->running || it->generation != generation)
 		return;
 
 	auto *car = vflow::get_group_by_id(groupId.toStdString());
@@ -195,15 +307,15 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 		it->seq.reserve(count);
 		for (int i = 0; i < count; ++i)
 			it->seq.push_back(i);
-		if (car->order_mode == 1) {
-			auto *rng = QRandomGenerator::global();
-			for (int i = count - 1; i > 0; --i) {
-				const int j = (int)rng->bounded((quint32)(i + 1));
-				std::swap(it->seq[i], it->seq[j]);
-			}
-		}
+		if (car->order_mode == 1)
+			shuffleSeq(it->seq);
 		it->index = 0;
 	}
+
+	auto next = [dock, groupId, generation](int delayMs) {
+		QTimer::singleShot(delayMs, dock,
+				   [dock, groupId, generation]() { scheduleGroupStep(dock, groupId, generation); });
+	};
 
 	if (it->phaseShow) {
 		if (!it->currentId.isEmpty()) {
@@ -211,20 +323,14 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 			vflow::set_visible_persist(it->currentId.toStdString(), false);
 		}
 
-		if (!car->loop && it->index >= count) {
-			stopGroupRun(groupId);
-			return;
-		}
-
 		if (it->index >= count) {
-			it->index = 0;
-			if (car->order_mode == 1) {
-				auto *rng = QRandomGenerator::global();
-				for (int i = count - 1; i > 0; --i) {
-					const int j = (int)rng->bounded((quint32)(i + 1));
-					std::swap(it->seq[i], it->seq[j]);
-				}
+			if (!car->loop) {
+				stopGroupRun(groupId);
+				return;
 			}
+			it->index = 0;
+			if (car->order_mode == 1)
+				shuffleSeq(it->seq);
 		}
 
 		const int memberIdx = it->seq.value(it->index, 0);
@@ -236,7 +342,7 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 		vflow::set_visible_persist(nextId.toStdString(), true);
 
 		it->phaseShow = false;
-		QTimer::singleShot(visibleMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
+		next(visibleMs);
 	} else {
 		if (!it->currentId.isEmpty()) {
 			g_groupHideAtMs.remove(it->currentId);
@@ -253,8 +359,62 @@ static void scheduleGroupStep(vflow::ui::LowerThirdDock *dock, const QString &gr
 		}
 
 		it->phaseShow = true;
-		QTimer::singleShot(intervalMs, dock, [dock, groupId]() { scheduleGroupStep(dock, groupId); });
+		next(intervalMs);
 	}
+}
+
+// Creates a Browser Source sized to the canvas, adds it to the scene the user is
+// editing and returns its name. Empty on failure.
+static QString createOverlaySource()
+{
+	const std::string html =
+		vflow::has_output_dir()
+			? QDir(QString::fromStdString(vflow::output_dir())).filePath("lt.html").toStdString()
+			: std::string();
+
+	int width = sltBrowserWidth;
+	int height = sltBrowserHeight;
+	obs_video_info ovi{};
+	if (obs_get_video_info(&ovi) && ovi.base_width > 0 && ovi.base_height > 0) {
+		width = (int)ovi.base_width;
+		height = (int)ovi.base_height;
+	}
+
+	QString name = QString::fromLatin1(sltBrowserSourceName);
+	for (int n = 2;; ++n) {
+		obs_source_t *existing = obs_get_source_by_name(name.toUtf8().constData());
+		if (!existing)
+			break;
+		obs_source_release(existing);
+		name = QStringLiteral("%1 %2").arg(QString::fromLatin1(sltBrowserSourceName)).arg(n);
+	}
+
+	obs_data_t *settings = obs_data_create();
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", html.c_str());
+	obs_data_set_int(settings, "width", width);
+	obs_data_set_int(settings, "height", height);
+	obs_data_set_bool(settings, "reroute_audio", true);
+	obs_data_set_bool(settings, "shutdown", false);
+	obs_data_set_bool(settings, "restart_when_active", false);
+	obs_source_t *src = obs_source_create(sltBrowserSourceId, name.toUtf8().constData(), settings, nullptr);
+	obs_data_release(settings);
+	if (!src)
+		return {};
+
+	obs_source_t *sceneSrc = obs_frontend_preview_program_mode_active() ? obs_frontend_get_current_preview_scene()
+									    : obs_frontend_get_current_scene();
+	if (obs_scene_t *scene = obs_scene_from_source(sceneSrc)) {
+		if (obs_sceneitem_t *item = obs_scene_add(scene, src))
+			obs_sceneitem_set_locked(item, true); // full-canvas overlay: avoid accidental drags
+	}
+	obs_source_release(sceneSrc);
+	obs_source_release(src);
+
+	// Bind first, then size: the size applies to the current target source.
+	vflow::set_target_browser_source_name(name.toStdString());
+	vflow::set_target_browser_dimensions(width, height);
+	return name;
 }
 
 namespace vflow::ui {
@@ -270,6 +430,17 @@ void LowerThirdDock::coreEventThunk(const vflow::core_event &ev, void *user)
 
 LowerThirdDock::~LowerThirdDock()
 {
+	stopAll();
+}
+
+void LowerThirdDock::stopAll()
+{
+	for (auto it = g_groupRuns.begin(); it != g_groupRuns.end(); ++it) {
+		it->running = false;
+		it->generation++;
+	}
+	if (repeatTimer_)
+		repeatTimer_->stop();
 	disconnectObsSignals();
 	if (coreListenerToken_) {
 		vflow::remove_event_listener(coreListenerToken_);
@@ -295,12 +466,8 @@ void LowerThirdDock::onCoreEvent(const vflow::core_event &ev)
 				row.row->style()->polish(row.row);
 				row.row->update();
 			}
-
-			if (row.visibleCheck) {
-				row.visibleCheck->blockSignals(true);
-				row.visibleCheck->setChecked(active);
-				row.visibleCheck->blockSignals(false);
-			}
+			if (row.liveLbl)
+				row.liveLbl->setVisible(active);
 
 			updateRowCountdownFor(row);
 			break;
@@ -312,6 +479,7 @@ void LowerThirdDock::onCoreEvent(const vflow::core_event &ev)
 	case vflow::event_type::Reloaded: {
 		rebuildList();
 		updateRowCountdowns();
+		updateSetupState();
 		break;
 	}
 
@@ -323,330 +491,372 @@ void LowerThirdDock::onCoreEvent(const vflow::core_event &ev)
 LowerThirdDock::LowerThirdDock(QWidget *parent) : QWidget(parent)
 {
 	setObjectName(QStringLiteral("LowerThirdDock"));
+	// A plain QWidget ignores stylesheet backgrounds; with this attribute the
+	// OBS theme's dock rule (OBSDock > QWidget) paints the same grey body the
+	// Sources dock has.
 	setAttribute(Qt::WA_StyledBackground, true);
+	applyDockStyle();
 
-	setStyleSheet(R"(
-#LowerThirdDock { background: rgba(39, 42, 51, 1.0); }
-QFrame#sltUpdateBanner {
-  border: 1px solid rgba(90,140,255,0.45);
-  border-radius: 10px;
-  background: rgba(90,140,255,0.14);
-  padding: 8px;
-}
-QLabel#sltUpdateBannerLabel { color: rgba(240,246,252,0.95); font-weight: 600; }
-QPushButton#sltUpdateBannerBtn {
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: rgba(255,255,255,0.06);
-}
-QPushButton#sltUpdateBannerBtn:hover { background: rgba(255,255,255,0.10); }
-QPushButton#sltToggleCarouselBtn {
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 8px;
-  padding: 5px 10px;
-  background: rgba(255,255,255,0.06);
-  color: rgba(240,246,252,0.95);
-}
-QPushButton#sltToggleCarouselBtn:hover { background: rgba(255,255,255,0.10); }
-QPushButton#sltToggleCarouselBtn:checked {
-  background: rgba(88,166,255,0.16);
-  border: 1px solid rgba(88,166,255,0.75);
-}
-QFrame#sltRowFrame {
-  border: 1px solid rgba(255,255,255,40);
-  border-radius: 4px;
-  padding: 4px 6px;
-  background: transparent;
-}
-QFrame#sltRowFrame:hover { background: rgba(255,255,255,0.04); }
-QFrame#sltRowFrame[sltInGroup="true"] {
-  background: rgba(46,160,67,0.14);
-  border: 1px solid rgba(46,160,67,0.55);
-}
-QFrame#sltRowFrame[sltActive="true"] {
-  background: rgba(88,166,255,0.16);
-  border: 1px solid rgba(88,166,255,0.9);
-}
-QLabel#sltRowLabel { color: #f0f6fc; font-weight: 500; }
-QLabel#sltRowSubLabel { color: rgba(240,246,252,0.72); font-size: 11px; }
-QLabel#sltRowThumbnail { border-radius: 16px; background: rgba(0,0,0,0.35); }
-QScrollArea#LowerThirdContent QPushButton { border: none; background: transparent; padding: 2px; }
-QScrollArea#LowerThirdContent QPushButton:hover { background: rgba(255,255,255,0.06); border-radius: 3px; }
-)");
-
+	// Everything is flush with the dock edges: list, setup panel and footer
+	// toolbar stack with no gaps, like the Sources dock.
 	auto *rootLayout = new QVBoxLayout(this);
-	rootLayout->setContentsMargins(8, 8, 8, 8);
-	rootLayout->setSpacing(6);
+	rootLayout->setContentsMargins(0, 0, 0, 0);
+	rootLayout->setSpacing(0);
+
+	auto *body = new QVBoxLayout();
+	body->setContentsMargins(0, 0, 0, 0);
+	body->setSpacing(0);
+	rootLayout->addLayout(body, 1);
 
 	auto *st = style();
+	const QColor glyphColor = QApplication::palette().color(QPalette::ButtonText);
 
+	// Update notice (GitHub releases)
 	{
 		updateFrame_ = new QFrame(this);
 		updateFrame_->setObjectName(QStringLiteral("sltUpdateBanner"));
-		updateFrame_->setFrameShape(QFrame::NoFrame);
 		updateFrame_->setVisible(false);
 
 		auto *row = new QHBoxLayout(updateFrame_);
-		row->setContentsMargins(8, 6, 8, 6);
-		row->setSpacing(10);
+		row->setContentsMargins(8, 4, 8, 4);
+		row->setSpacing(8);
 
-		auto *ico = new QLabel(updateFrame_);
-		ico->setFixedSize(18, 18);
-		ico->setAlignment(Qt::AlignCenter);
-		ico->setPixmap(st->standardIcon(QStyle::SP_ArrowUp).pixmap(16, 16));
-		row->addWidget(ico);
-
-		updateLabel_ = new QLabel(tr("New VinciFlow update available."), updateFrame_);
-		updateLabel_->setObjectName(QStringLiteral("sltUpdateBannerLabel"));
+		updateLabel_ = new QLabel(updateFrame_);
+		updateLabel_->setObjectName(QStringLiteral("sltBannerLabel"));
 		updateLabel_->setWordWrap(true);
 		row->addWidget(updateLabel_, 1);
 
-		updateBtn_ = new QPushButton(tr("Download update"), updateFrame_);
-		updateBtn_->setObjectName(QStringLiteral("sltUpdateBannerBtn"));
+		updateBtn_ = new QPushButton(tr("Download"), updateFrame_);
 		updateBtn_->setCursor(Qt::PointingHandCursor);
-		updateBtn_->setIcon(st->standardIcon(QStyle::SP_DialogSaveButton));
-		updateBtn_->setToolTip(tr("Open the VinciFlow download page"));
 		row->addWidget(updateBtn_);
 
 		connect(updateBtn_, &QPushButton::clicked, this, [this]() {
-			QDesktopServices::openUrl(
-				QUrl(QStringLiteral("https://streamrsc.com/streaming-resource/vinci-flow")));
+			if (!updateUrl_.isEmpty())
+				QDesktopServices::openUrl(QUrl(updateUrl_));
 		});
 
-		rootLayout->addWidget(updateFrame_);
+		body->addWidget(updateFrame_);
 	}
 
+	// Setup guidance: tells the user exactly what is missing, with a one-click fix.
 	{
-		auto *grid = new QGridLayout();
-		grid->setContentsMargins(0, 0, 0, 0);
-		grid->setHorizontalSpacing(6);
-		grid->setVerticalSpacing(0);
-		grid->setColumnStretch(0, 0);
-		grid->setColumnStretch(1, 1);
+		statusFrame_ = new QFrame(this);
+		statusFrame_->setObjectName(QStringLiteral("sltBanner"));
+		statusFrame_->setVisible(false);
 
-		auto *lbl = new QLabel(tr("Resources:"), this);
-		lbl->setObjectName(QStringLiteral("sltRowLabel"));
-		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+		auto *v = new QVBoxLayout(statusFrame_);
+		v->setContentsMargins(8, 6, 8, 6);
+		v->setSpacing(6);
 
-		auto *right = new QWidget(this);
-		auto *rightRow = new QHBoxLayout(right);
-		rightRow->setContentsMargins(0, 0, 0, 0);
-		rightRow->setSpacing(6);
+		statusLabel_ = new QLabel(statusFrame_);
+		statusLabel_->setObjectName(QStringLiteral("sltBannerLabel"));
+		statusLabel_->setWordWrap(true);
+		v->addWidget(statusLabel_);
 
-		outputPathEdit = new QLineEdit(right);
-		outputPathEdit->setReadOnly(true);
-		outputPathEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		statusBtn_ = new QPushButton(statusFrame_);
+		statusBtn_->setCursor(Qt::PointingHandCursor);
+		v->addWidget(statusBtn_, 0, Qt::AlignLeft);
 
-		outputBrowseBtn = new QPushButton(right);
-		outputBrowseBtn->setCursor(Qt::PointingHandCursor);
-		outputBrowseBtn->setToolTip(tr("Select output folder"));
-		outputBrowseBtn->setFlat(true);
-		outputBrowseBtn->setIcon(st->standardIcon(QStyle::SP_DirOpenIcon));
+		body->addWidget(statusFrame_);
+	}
 
-		rightRow->addWidget(outputPathEdit, 1);
-		rightRow->addWidget(outputBrowseBtn);
+	// Lower third list, flat on the dock body like the Sources list.
+	{
+		scrollArea = new QScrollArea(this);
+		scrollArea->setObjectName(QStringLiteral("LowerThirdContent"));
+		scrollArea->setWidgetResizable(true);
+		scrollArea->setFrameShape(QFrame::NoFrame);
+		scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-		grid->addWidget(lbl, 0, 0);
-		grid->addWidget(right, 0, 1);
+		listContainer = new QWidget(scrollArea);
+		listContainer->setObjectName(QStringLiteral("sltListContainer"));
+		listLayout = new QVBoxLayout(listContainer);
+		listLayout->setContentsMargins(4, 4, 4, 4);
+		listLayout->setSpacing(2);
+		listLayout->setAlignment(Qt::AlignTop);
 
-		rootLayout->addLayout(grid);
+		emptyStateLbl_ = new QLabel(tr("No lower thirds yet.\nClick \"+\" below to create your first one, "
+					       "then click it here to show or hide it on stream."),
+					    listContainer);
+		emptyStateLbl_->setObjectName(QStringLiteral("sltEmptyState"));
+		emptyStateLbl_->setAlignment(Qt::AlignCenter);
+		emptyStateLbl_->setWordWrap(true);
+		listLayout->addWidget(emptyStateLbl_);
+
+		scrollArea->setWidget(listContainer);
+		body->addWidget(scrollArea, 1);
+	}
+
+	// Setup panel (collapsed once everything works)
+	{
+		auto *panel = new QFrame(this);
+		panel->setObjectName(QStringLiteral("sltSetupPanel"));
+		setupPanel_ = panel;
+
+		auto *panelLayout = new QVBoxLayout(panel);
+		panelLayout->setContentsMargins(8, 6, 8, 8);
+		panelLayout->setSpacing(6);
+
+		auto *title = new QLabel(tr("Overlay setup").toUpper(), panel);
+		title->setObjectName(QStringLiteral("sltSectionTitle"));
+		panelLayout->addWidget(title);
+
+		auto *form = new QGridLayout();
+		form->setContentsMargins(0, 0, 0, 0);
+		form->setHorizontalSpacing(6);
+		form->setVerticalSpacing(4);
+		form->setColumnStretch(1, 1);
+		panelLayout->addLayout(form);
+
+		int r = 0;
+
+		// Overlay source
+		form->addWidget(new QLabel(tr("Overlay source:"), setupPanel_), r, 0);
+		{
+			auto *line = new QHBoxLayout();
+			line->setSpacing(4);
+
+			browserSourceCombo = new QComboBox(setupPanel_);
+			browserSourceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+			browserSourceCombo->setToolTip(tr("The Browser Source that displays your lower thirds"));
+
+			refreshSourcesBtn = new QPushButton(setupPanel_);
+			refreshSourcesBtn->setCursor(Qt::PointingHandCursor);
+			refreshSourcesBtn->setToolTip(tr("Refresh list"));
+			refreshSourcesBtn->setIcon(themeIcon("view-refresh", st, QStyle::SP_BrowserReload));
+			refreshSourcesBtn->setProperty("class", QStringLiteral("icon-refresh"));
+
+			createSourceBtn_ = new QPushButton(setupPanel_);
+			createSourceBtn_->setCursor(Qt::PointingHandCursor);
+			createSourceBtn_->setToolTip(tr("Create a new overlay Browser Source in the current scene"));
+			createSourceBtn_->setIcon(themeIcon("list-add", st, QStyle::SP_FileDialogNewFolder));
+			createSourceBtn_->setProperty("class", QStringLiteral("icon-plus"));
+
+			line->addWidget(browserSourceCombo, 1);
+			line->addWidget(refreshSourcesBtn);
+			line->addWidget(createSourceBtn_);
+			form->addLayout(line, r++, 1);
+		}
+
+		// Overlay size
+		form->addWidget(new QLabel(tr("Overlay size:"), setupPanel_), r, 0);
+		{
+			auto *line = new QHBoxLayout();
+			line->setSpacing(4);
+
+			browserWidthSpin = new QSpinBox(setupPanel_);
+			browserWidthSpin->setRange(1, 16384);
+			browserWidthSpin->setSuffix(QStringLiteral(" px"));
+			browserWidthSpin->setToolTip(tr("Width of the overlay (normally your canvas width)"));
+
+			browserHeightSpin = new QSpinBox(setupPanel_);
+			browserHeightSpin->setRange(1, 16384);
+			browserHeightSpin->setSuffix(QStringLiteral(" px"));
+			browserHeightSpin->setToolTip(tr("Height of the overlay (normally your canvas height)"));
+
+			matchCanvasBtn_ = new QPushButton(tr("Match canvas"), setupPanel_);
+			matchCanvasBtn_->setCursor(Qt::PointingHandCursor);
+			matchCanvasBtn_->setToolTip(tr("Use the base canvas size from Settings > Video"));
+
+			line->addWidget(browserWidthSpin, 1);
+			line->addWidget(new QLabel(QStringLiteral("x"), setupPanel_));
+			line->addWidget(browserHeightSpin, 1);
+			line->addWidget(matchCanvasBtn_);
+			form->addLayout(line, r++, 1);
+		}
+
+		// Resources folder
+		form->addWidget(new QLabel(tr("Resources folder:"), setupPanel_), r, 0);
+		{
+			auto *line = new QHBoxLayout();
+			line->setSpacing(4);
+
+			outputPathEdit = new QLineEdit(setupPanel_);
+			outputPathEdit->setReadOnly(true);
+			outputPathEdit->setToolTip(
+				tr("Where VinciFlow keeps your lower thirds, images and the generated overlay files"));
+
+			outputBrowseBtn = new QPushButton(setupPanel_);
+			outputBrowseBtn->setCursor(Qt::PointingHandCursor);
+			outputBrowseBtn->setToolTip(tr("Use a different folder (for example a synced or shared one)"));
+			outputBrowseBtn->setIcon(st->standardIcon(QStyle::SP_DirOpenIcon));
+
+			openFolderBtn_ = new QPushButton(setupPanel_);
+			openFolderBtn_->setCursor(Qt::PointingHandCursor);
+			openFolderBtn_->setToolTip(tr("Open the folder in your file manager"));
+			openFolderBtn_->setIcon(themeIcon("folder-open", st, QStyle::SP_DirLinkIcon));
+
+			line->addWidget(outputPathEdit, 1);
+			line->addWidget(outputBrowseBtn);
+			line->addWidget(openFolderBtn_);
+			form->addLayout(line, r++, 1);
+		}
+
+		body->addWidget(setupPanel_);
 
 		connect(outputBrowseBtn, &QPushButton::clicked, this, &LowerThirdDock::onBrowseOutputFolder);
-	}
-
-	{
-		auto *grid = new QGridLayout();
-		grid->setContentsMargins(0, 0, 0, 0);
-		grid->setHorizontalSpacing(6);
-		grid->setVerticalSpacing(0);
-		grid->setColumnStretch(0, 0);
-		grid->setColumnStretch(1, 1);
-
-		auto *lbl = new QLabel(tr("Browser Source:"), this);
-		lbl->setObjectName(QStringLiteral("sltRowLabel"));
-		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
-
-		auto *right = new QWidget(this);
-		auto *rightRow = new QHBoxLayout(right);
-		rightRow->setContentsMargins(0, 0, 0, 0);
-		rightRow->setSpacing(6);
-
-		browserSourceCombo = new QComboBox(right);
-		browserSourceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-		browserSourceCombo->setToolTip(
-			tr("Select an existing OBS Browser Source that will display and control VinciFlow"));
-
-		refreshSourcesBtn = new QPushButton(right);
-		refreshSourcesBtn->setCursor(Qt::PointingHandCursor);
-		refreshSourcesBtn->setToolTip(tr("Refresh list"));
-		refreshSourcesBtn->setFlat(true);
-
-		QIcon refresh = QIcon::fromTheme(QStringLiteral("view-refresh"));
-		if (refresh.isNull())
-			refresh = st->standardIcon(QStyle::SP_BrowserReload);
-		refreshSourcesBtn->setIcon(refresh);
-
-		rightRow->addWidget(browserSourceCombo, 1);
-		rightRow->addWidget(refreshSourcesBtn);
-
-		grid->addWidget(lbl, 0, 0);
-		grid->addWidget(right, 0, 1);
-
-		rootLayout->addLayout(grid);
-
+		connect(openFolderBtn_, &QPushButton::clicked, this, []() {
+			if (vflow::has_output_dir())
+				QDesktopServices::openUrl(
+					QUrl::fromLocalFile(QString::fromStdString(vflow::output_dir())));
+		});
 		connect(refreshSourcesBtn, &QPushButton::clicked, this, [this]() { populateBrowserSources(true); });
+		connect(createSourceBtn_, &QPushButton::clicked, this, &LowerThirdDock::onCreateOverlaySource);
 		connect(browserSourceCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 			&LowerThirdDock::onBrowserSourceChanged);
-	}
-
-	{
-		auto *grid = new QGridLayout();
-		grid->setContentsMargins(0, 0, 0, 0);
-		grid->setHorizontalSpacing(6);
-		grid->setVerticalSpacing(0);
-		grid->setColumnStretch(0, 0);
-		grid->setColumnStretch(1, 1);
-
-		auto *lbl = new QLabel(tr("Browser Size:"), this);
-		lbl->setObjectName(QStringLiteral("sltRowLabel"));
-		lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-		lbl->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
-
-		auto *right = new QWidget(this);
-		auto *rightRow = new QHBoxLayout(right);
-		rightRow->setContentsMargins(0, 0, 0, 0);
-		rightRow->setSpacing(6);
-
-		browserWidthSpin = new QSpinBox(right);
-		browserWidthSpin->setRange(1, 16384);
-		browserWidthSpin->setToolTip(tr("Width of the selected Browser Source"));
-		browserWidthSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-		browserWidthSpin->setMinimumWidth(90);
-
-		browserHeightSpin = new QSpinBox(right);
-		browserHeightSpin->setRange(1, 16384);
-		browserHeightSpin->setToolTip(tr("Height of the selected Browser Source"));
-		browserHeightSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-		browserHeightSpin->setMinimumWidth(90);
-
-		auto *xLbl = new QLabel(tr("x"), right);
-		xLbl->setAlignment(Qt::AlignCenter);
-
-		rightRow->addWidget(browserWidthSpin, 1);
-		rightRow->addWidget(xLbl);
-		rightRow->addWidget(browserHeightSpin, 1);
-
-		grid->addWidget(lbl, 0, 0);
-		grid->addWidget(right, 0, 1);
-
-		rootLayout->addLayout(grid);
-
-		connect(browserWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
-			&LowerThirdDock::onBrowserSizeChanged);
-		connect(browserHeightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
-			&LowerThirdDock::onBrowserSizeChanged);
-	}
-
-	scrollArea = new QScrollArea(this);
-	scrollArea->setObjectName(QStringLiteral("LowerThirdContent"));
-	scrollArea->setWidgetResizable(true);
-
-	listContainer = new QWidget(scrollArea);
-	listLayout = new QVBoxLayout(listContainer);
-	listLayout->setContentsMargins(8, 8, 8, 8);
-	listLayout->setSpacing(6);
-	listLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-
-	scrollArea->setWidget(listContainer);
-	rootLayout->addWidget(scrollArea, 1);
-
-	widgetCarousel_ = create_widget_carousel(this);
-	const bool carouselVisible = loadWidgetCarouselVisibleState();
-	if (widgetCarousel_)
-		widgetCarousel_->setVisible(carouselVisible);
-
-	{
-		auto *row = new QHBoxLayout();
-		row->setSpacing(6);
-
-		toggleCarouselBtn_ = new QPushButton(this);
-		toggleCarouselBtn_->setObjectName(QStringLiteral("sltToggleCarouselBtn"));
-		toggleCarouselBtn_->setCursor(Qt::PointingHandCursor);
-		toggleCarouselBtn_->setCheckable(true);
-		toggleCarouselBtn_->setFlat(false);
-		updateWidgetCarouselToggleUi(toggleCarouselBtn_, widgetCarousel_, st);
-
-		row->addWidget(toggleCarouselBtn_);
-		row->addStretch(1);
-
-		infoBtn = new QPushButton(this);
-		infoBtn->setCursor(Qt::PointingHandCursor);
-		infoBtn->setToolTip(tr("Troubleshooting / Help"));
-		infoBtn->setFlat(true);
-
-		QIcon infoIco = QIcon::fromTheme(QStringLiteral("help-about"));
-		if (infoIco.isNull())
-			infoIco = st->standardIcon(QStyle::SP_MessageBoxInformation);
-		infoBtn->setIcon(infoIco);
-
-		addBtn = new QPushButton(this);
-		addBtn->setCursor(Qt::PointingHandCursor);
-		addBtn->setToolTip(tr("Add new lower third"));
-		addBtn->setFlat(true);
-
-		manageGroupsBtn_ = new QPushButton(this);
-		manageGroupsBtn_->setCursor(Qt::PointingHandCursor);
-		manageGroupsBtn_->setToolTip(tr("Manage groups"));
-		manageGroupsBtn_->setFlat(true);
-
-		QIcon carIco = QIcon::fromTheme(QStringLiteral("view-media-playlist"));
-		if (carIco.isNull())
-			carIco = QIcon::fromTheme(QStringLiteral("media-playlist-shuffle"));
-		if (carIco.isNull())
-			carIco = st->standardIcon(QStyle::SP_FileDialogDetailedView);
-		manageGroupsBtn_->setIcon(carIco);
-
-		QIcon plus = QIcon::fromTheme(QStringLiteral("list-add"));
-		if (plus.isNull())
-			plus = st->standardIcon(QStyle::SP_DialogYesButton);
-		addBtn->setIcon(plus);
-
-		row->addWidget(infoBtn);
-		row->addWidget(addBtn);
-		row->addWidget(manageGroupsBtn_);
-		rootLayout->addLayout(row);
-
-		connect(toggleCarouselBtn_, &QPushButton::clicked, this, [this, st](bool checked) {
-			if (!widgetCarousel_)
+		connect(browserWidthSpin, &QSpinBox::editingFinished, this, &LowerThirdDock::onBrowserSizeChanged);
+		connect(browserHeightSpin, &QSpinBox::editingFinished, this, &LowerThirdDock::onBrowserSizeChanged);
+		connect(matchCanvasBtn_, &QPushButton::clicked, this, [this]() {
+			obs_video_info ovi{};
+			if (!obs_get_video_info(&ovi))
 				return;
-			widgetCarousel_->setVisible(checked);
-			saveWidgetCarouselVisibleState(checked);
-			updateWidgetCarouselToggleUi(toggleCarouselBtn_, widgetCarousel_, st);
+			browserWidthSpin->setValue((int)ovi.base_width);
+			browserHeightSpin->setValue((int)ovi.base_height);
+			onBrowserSizeChanged();
 		});
-
-		connect(addBtn, &QPushButton::clicked, this, &LowerThirdDock::onAddLowerThird);
-		connect(manageGroupsBtn_, &QPushButton::clicked, this, &LowerThirdDock::onManageGroups);
-		connect(infoBtn, &QPushButton::clicked, this, [this]() { show_troubleshooting_dialog(this); });
 	}
 
-	if (widgetCarousel_)
-		rootLayout->addWidget(widgetCarousel_);
+	// Footer: a real QToolBar, so the OBS theme styles it exactly like the
+	// toolbar under the Sources list (border-top, height, button hover).
+	// Buttons carry the theme icon classes ("icon-plus", ...) so the theme
+	// supplies matching icons; the icons set here are only a fallback.
+	{
+		auto *toolbar = new QToolBar(this);
+		toolbar->setObjectName(QStringLiteral("sltToolbar"));
+		toolbar->setIconSize(QSize(16, 16));
+		toolbar->setMovable(false);
+		toolbar->setFloatable(false);
+		toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-	const bool hasDir = vflow::has_output_dir();
-	addBtn->setEnabled(hasDir);
-	if (browserSourceCombo)
-		browserSourceCombo->setEnabled(true);
-	if (refreshSourcesBtn)
-		refreshSourcesBtn->setEnabled(true);
+		auto makeToolBtn = [toolbar](const QIcon &icon, const char *themeClass, const QString &tip) {
+			auto *b = new QToolButton(toolbar);
+			b->setCursor(Qt::PointingHandCursor);
+			b->setFocusPolicy(Qt::NoFocus);
+			b->setIcon(icon);
+			b->setIconSize(QSize(16, 16));
+			b->setToolTip(tip);
+			b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			if (themeClass)
+				b->setProperty("class", QString::fromLatin1(themeClass));
+			toolbar->addWidget(b);
+			return b;
+		};
+
+		addBtn = makeToolBtn(themeIcon("list-add", st, QStyle::SP_FileDialogNewFolder), "icon-plus",
+				     tr("New lower third"));
+		manageGroupsBtn_ = makeToolBtn(glyphIcon("groups", glyphColor), nullptr,
+					       tr("Groups: play several lower thirds one after another"));
+
+		auto *spacer = new QWidget(toolbar);
+		spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		toolbar->addWidget(spacer);
+
+		setupToggleBtn_ = makeToolBtn(themeIcon("preferences-system", st, QStyle::SP_FileDialogInfoView),
+					      "icon-cogs", tr("Setup: overlay source, size and resources folder"));
+		setupToggleBtn_->setCheckable(true);
+		infoBtn =
+			makeToolBtn(glyphIcon("help", glyphColor), nullptr, tr("Help, guides, community and support"));
+
+		rootLayout->addWidget(toolbar);
+
+		connect(addBtn, &QToolButton::clicked, this, &LowerThirdDock::onAddLowerThird);
+		connect(manageGroupsBtn_, &QToolButton::clicked, this, &LowerThirdDock::onManageGroups);
+		connect(infoBtn, &QToolButton::clicked, this, [this]() { show_troubleshooting_dialog(this); });
+		connect(setupToggleBtn_, &QToolButton::toggled, this, [this](bool on) { setSetupExpanded(on); });
+	}
+
+	addBtn->setEnabled(vflow::has_output_dir());
+}
+
+void LowerThirdDock::applyDockStyle()
+{
+	// Colours come from the application palette (the OBS theme), with alpha,
+	// which QSS palette() roles cannot express. The widget's own palette is not
+	// used: applying a stylesheet rewrites it, and reading it back here would
+	// produce a different stylesheet on every PaletteChange, without end.
+	if (applyingStyle_)
+		return;
+	const QPalette pal = QApplication::palette();
+	paletteKey_ = pal.cacheKey();
+	const QColor text = pal.color(QPalette::Text);
+	const QColor hl = pal.color(QPalette::Highlight);
+	const QColor hlText = pal.color(QPalette::HighlightedText);
+
+	const QString t08 = rgba(text, 0.08), t12 = rgba(text, 0.12), t16 = rgba(text, 0.16), t60 = rgba(text, 0.60);
+	const QString h12 = rgba(hl, 0.12), h65 = rgba(hl, 0.65);
+
+	QString css;
+	// Same grey body as the Sources dock (palette base is the theme's bg_base).
+	css += QStringLiteral("QWidget#LowerThirdDock { background: palette(base); }\n");
+
+	css += QStringLiteral("QFrame#sltBanner, QFrame#sltUpdateBanner { background: %1; border: none; "
+			      "border-bottom: 1px solid %2; }\n")
+		       .arg(h12, h65);
+	css += QStringLiteral("QLabel#sltBannerLabel { font-weight: 600; background: transparent; }\n");
+
+	css += QStringLiteral("QScrollArea#LowerThirdContent, QWidget#sltListContainer { background: transparent; }\n");
+	css += QStringLiteral("QLabel#sltEmptyState { color: %1; padding: 16px 24px; background: transparent; }\n")
+		       .arg(t60);
+
+	// Rows behave like list items: flat, hover tint, and the one on stream is
+	// highlighted like a selected source.
+	css += QStringLiteral("QFrame#sltRowFrame { background: transparent; border: 1px solid transparent; "
+			      "border-radius: 4px; }\n");
+	css += QStringLiteral("QFrame#sltRowFrame:hover { background: %1; }\n").arg(t08);
+	css += QStringLiteral("QFrame#sltRowFrame[sltActive=\"true\"] { background: %1; }\n").arg(hl.name());
+	css += QStringLiteral("QFrame#sltRowFrame QLabel { background: transparent; }\n");
+	css += QStringLiteral("QLabel#sltRowLabel { font-weight: 600; }\n");
+	css += QStringLiteral("QLabel#sltRowSubLabel { font-size: 11px; color: %1; }\n").arg(t60);
+	css += QStringLiteral("QFrame#sltRowFrame[sltActive=\"true\"] QLabel#sltRowLabel { color: %1; }\n")
+		       .arg(hlText.name());
+	css += QStringLiteral("QFrame#sltRowFrame[sltActive=\"true\"] QLabel#sltRowSubLabel { color: %1; }\n")
+		       .arg(rgba(hlText, 0.80));
+	css += QStringLiteral("QLabel#sltLivePill { background: #d93025; color: white; border-radius: 8px; "
+			      "padding: 2px 7px; font-size: 10px; font-weight: 700; }\n");
+	css += QStringLiteral("QToolButton#sltRowBtn { background: transparent; border: 1px solid transparent; "
+			      "border-radius: 4px; padding: 0; }\n");
+	css += QStringLiteral("QToolButton#sltRowBtn:hover { background: %1; border-color: %2; }\n").arg(t12, t16);
+	css += QStringLiteral("QToolButton#sltRowBtn:pressed { background: %1; }\n").arg(t16);
+
+	// Setup section: a flat strip separated from the list by a line.
+	css += QStringLiteral("QFrame#sltSetupPanel { background: transparent; border: none; "
+			      "border-top: 1px solid %1; }\n")
+		       .arg(t12);
+	css += QStringLiteral("QLabel#sltSectionTitle { font-size: 11px; font-weight: 700; color: %1; "
+			      "background: transparent; }\n")
+		       .arg(t60);
+
+	if (css == styleSheet())
+		return;
+
+	applyingStyle_ = true;
+	setStyleSheet(css);
+	applyingStyle_ = false;
+}
+
+void LowerThirdDock::changeEvent(QEvent *event)
+{
+	QWidget::changeEvent(event);
+
+	// OBS theme switch: recolour the stylesheet and the palette-drawn icons and
+	// thumbnails. Only the application palette counts; the widget palette also
+	// changes whenever a stylesheet is (re)applied.
+	const bool paletteEvent = event->type() == QEvent::PaletteChange ||
+				  event->type() == QEvent::ApplicationPaletteChange;
+	if (!paletteEvent || applyingStyle_ || QApplication::palette().cacheKey() == paletteKey_)
+		return;
+
+	applyDockStyle();
+	if (coreListenerToken_) {
+		rebuildList();
+		updateRowCountdowns();
+	}
 }
 
 bool LowerThirdDock::init()
 {
 	if (vflow::has_output_dir())
-		outputPathEdit->setText(QString::fromStdString(vflow::output_dir()));
+		outputPathEdit->setText(QDir::toNativeSeparators(QString::fromStdString(vflow::output_dir())));
 	else
 		outputPathEdit->clear();
 
@@ -677,7 +887,116 @@ bool LowerThirdDock::init()
 
 	ensureRepeatTimerStarted();
 	connectObsSignals();
+	updateSetupState();
+	QTimer::singleShot(5000, this, [this]() { checkForUpdates(); });
 	return true;
+}
+
+void LowerThirdDock::setSetupExpanded(bool expanded)
+{
+	if (setupPanel_)
+		setupPanel_->setVisible(expanded);
+	if (setupToggleBtn_ && setupToggleBtn_->isChecked() != expanded) {
+		setupToggleBtn_->blockSignals(true);
+		setupToggleBtn_->setChecked(expanded);
+		setupToggleBtn_->blockSignals(false);
+	}
+}
+
+void LowerThirdDock::updateSetupState()
+{
+	if (!statusFrame_)
+		return;
+
+	statusBtn_->disconnect();
+
+	const bool hasDir = vflow::has_output_dir();
+	const bool hasSource = vflow::target_browser_source_exists();
+
+	if (!hasDir) {
+		statusLabel_->setText(tr("Choose a folder where VinciFlow can keep your lower thirds."));
+		statusBtn_->setText(tr("Choose folder..."));
+		connect(statusBtn_, &QPushButton::clicked, this, &LowerThirdDock::onBrowseOutputFolder);
+		statusFrame_->setVisible(true);
+		setSetupExpanded(true);
+	} else if (!hasSource) {
+		statusLabel_->setText(tr(
+			"Almost there! Add the VinciFlow overlay to your scene so your lower thirds appear on stream."));
+		statusBtn_->setText(tr("Add overlay to current scene"));
+		connect(statusBtn_, &QPushButton::clicked, this, &LowerThirdDock::onCreateOverlaySource);
+		statusFrame_->setVisible(true);
+	} else {
+		statusFrame_->setVisible(false);
+	}
+
+	if (emptyStateLbl_)
+		emptyStateLbl_->setVisible(rows.isEmpty());
+
+	// Keep the panel tucked away unless it is needed or the user opened it.
+	if (hasDir && setupToggleBtn_ && !setupToggleBtn_->isChecked())
+		setSetupExpanded(false);
+}
+
+void LowerThirdDock::onCreateOverlaySource()
+{
+	if (!vflow::has_output_dir()) {
+		onBrowseOutputFolder();
+		if (!vflow::has_output_dir())
+			return;
+	}
+
+	vflow::ensure_output_artifacts_exist();
+	const QString name = createOverlaySource();
+	if (name.isEmpty()) {
+		QMessageBox::warning(
+			this, tr("Could not create overlay"),
+			tr("OBS could not create a Browser Source. Make sure the Browser plugin is installed "
+			   "(it ships with OBS on Windows and macOS)."));
+		return;
+	}
+
+	vflow::rebuild_and_swap();
+
+	populateBrowserSources(false);
+	if (browserWidthSpin && browserHeightSpin) {
+		browserWidthSpin->blockSignals(true);
+		browserHeightSpin->blockSignals(true);
+		browserWidthSpin->setValue(vflow::target_browser_width());
+		browserHeightSpin->setValue(vflow::target_browser_height());
+		browserWidthSpin->blockSignals(false);
+		browserHeightSpin->blockSignals(false);
+	}
+	updateSetupState();
+	emit requestSave();
+}
+
+void LowerThirdDock::checkForUpdates()
+{
+	if (!net_)
+		net_ = new QNetworkAccessManager(this);
+
+	QNetworkRequest req{QUrl(QString::fromLatin1(kReleasesApiUrl))};
+	req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("VinciFlow/" PLUGIN_VERSION));
+	req.setRawHeader("Accept", "application/vnd.github+json");
+	req.setTransferTimeout(10000);
+
+	QNetworkReply *reply = net_->get(req);
+	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+		reply->deleteLater();
+		if (reply->error() != QNetworkReply::NoError)
+			return; // offline or rate-limited: stay quiet
+
+		const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+		QString tag = o.value(QStringLiteral("tag_name")).toString().trimmed();
+		if (tag.startsWith(QLatin1Char('v'), Qt::CaseInsensitive))
+			tag.remove(0, 1);
+
+		const QVersionNumber remote = QVersionNumber::fromString(tag);
+		const QVersionNumber local = QVersionNumber::fromString(QStringLiteral(PLUGIN_VERSION));
+		if (!remote.isNull() && QVersionNumber::compare(remote, local) > 0)
+			setUpdateAvailable(tag, QStringLiteral(PLUGIN_VERSION),
+					   o.value(QStringLiteral("html_url")).toString());
+	});
 }
 
 void LowerThirdDock::populateBrowserSources(bool keepSelection)
@@ -741,6 +1060,7 @@ void LowerThirdDock::onBrowserSourceChanged(int index)
 		vflow::rebuild_and_swap();
 	}
 
+	updateSetupState();
 	emit requestSave();
 }
 
@@ -898,10 +1218,14 @@ void LowerThirdDock::repeatTick()
 
 void LowerThirdDock::onBrowseOutputFolder()
 {
-	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Output Folder"),
+	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Resources Folder"),
 							      QString::fromStdString(vflow::output_dir()));
 	if (dir.isEmpty())
 		return;
+
+	// Groups refer to lower thirds of the current folder.
+	for (const QString &gid : g_groupRuns.keys())
+		stopGroupRun(gid);
 
 	if (!vflow::set_output_dir_and_load(dir.toStdString())) {
 		QMessageBox::warning(
@@ -917,7 +1241,7 @@ void LowerThirdDock::onBrowseOutputFolder()
 	offAtMs_.clear();
 	reShowAtMs_.clear();
 
-	outputPathEdit->setText(dir);
+	outputPathEdit->setText(QDir::toNativeSeparators(dir));
 
 	const bool hasDir = vflow::has_output_dir();
 	addBtn->setEnabled(hasDir);
@@ -927,6 +1251,7 @@ void LowerThirdDock::onBrowseOutputFolder()
 	rebuildList();
 	updateRowCountdowns();
 	updateRowActiveStyles();
+	updateSetupState();
 	emit requestSave();
 }
 
@@ -935,10 +1260,14 @@ void LowerThirdDock::onAddLowerThird()
 	if (!vflow::has_output_dir())
 		return;
 
-	vflow::add_default_lower_third();
+	// Created hidden so nothing pops up on stream; open the editor right away.
+	const std::string id = vflow::add_default_lower_third(false);
+	if (id.empty())
+		return;
 
 	updateRowCountdowns();
 	emit requestSave();
+	handleOpenSettings(QString::fromStdString(id));
 }
 
 void LowerThirdDock::onManageGroups()
@@ -999,7 +1328,10 @@ void LowerThirdDock::onManageGroups()
 	auto *titleEd = new QLineEdit(tabGeneral);
 
 	auto *toggleHkEdit = new QKeySequenceEdit(tabGeneral);
-	toggleHkEdit->setToolTip(tr("Set hotkey to toggle the carousel for this group"));
+	toggleHkEdit->setMaximumSequenceLength(1);
+	toggleHkEdit->setToolTip(tr("Starts/stops this group. Works while OBS is in the background and can also be "
+				    "changed in OBS Settings > Hotkeys."));
+	QKeySequence loadedToggleSeq;
 
 	auto *toggleHkClear = new QPushButton(&dlg);
 	toggleHkClear->setToolTip(tr("Clear hotkey"));
@@ -1154,8 +1486,8 @@ void LowerThirdDock::onManageGroups()
 				intervalSpin->setValue(intSec);
 			}
 			colorEd->setText(QString::fromStdString(car->dock_color));
-			toggleHkEdit->setKeySequence(
-				QKeySequence(QString::fromStdString(car->toggle_hotkey).trimmed()));
+			loadedToggleSeq = vflow::hotkeys::group_sequence(qid);
+			toggleHkEdit->setKeySequence(loadedToggleSeq);
 			refreshMembers(car->id);
 		}
 		updateStartStopButtons();
@@ -1262,35 +1594,20 @@ void LowerThirdDock::onManageGroups()
 		upd.interval_ms = std::max(0, intervalSpin->value()) * 1000;
 		upd.dock_color = colorEd->text().trimmed().toStdString();
 
-		auto normalize = [](const QString &s) -> QString {
-			return QKeySequence(s).toString(QKeySequence::PortableText).trimmed();
-		};
-
-		const QString seq = normalize(toggleHkEdit->keySequence().toString(QKeySequence::PortableText));
-		if (!seq.isEmpty()) {
-			for (auto &it : vflow::all()) {
-				if (it.id == upd.id)
-					continue;
-				const QString other = normalize(QString::fromStdString(it.hotkey));
-				if (!other.isEmpty() && other == seq) {
-					it.hotkey.clear();
-					vflow::notify_list_updated(it.id);
-				}
+		// Only touch the OBS bindings when the field was edited, so bindings made in
+		// OBS Settings > Hotkeys (e.g. mouse buttons) are not cleared by accident.
+		const QKeySequence seq = toggleHkEdit->keySequence();
+		if (seq != loadedToggleSeq) {
+			if (!vflow::hotkeys::is_supported(seq)) {
+				QMessageBox::warning(
+					&dlg, tr("Unsupported hotkey"),
+					tr("This key cannot be used as an OBS hotkey. Please pick another one, "
+					   "or assign it in OBS Settings > Hotkeys."));
+				return;
 			}
-			bool clearedAnyGroup = false;
-			for (auto &g : vflow::groups()) {
-				if (g.id == upd.id)
-					continue;
-				const QString other = normalize(QString::fromStdString(g.toggle_hotkey));
-				if (!other.isEmpty() && other == seq) {
-					g.toggle_hotkey.clear();
-					clearedAnyGroup = true;
-				}
-			}
-			if (clearedAnyGroup)
-				vflow::notify_list_updated();
+			vflow::hotkeys::set_group_sequence(qid, seq);
+			upd.toggle_hotkey = seq.toString(QKeySequence::PortableText).toStdString();
 		}
-		upd.toggle_hotkey = seq.toStdString();
 
 		vflow::update_group(upd);
 
@@ -1309,7 +1626,6 @@ void LowerThirdDock::onManageGroups()
 
 		it->setText(QString::fromStdString(upd.title.empty() ? upd.id : upd.title));
 		rebuildList();
-		rebuildShortcuts();
 		dlg.accept();
 	});
 
@@ -1329,12 +1645,20 @@ void LowerThirdDock::rebuildList()
 	const auto &items = vflow::all();
 	const QString outDir = QString::fromStdString(vflow::output_dir());
 
+	const qreal dpr = devicePixelRatio();
+	const QColor text = QApplication::palette().color(QPalette::Text);
+	QColor tileBg = QApplication::palette().color(QPalette::Highlight);
+	tileBg.setAlphaF(0.35f);
+
 	for (const auto &cfg : items) {
 		LowerThirdRowUi ui;
 		ui.id = QString::fromStdString(cfg.id);
 
+		const QString displayLabel = QString::fromStdString(cfg.label.empty() ? cfg.title : cfg.label);
+
 		auto *rowFrame = new QFrame(listContainer);
 		rowFrame->setObjectName(QStringLiteral("sltRowFrame"));
+		rowFrame->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 		rowFrame->setProperty("sltActive", QVariant(vflow::is_visible(cfg.id)));
 
 		const auto carIds = vflow::groups_containing(cfg.id);
@@ -1353,114 +1677,99 @@ void LowerThirdDock::rebuildList()
 		}
 
 		rowFrame->setCursor(Qt::PointingHandCursor);
+		rowFrame->setToolTip(QStringLiteral("%1\n%2").arg(displayLabel, tr("Click to show or hide on stream")));
 		applyGroupRowStyle(rowFrame);
 
 		auto *h = new QHBoxLayout(rowFrame);
-		h->setContentsMargins(8, 4, 8, 4);
-		h->setSpacing(6);
+		h->setContentsMargins(8, 5, 6, 5);
+		h->setSpacing(8);
 
-		auto *visible = new QCheckBox(rowFrame);
-		visible->setChecked(vflow::is_visible(cfg.id));
-		visible->setFocusPolicy(Qt::NoFocus);
-		visible->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-		visible->setStyleSheet("QCheckBox::indicator { width: 0px; height: 0px; margin: 0; padding: 0; }");
-		h->addWidget(visible);
-		ui.visibleCheck = visible;
-
+		// Thumbnail. Always present so rows line up; a letter tile stands in
+		// for a missing picture.
 		auto *thumb = new QLabel(rowFrame);
 		thumb->setObjectName(QStringLiteral("sltRowThumbnail"));
-		thumb->setFixedSize(32, 32);
-		thumb->setScaledContents(true);
+		thumb->setFixedSize(kRowThumbSize, kRowThumbSize);
 
-		bool hasThumb = false;
-		if (!cfg.profile_picture.empty() && !outDir.isEmpty()) {
-			const QString imgPath = QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture));
-			QPixmap px(imgPath);
-			if (!px.isNull()) {
-				thumb->setPixmap(
-					px.scaled(32, 32, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
-				hasThumb = true;
-			}
-		}
-		thumb->setVisible(hasThumb);
-		h->addWidget(thumb);
+		QPixmap px;
+		if (!cfg.profile_picture.empty() && !outDir.isEmpty())
+			px.load(QDir(outDir).filePath(QString::fromStdString(cfg.profile_picture)));
+		thumb->setPixmap(
+			px.isNull() ? initialsThumbnail(displayLabel, kRowThumbSize, kRowThumbRadius, tileBg, text, dpr)
+				    : roundedThumbnail(px, kRowThumbSize, kRowThumbRadius, dpr));
+		h->addWidget(thumb, 0, Qt::AlignVCenter);
 		ui.thumbnailLbl = thumb;
 
+		// Name and status line. Ignored width policy: long names clip instead
+		// of forcing a horizontal scrollbar on the list.
 		auto *labelCol = new QWidget(rowFrame);
 		auto *labelColLayout = new QVBoxLayout(labelCol);
 		labelColLayout->setContentsMargins(0, 0, 0, 0);
-		labelColLayout->setSpacing(0);
+		labelColLayout->setSpacing(1);
 
-		const QString displayLabel = QString::fromStdString(cfg.label.empty() ? cfg.title : cfg.label);
 		auto *label = new QLabel(displayLabel, labelCol);
 		label->setObjectName(QStringLiteral("sltRowLabel"));
 		label->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-		label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
-		auto *sub = new QLabel(labelCol);
+		// Starts as a blank line so the row keeps its height before any
+		// countdown or hotkey hint is shown.
+		auto *sub = new QLabel(QString(QChar::Nbsp), labelCol);
 		sub->setObjectName(QStringLiteral("sltRowSubLabel"));
 		sub->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-		sub->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-		sub->setText(QString());
+		sub->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
 		labelColLayout->addWidget(label);
 		labelColLayout->addWidget(sub);
+		h->addWidget(labelCol, 1, Qt::AlignVCenter);
 
-		h->addWidget(labelCol, 1);
+		// LIVE badge. It keeps its slot while hidden so the row never shifts
+		// when a lower third goes on or off stream.
+		auto *live = new QLabel(tr("LIVE"), rowFrame);
+		live->setObjectName(QStringLiteral("sltLivePill"));
+		live->setToolTip(tr("Visible on stream"));
+		live->setAlignment(Qt::AlignCenter);
+		{
+			QSizePolicy sp = live->sizePolicy();
+			sp.setRetainSizeWhenHidden(true);
+			live->setSizePolicy(sp);
+		}
+		live->setVisible(vflow::is_visible(cfg.id));
+		h->addWidget(live, 0, Qt::AlignVCenter);
 
 		ui.labelLbl = label;
 		ui.subLbl = sub;
-
-		auto *upBtn = new QPushButton(rowFrame);
-		auto *downBtn = new QPushButton(rowFrame);
-		auto *cloneBtn = new QPushButton(rowFrame);
-		auto *settingsBtn = new QPushButton(rowFrame);
-		auto *removeBtn = new QPushButton(rowFrame);
-
-		auto *st = rowFrame->style();
-
-		upBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-up"), st->standardIcon(QStyle::SP_ArrowUp)));
-		upBtn->setToolTip(tr("Move up"));
-		upBtn->setFlat(true);
-
-		downBtn->setIcon(QIcon::fromTheme(QStringLiteral("go-down"), st->standardIcon(QStyle::SP_ArrowDown)));
-		downBtn->setToolTip(tr("Move down"));
-		downBtn->setFlat(true);
-
-		cloneBtn->setIcon(
-			QIcon::fromTheme(QStringLiteral("edit-copy"), st->standardIcon(QStyle::SP_DialogOpenButton)));
-		cloneBtn->setToolTip(tr("Clone lower third"));
-		cloneBtn->setFlat(true);
-
-		settingsBtn->setCursor(Qt::PointingHandCursor);
-
-		QIcon edit = QIcon::fromTheme(QStringLiteral("document-edit"));
-		if (edit.isNull())
-			edit = QIcon::fromTheme(QStringLiteral("edit-rename"));
-		if (edit.isNull())
-			edit = style()->standardIcon(QStyle::SP_FileDialogDetailedView);
-
-		settingsBtn->setIcon(edit);
-		settingsBtn->setToolTip(tr("Press here to edit the lower third"));
-		settingsBtn->setFlat(true);
-
-		removeBtn->setIcon(st->standardIcon(QStyle::SP_DialogCloseButton));
-		removeBtn->setCursor(Qt::PointingHandCursor);
+		ui.liveLbl = live;
 		{
-			QIcon del = QIcon::fromTheme(QStringLiteral("edit-delete"));
-			if (del.isNull())
-				del = style()->standardIcon(QStyle::SP_DialogCloseButton);
-			removeBtn->setIcon(del);
+			const QKeySequence seq = vflow::hotkeys::item_sequence(ui.id);
+			if (!seq.isEmpty())
+				ui.hotkeyText = tr("Hotkey: %1").arg(seq.toString(QKeySequence::NativeText));
 		}
-		removeBtn->setToolTip(tr("Remove lower third"));
-		removeBtn->setFlat(true);
 
-		cloneBtn->setIconSize(QSize(16, 16));
-		settingsBtn->setIconSize(QSize(16, 16));
-		removeBtn->setIconSize(QSize(16, 16));
+		// Row actions. OBS theme icon classes first, drawn/standard icons as fallback.
+		auto *st = rowFrame->style();
+		auto makeRowBtn = [rowFrame](const QIcon &icon, const char *themeClass, const QString &tip) {
+			auto *b = new QToolButton(rowFrame);
+			b->setObjectName(QStringLiteral("sltRowBtn"));
+			b->setAutoRaise(true);
+			b->setCursor(Qt::PointingHandCursor);
+			b->setFocusPolicy(Qt::NoFocus);
+			b->setIcon(icon);
+			b->setIconSize(QSize(16, 16));
+			b->setFixedSize(24, 24);
+			b->setToolTip(tip);
+			if (themeClass)
+				b->setProperty("class", QString::fromLatin1(themeClass));
+			return b;
+		};
 
-		upBtn->setIconSize(QSize(16, 16));
-		downBtn->setIconSize(QSize(16, 16));
+		auto *upBtn = makeRowBtn(themeIcon("go-up", st, QStyle::SP_ArrowUp), "icon-up", tr("Move up"));
+		auto *downBtn =
+			makeRowBtn(themeIcon("go-down", st, QStyle::SP_ArrowDown), "icon-down", tr("Move down"));
+		auto *cloneBtn = makeRowBtn(glyphIcon("clone", text), nullptr, tr("Clone lower third"));
+		auto *settingsBtn = makeRowBtn(themeIcon("document-edit", st, QStyle::SP_FileDialogDetailedView),
+					       "icon-gear", tr("Edit lower third"));
+		auto *removeBtn = makeRowBtn(themeIcon("edit-delete", st, QStyle::SP_DialogCloseButton), "icon-trash",
+					     tr("Remove lower third"));
 
 		h->addWidget(upBtn);
 		h->addWidget(downBtn);
@@ -1484,24 +1793,28 @@ void LowerThirdDock::rebuildList()
 		sub->installEventFilter(this);
 		thumb->installEventFilter(this);
 
-		connect(cloneBtn, &QPushButton::clicked, this, [this, id]() { handleClone(id); });
-		connect(upBtn, &QPushButton::clicked, this, [this, id]() {
+		connect(cloneBtn, &QToolButton::clicked, this, [this, id]() { handleClone(id); });
+		connect(upBtn, &QToolButton::clicked, this, [this, id]() {
 			vflow::move_lower_third(id.toStdString(), -1);
 			emit requestSave();
 		});
-		connect(downBtn, &QPushButton::clicked, this, [this, id]() {
+		connect(downBtn, &QToolButton::clicked, this, [this, id]() {
 			vflow::move_lower_third(id.toStdString(), +1);
 			emit requestSave();
 		});
-		connect(settingsBtn, &QPushButton::clicked, this, [this, id]() { handleOpenSettings(id); });
-		connect(removeBtn, &QPushButton::clicked, this, [this, id]() { handleRemove(id); });
+		connect(settingsBtn, &QToolButton::clicked, this, [this, id]() { handleOpenSettings(id); });
+		connect(removeBtn, &QToolButton::clicked, this, [this, id]() { handleRemove(id); });
 
 		rows.push_back(ui);
 	}
 
-	rebuildShortcuts();
+	// Rows stack from the top; the empty-state hint is centred in the panel.
+	listLayout->setAlignment(rows.isEmpty() ? Qt::AlignVCenter : Qt::AlignTop);
+
 	updateRowActiveStyles();
 	updateRowCountdowns();
+	if (emptyStateLbl_)
+		emptyStateLbl_->setVisible(rows.isEmpty());
 }
 
 void LowerThirdDock::updateRowActiveStyles()
@@ -1517,11 +1830,8 @@ void LowerThirdDock::updateRowActiveStyles()
 			row.row->update();
 		}
 
-		if (row.visibleCheck) {
-			row.visibleCheck->blockSignals(true);
-			row.visibleCheck->setChecked(active);
-			row.visibleCheck->blockSignals(false);
-		}
+		if (row.liveLbl)
+			row.liveLbl->setVisible(active);
 	}
 }
 
@@ -1542,63 +1852,20 @@ bool LowerThirdDock::eventFilter(QObject *watched, QEvent *event)
 	return QWidget::eventFilter(watched, event);
 }
 
-void LowerThirdDock::clearShortcuts()
+void LowerThirdDock::toggleLowerThird(const QString &id)
 {
-	for (auto *sc : shortcuts_) {
-		if (sc)
-			sc->deleteLater();
-	}
-	shortcuts_.clear();
+	if (vflow::get_by_id(id.toStdString()))
+		handleToggleVisible(id);
 }
 
-void LowerThirdDock::rebuildShortcuts()
+void LowerThirdDock::toggleGroup(const QString &id)
 {
-	clearShortcuts();
-
-	const auto &items = vflow::all();
-	for (const auto &cfg : items) {
-		if (cfg.hotkey.empty())
-			continue;
-
-		const QString seqStr = QString::fromStdString(cfg.hotkey).trimmed();
-		if (seqStr.isEmpty())
-			continue;
-
-		QKeySequence seq(seqStr);
-		if (seq.isEmpty())
-			continue;
-
-		auto *sc = new QShortcut(seq, this);
-		sc->setContext(Qt::ApplicationShortcut);
-		shortcuts_.push_back(sc);
-
-		const QString id = QString::fromStdString(cfg.id);
-		connect(sc, &QShortcut::activated, this, [this, id]() { handleToggleVisible(id); });
-	}
-
-	for (const auto &g : vflow::groups_const()) {
-		const QString groupId = QString::fromStdString(g.id);
-		const QString seqStr = QString::fromStdString(g.toggle_hotkey).trimmed();
-		if (seqStr.isEmpty())
-			continue;
-
-		QKeySequence seq(seqStr);
-		if (seq.isEmpty())
-			continue;
-
-		auto *sc = new QShortcut(seq, this);
-		sc->setContext(Qt::ApplicationShortcut);
-		shortcuts_.push_back(sc);
-		connect(sc, &QShortcut::activated, this, [this, groupId]() {
-			auto it = g_groupRuns.find(groupId);
-			if (it != g_groupRuns.end() && it->running)
-				stopGroupRun(groupId);
-			else
-				startGroupRun(this, groupId);
-			updateRowCountdowns();
-			updateRowActiveStyles();
-		});
-	}
+	if (isGroupRunning(id))
+		stopGroupRun(id);
+	else
+		startGroupRun(this, id);
+	updateRowCountdowns();
+	updateRowActiveStyles();
 }
 
 void LowerThirdDock::handleToggleVisible(const QString &id)
@@ -1661,7 +1928,7 @@ void LowerThirdDock::handleClone(const QString &id)
 	if (!vflow::has_output_dir())
 		return;
 
-	vflow::clone_lower_third(id.toStdString());
+	vflow::clone_lower_third(id.toStdString(), false);
 	emit requestSave();
 }
 
@@ -1675,7 +1942,6 @@ void LowerThirdDock::handleOpenSettings(const QString &id)
 	dlg->show();
 	dlg->raise();
 	dlg->activateWindow();
-	rebuildList();
 }
 
 void LowerThirdDock::handleRemove(const QString &id)
@@ -1723,18 +1989,22 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 
 	const auto *cfg = vflow::get_by_id(rowUi.id.toStdString());
 	if (!cfg) {
-		rowUi.subLbl->clear();
-		rowUi.subLbl->setVisible(false);
+		rowUi.subLbl->setText(QString(QChar::Nbsp));
 		return;
 	}
 
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const QString qid = rowUi.id;
 
+	// Nothing scheduled: show the hotkey hint (if any). The line stays, blank,
+	// so every row keeps the same height.
+	auto showIdle = [&rowUi]() {
+		rowUi.subLbl->setText(rowUi.hotkeyText.isEmpty() ? QString(QChar::Nbsp) : rowUi.hotkeyText);
+	};
+
 	if (g_groupHideAtMs.contains(qid) && vflow::is_visible(cfg->id)) {
-		rowUi.subLbl->setVisible(true);
 		const qint64 leftHide = g_groupHideAtMs.value(qid) - now;
-		rowUi.subLbl->setText(QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
+		rowUi.subLbl->setText(tr("Hides in %1").arg(formatCountdownMs(leftHide)));
 		return;
 	}
 
@@ -1743,29 +2013,23 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 
 	if (every <= 0) {
 		if (keepVisible <= 0) {
-			rowUi.subLbl->clear();
-			rowUi.subLbl->setVisible(false);
+			showIdle();
 			return;
 		}
 
 		const bool isVis = vflow::is_visible(cfg->id);
 		if (!isVis) {
-			rowUi.subLbl->clear();
-			rowUi.subLbl->setVisible(false);
+			showIdle();
 			return;
 		}
-
-		rowUi.subLbl->setVisible(true);
 
 		if (!offAtMs_.contains(qid))
 			offAtMs_[qid] = now + (qint64)keepVisible * 1000;
 
 		const qint64 leftHide = offAtMs_[qid] - now;
-		rowUi.subLbl->setText(QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
+		rowUi.subLbl->setText(tr("Hides in %1").arg(formatCountdownMs(leftHide)));
 		return;
 	}
-
-	rowUi.subLbl->setVisible(true);
 
 	if (!nextOnMs_.contains(qid)) {
 		nextOnMs_[qid] = now + (qint64)every * 1000;
@@ -1777,16 +2041,16 @@ void LowerThirdDock::updateRowCountdownFor(const LowerThirdRowUi &rowUi)
 
 	if (isVis && offAtMs_.contains(qid)) {
 		const qint64 leftHide = offAtMs_[qid] - now;
-		parts << (QStringLiteral("Hides in ") + formatCountdownMs(leftHide));
+		parts << (tr("Hides in %1").arg(formatCountdownMs(leftHide)));
 	} else if (isVis) {
-		parts << QStringLiteral("Visible");
+		parts << tr("Visible");
 	}
 
 	if (nextOnMs_.contains(qid)) {
 		const qint64 leftNext = nextOnMs_[qid] - now;
-		parts << (QStringLiteral("Next in ") + formatCountdownMs(leftNext));
+		parts << (tr("Next in %1").arg(formatCountdownMs(leftNext)));
 	} else {
-		parts << QStringLiteral("Repeating");
+		parts << tr("Repeating");
 	}
 
 	rowUi.subLbl->setText(parts.join(QStringLiteral(" • ")));
@@ -1847,7 +2111,22 @@ void LowerThirdDock::onObsSourceEvent(void *data, calldata_t *cd)
 	if (!isBrowserSource(src))
 		return;
 
-	QMetaObject::invokeMethod(self, [self]() { self->populateBrowserSources(true); }, Qt::QueuedConnection);
+	// Follow renames of the overlay source instead of losing the binding.
+	const char *prevName = calldata_string(cd, "prev_name");
+	const char *newName = calldata_string(cd, "new_name");
+	const QString from = prevName ? QString::fromUtf8(prevName) : QString();
+	const QString to = newName ? QString::fromUtf8(newName) : QString();
+
+	QMetaObject::invokeMethod(
+		self,
+		[self, from, to]() {
+			if (!from.isEmpty() && !to.isEmpty() &&
+			    from == QString::fromStdString(vflow::target_browser_source_name()))
+				vflow::set_target_browser_source_name(to.toStdString());
+			self->populateBrowserSources(true);
+			self->updateSetupState();
+		},
+		Qt::QueuedConnection);
 }
 
 void LowerThirdDock::refreshBrowserSources()
@@ -1857,27 +2136,43 @@ void LowerThirdDock::refreshBrowserSources()
 
 void LowerThirdDock::onSceneCollectionChanged()
 {
+	// OBS reports "finished loading" and "scene collection changed" together at
+	// startup; coalesce them so the overlay is rebuilt (and reloaded) only once.
+	if (collectionRefreshPending_)
+		return;
+	collectionRefreshPending_ = true;
+	QTimer::singleShot(150, this, [this]() {
+		collectionRefreshPending_ = false;
+		applySceneCollection();
+	});
+}
+
+void LowerThirdDock::applySceneCollection()
+{
 	populateBrowserSources(false);
 
 	const QString selected = QString::fromStdString(vflow::target_browser_source_name());
 	if (!selected.isEmpty() && vflow::has_output_dir()) {
 		vflow::rebuild_and_swap();
 	}
+	updateSetupState();
 }
 
-void LowerThirdDock::setUpdateAvailable(const QString &remoteVersion, const QString &localVersion)
+void LowerThirdDock::setUpdateAvailable(const QString &remoteVersion, const QString &localVersion, const QString &url)
 {
 	updateRemote_ = remoteVersion.trimmed();
 	updateLocal_ = localVersion.trimmed();
+	updateUrl_ = url.trimmed();
+	if (updateUrl_.isEmpty())
+		updateUrl_ = QStringLiteral("https://github.com/mmlTools/vinci-flow/releases/latest");
 
-	const bool show = (!updateRemote_.isEmpty() && !updateLocal_.isEmpty() && updateRemote_ != updateLocal_);
+	const bool show = !updateRemote_.isEmpty() && updateRemote_ != updateLocal_;
 	if (!updateFrame_ || !updateLabel_)
 		return;
 
 	updateFrame_->setVisible(show);
-	if (show) {
-		updateLabel_->setText(tr("New version available: %1 (you have %2)").arg(updateRemote_, updateLocal_));
-	}
+	if (show)
+		updateLabel_->setText(tr("VinciFlow %1 is available (you have %2).").arg(updateRemote_, updateLocal_));
 }
 
 } // namespace vflow::ui
@@ -1890,11 +2185,7 @@ void LowerThird_create_dock()
 	auto *panel = new vflow::ui::LowerThirdDock(nullptr);
 	panel->init();
 
-#if defined(HAVE_OBS_DOCK_BY_ID)
 	obs_frontend_add_dock_by_id(sltDockId, sltDockTitle, panel);
-#else
-	obs_frontend_add_dock(panel);
-#endif
 
 	g_dockWidget = panel;
 	LOGI("Dock created");
@@ -1905,11 +2196,7 @@ void LowerThird_destroy_dock()
 	if (!g_dockWidget)
 		return;
 
-#if defined(HAVE_OBS_DOCK_BY_ID)
 	obs_frontend_remove_dock(sltDockId);
-#else
-	obs_frontend_remove_dock(g_dockWidget);
-#endif
 
 	g_dockWidget = nullptr;
 	LOGI("Dock destroyed");

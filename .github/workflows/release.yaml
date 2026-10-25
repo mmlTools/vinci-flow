@@ -1,0 +1,196 @@
+name: Build & Release
+run-name: Build & release from ${{ github.ref_name }} 🚀
+
+# Started manually from the Actions tab ("Run workflow"). The plugin is built once
+# per platform; only when every build succeeded is the version tag created, and the
+# packages from those same builds are attached to the GitHub release.
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the release as a draft (publish it yourself after checking it)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Check Version 🔎
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Version And Tag ☑️
+        id: check
+        run: |
+          : Check Version And Tag ☑️
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob
+
+          version="$(jq -r .version buildspec.json)"
+
+          case "${version}" in
+            +([0-9]).+([0-9]).+([0-9]) ) prerelease=false ;;
+            +([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) ) prerelease=true ;;
+            *)
+              echo "::error::Version '${version}' in buildspec.json must look like 1.2.3, 1.2.3-rc1 or 1.2.3-beta1."
+              exit 1
+              ;;
+          esac
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${version}" > /dev/null; then
+            echo "::error::Tag ${version} already exists. Bump the version in buildspec.json before releasing."
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "### Releasing ${version} from ${GITHUB_REF_NAME} (${GITHUB_SHA:0:9})" >> "$GITHUB_STEP_SUMMARY"
+
+  build-project:
+    name: Build Project 🧱
+    needs: prepare
+    uses: ./.github/workflows/build-project.yaml
+    with:
+      release: true
+    secrets: inherit
+    permissions:
+      contents: read
+
+  create-tag:
+    name: Create Tag 🏷️
+    needs: [prepare, build-project]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag Built Commit 🏷️
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          : Tag Built Commit 🏷️
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so nothing is rebuilt.
+          git tag -a "${VERSION}" -m "VinciFlow ${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${VERSION}"
+
+  create-release:
+    name: Create Release 🛫
+    needs: [prepare, build-project, create-tag]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Build Artifacts 📥
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect Packages 🗂️
+        run: |
+          : Collect Packages 🗂️
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob nullglob
+
+          mkdir -p dist
+          commit_hash="${GITHUB_SHA:0:9}"
+
+          variants=(
+            'windows-x64;zip|exe'
+            'macos-universal;tar.xz|pkg'
+            'ubuntu-24.04-x86_64;tar.xz|deb|ddeb'
+            'flatpak-x86_64;flatpak'
+            'sources;tar.xz'
+          )
+
+          for variant_data in "${variants[@]}"; do
+            IFS=';' read -r variant suffix <<< "${variant_data}"
+            for candidate in artifacts/*-${variant}-${commit_hash}/@(*|*-dbgsym).@(${suffix}); do
+              mv "${candidate}" dist/
+            done
+          done
+
+          files=(dist/*)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No packages were produced by the build jobs."
+            exit 1
+          fi
+          ls -l dist
+
+      - name: Create Full Bundle Zip 📦
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PLUGIN_NAME: ${{ needs.build-project.outputs.pluginName }}
+        run: |
+          : Create Full Bundle Zip 📦
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          set -euo pipefail
+
+          bundle_dir="plugin-${VERSION}"
+          mkdir -p "${bundle_dir}"
+          cp -f dist/* "${bundle_dir}/"
+
+          {
+            echo "Plugin: ${PLUGIN_NAME}"
+            echo "Version: ${VERSION}"
+            echo "Commit: ${GITHUB_SHA}"
+            echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo
+            echo "Included files:"
+            for f in dist/*; do echo " - ${f##*/}"; done
+          } > "${bundle_dir}/BUNDLE_INFO.txt"
+
+          zip -r "dist/plugin-${VERSION}.zip" "${bundle_dir}"
+
+      - name: Write Release Notes 📝
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          : Write Release Notes 📝
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          # Section of CHANGELOG.md for this version (between "## <version>" and the next "## ").
+          if [[ -f CHANGELOG.md ]]; then
+            awk -v v="## ${VERSION}" '$0 == v {f=1; next} /^## / && f {exit} f' CHANGELOG.md > NOTES.md
+          fi
+
+          {
+            echo
+            echo "### Checksums (SHA-256)"
+            for file in dist/*; do
+              echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)"
+            done
+          } >> NOTES.md
+
+      - name: Create Release 🛫
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564
+        with:
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ fromJSON(needs.prepare.outputs.prerelease) }}
+          tag_name: ${{ needs.prepare.outputs.version }}
+          name: ${{ needs.build-project.outputs.pluginName }} ${{ needs.prepare.outputs.version }}
+          body_path: NOTES.md
+          files: dist/*
